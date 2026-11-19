@@ -487,33 +487,36 @@ function Update-EnvCard {
 function Update-EnvView { Update-EnvCard; if ($EnvUI.Win) { Update-EnvList } }
 $EnvXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Oliv_Maintenance - Variables d'environnement" Width="1000" Height="700" MinWidth="720" MinHeight="460"
+        Title="Oliv_Maintenance - Variables d'environnement" Width="1000" Height="700" MinWidth="560" MinHeight="460"
         Background="{DynamicResource BgBrush}" Foreground="{DynamicResource FgBrush}" FontFamily="Segoe UI" FontSize="13">
   <Grid Margin="16,12,16,12">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <DockPanel Margin="0,0,0,10">
-      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-        <Border x:Name="FindBox" Width="220" Height="34" CornerRadius="17" Background="{DynamicResource BgBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1.5" VerticalAlignment="Center" Cursor="IBeam">
+    <!-- haut : 2 portées sur toute la largeur (moitié chacune, texte raccourci si besoin), puis filtre et ajout -->
+    <StackPanel Margin="0,0,0,10">
+      <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <Button x:Name="ScopeU" Style="{DynamicResource ActionBtn}" Height="36" Padding="14,0" MinWidth="0" HorizontalContentAlignment="Left" Tag="on">
+          <DockPanel><TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBlock x:Name="ScopeUTxt" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></DockPanel>
+        </Button>
+        <Button x:Name="ScopeS" Grid.Column="2" Style="{DynamicResource ActionBtn}" Height="36" Padding="14,0" MinWidth="0" HorizontalContentAlignment="Left">
+          <DockPanel><TextBlock Text="&#xE7F4;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBlock x:Name="ScopeSTxt" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></DockPanel>
+        </Button>
+      </Grid>
+      <Grid Margin="0,8,0,0">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Border x:Name="FindBox" Height="34" CornerRadius="17" Background="{DynamicResource BgBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1.5" VerticalAlignment="Center" Cursor="IBeam">
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="{DynamicResource AccentBrush}" Margin="12,0,8,0" VerticalAlignment="Center"/>
             <TextBox x:Name="Find" Grid.Column="1" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource FgBrush}" CaretBrush="{DynamicResource FgBrush}" VerticalAlignment="Center" Margin="0,0,12,0">
               <TextBox.Template><ControlTemplate TargetType="TextBox"><ScrollViewer x:Name="PART_ContentHost" Focusable="False" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden" Background="Transparent"/></ControlTemplate></TextBox.Template>
             </TextBox>
-            <TextBlock x:Name="FindHint" Grid.Column="1" Text="Filtrer (nom ou valeur)" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" IsHitTestVisible="False"/>
+            <TextBlock x:Name="FindHint" Grid.Column="1" Text="Filtrer (nom ou valeur)" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" IsHitTestVisible="False" TextTrimming="CharacterEllipsis"/>
           </Grid>
         </Border>
-        <Button x:Name="Add" Style="{DynamicResource PrimaryBtn}" Height="34" Padding="14,0" Margin="8,0,0,0" Content="Ajouter une variable"/>
-      </StackPanel>
-      <StackPanel Orientation="Horizontal">
-        <Button x:Name="ScopeU" Style="{DynamicResource ActionBtn}" Height="34" Padding="14,0" Margin="0,0,8,0" Tag="on">
-          <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBlock x:Name="ScopeUTxt" VerticalAlignment="Center"/></StackPanel>
-        </Button>
-        <Button x:Name="ScopeS" Style="{DynamicResource ActionBtn}" Height="34" Padding="14,0">
-          <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7F4;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBlock x:Name="ScopeSTxt" VerticalAlignment="Center"/></StackPanel>
-        </Button>
-      </StackPanel>
-    </DockPanel>
+        <Button x:Name="Add" Grid.Column="1" Style="{DynamicResource PrimaryBtn}" Height="34" Padding="14,0" Margin="8,0,0,0" Content="Ajouter une variable"/>
+      </Grid>
+    </StackPanel>
     <!-- portée affichée : bandeau de couleur différente pour l'utilisateur et pour l'ordinateur -->
     <Border x:Name="Info" Grid.Row="1" Margin="0,0,0,10" Padding="14,8" CornerRadius="6" BorderThickness="4,0,0,0" Background="{DynamicResource PanelBrush}">
       <StackPanel>
@@ -560,7 +563,9 @@ function Update-EnvList {
     if (-not $EnvUI.Win) { return }
     $sys = $EnvUI.Scope -eq 'S'; $path = $(if ($sys) { $EnvSys } else { $EnvUsr })
     $u = @(Get-EnvVar $EnvUsr); $s = @(Get-EnvVar $EnvSys)
-    $EnvUI.ScopeUTxt.Text = "Utilisateur : $UserName ($($u.Count))"; $EnvUI.ScopeSTxt.Text = "Ordinateur : tous les comptes ($($s.Count))"
+    $short = ("$UserName" -split '\\')[-1]
+    $EnvUI.ScopeUTxt.Text = "Utilisateur : $short ($($u.Count))"; $EnvUI.ScopeSTxt.Text = "Ordinateur : tous les comptes ($($s.Count))"
+    $EnvUI.ScopeU.ToolTip = "Variables du compte $UserName"; $EnvUI.ScopeS.ToolTip = 'Variables communes à tous les comptes du PC'
     $EnvUI.ScopeU.Tag = $(if ($sys) { '' } else { 'on' }); $EnvUI.ScopeS.Tag = $(if ($sys) { 'on' } else { '' })
     $EnvUI.Info.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, $(if ($sys) { 'WarnFgBrush' } else { 'AccentBrush' }))
     $EnvUI.InfoHead.Text = $(if ($sys) { 'Variables de l''ordinateur (système)' } else { "Variables de l'utilisateur $UserName" })
