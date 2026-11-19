@@ -1,6 +1,6 @@
 # ---------- Cartes masquées : clic droit sur une carte > « Masquer cette carte », liste complète dans Paramètres
-# Clé Page|Titre enregistrée dans HKCU\Software\Oliv_Maintenance\Affichage\CartesMasquees (hors réglages vidés à chaque
-# nouvelle version : le choix survit aux mises à jour). Carte masquée : repliée (hauteur maximale 0, sans marge) en plus de
+# Clé Page|Titre enregistrée dans HKCU\Software\Oliv_Maintenance\Affichage\CartesMasquees (hors réglages vidés à la
+# 1re installation : le choix survit même à une réinitialisation). Carte masquée : repliée (hauteur maximale 0, sans marge) en plus de
 # Collapsed, pour qu'un affichage décidé ailleurs (carte qui se montre quand elle a du contenu) ne la fasse pas revenir.
 $CardPages = [ordered]@{ Info = 'Accueil'; Maint = 'Maintenance'; Perf = 'Système'; Secu = 'Sécurité'; Perso = 'Personnalisation'; Tools = 'Outils' }
 $CardRegKey = 'HKCU\Software\Oliv_Maintenance\Affichage'
