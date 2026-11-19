@@ -42,6 +42,15 @@ foreach ($w in $EarlyWarn) { Write-UiLog $w 'WARN' }; $EarlyWarn.Clear()
 # boucle de messages du répartiteur (et non ShowDialog) : la fenêtre peut être masquée dans la zone de notification sans
 # terminer l'application ; fin de la boucle à la fermeture de la fenêtre
 $Window.Add_Closed({ $Window.Dispatcher.InvokeShutdown() })
+# erreur non interceptée dans un gestionnaire d'interface (clic, minuteur) : consignée dans le journal, l'application reste
+# ouverte au lieu de se fermer en erreur fatale
+$Window.Dispatcher.Add_UnhandledException({
+    param($s, $e)
+    $x = $e.Exception; $er = $(if ($x -is [Management.Automation.IContainsErrorRecord]) { $x.ErrorRecord } else { $null })
+    $where = $(if ($er -and $er.InvocationInfo) { ' (ligne {0} : {1})' -f $er.InvocationInfo.ScriptLineNumber, "$($er.InvocationInfo.Line)".Trim() } else { '' })
+    try { Write-UiLog ('Erreur interne interceptée : {0}{1}' -f $x.Message, $where) 'ERROR' } catch { $null = $_ }
+    $e.Handled = $true
+})
 Start-MainWindow
 [Windows.Threading.Dispatcher]::Run()
 Exit-App 0

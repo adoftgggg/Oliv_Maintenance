@@ -807,10 +807,11 @@ function Update-SoftStatus {
     $SoftUI.Go.IsEnabled = -not $Sync.WgRunning
     $SoftUI.Go.Content = $(if ($SoftUI.Done) { 'Nouvelle recherche' } else { 'Rechercher' })
     $upg = Test-SoftUpgrading
-    $SoftUI.Prog.Visibility = $(if ($Sync.WgRunning -or $upg) { 'Visible' } else { 'Collapsed' })
+    # mise à jour en cours : avancement et bouton Interrompre du panneau d'exécution global (bas de la fenêtre), pas de doublon ici
+    $SoftUI.Prog.Visibility = $(if ($Sync.WgRunning) { 'Visible' } else { 'Collapsed' })
     # mise à jour : avancement réel (logiciels terminés + étape du logiciel en cours), bouton d'arrêt à la place du bouton principal
     $SoftUI.Prog.IsIndeterminate = -not $upg; if ($upg) { $SoftUI.Prog.Value = [math]::Max([double]0, [double]$Sync.TaskPct) }
-    $SoftUI.RunStop.Visibility = $(if ($upg) { 'Visible' } else { 'Collapsed' }); $SoftUI.RunStop.IsEnabled = -not $Sync.Cancel
+    $SoftUI.RunStop.Visibility = 'Collapsed'
     $SoftUI.Run.Visibility = $(if ($upg -or $SoftUI.Filter -eq 'Hist') { 'Collapsed' } else { 'Visible' })
     # onglet Historique : bouton de purge à la place du bouton de mise à jour (grisé si l'historique est vide)
     $SoftUI.HistClear.Visibility = $(if ($SoftUI.Filter -eq 'Hist' -and -not $upg) { 'Visible' } else { 'Collapsed' })

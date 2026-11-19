@@ -153,7 +153,7 @@ function Update-SvcList {
     Update-SvcFilter
 }
 function Update-SvcFilter {
-    $d = @($SvcUI.Data); $q = "$($Ui.SvcFind.Text)".Trim() -replace '[\[\]\*\?]', ''
+    $d = @($SvcUI.Data | Where-Object { $_ -and $_.Name }); $q = "$($Ui.SvcFind.Text)".Trim() -replace '[\[\]\*\?]', ''
     $n = 0
     foreach ($s in $d) {
         $r = $SvcUI.Rows[$s.Name]; if (-not $r) { continue }

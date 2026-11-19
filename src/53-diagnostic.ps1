@@ -136,6 +136,8 @@ function Test-AdminCredential([string]$User, [string]$Pass) {
 # l'affichage de la clé). Reprendre : protection suspendue (mise à jour du BIOS...) réactivée. Opérations dans une tâche
 # de fond (module BitLocker, CIM), diagnostic relancé à la fin.
 function Add-BitLockerMenu($V, [string]$State) {
+    $InfoUI.BlValue = $V
+    if ($State -in 'encrypting', 'decrypting') { Start-BlWatch }
     $g = $V.Parent
     $V.VerticalAlignment = 'Center'; $g.Children[0].VerticalAlignment = 'Center'
     $col = Add-AutoColumn $g
@@ -212,6 +214,7 @@ $BgJobDone['BitLocker'] = {
             Write-UiLog $(if ($r.Backup) { "Clé de récupération sauvegardée dans : $($r.Backup)." } else { 'Clé de récupération non sauvegardée hors du poste (ni Entra ID ni Active Directory) : la noter depuis le diagnostic rapide (Afficher).' }) $(if ($r.Backup) { 'OK' } else { 'WARN' })
         }
         Add-SessionEvent 'Sécurité' "BitLocker ($vol)" $r.Msg 'ok'
+        if ($Sync.BlAction -in 'enable', 'disable') { Start-BlWatch }
     } else {
         $m = $(if ($r) { $r.Msg } else { 'tâche interrompue' })
         Write-UiLog ('BitLocker ({0}) : échec - {1}' -f $vol, $m) 'ERROR'
@@ -271,6 +274,7 @@ function Start-AvScan([string]$Engine, [string]$Type, [string]$Name) {
     $Sync.AvScanLabel = $lbl; $Sync.AvScanName = $Name; $Sync.AvScanResult = $null; $Sync.AvScanStart = [DateTime]::Now
     Write-UiLog "$Name : analyse $lbl lancée." 'APP'
     Start-BgJob 'AvScan' $AvScanScript
+    Start-AvActivity
 }
 $AvScanScript = @'
 $a = $Sync.AvScan; $r = @{ Ok = $false; Msg = ''; Threats = @(); Warn = '' }
@@ -300,6 +304,12 @@ $Sync.AvScanResult = $r
 $BgJobDone['AvScan'] = {
     $r = $Sync.AvScanResult; $lbl = $Sync.AvScanLabel; $nm = $Sync.AvScanName
     $dur = [DateTime]::Now - $Sync.AvScanStart
+    Remove-BgActivity 'AvScan'
+    if ($Sync.AvCancel) {
+        $Sync.AvCancel = $false
+        Write-UiLog ('{0} : analyse {1} interrompue après {2:hh\:mm\:ss}.' -f $nm, $lbl, $dur) 'WARN'; Add-SessionEvent 'Sécurité' "Analyse $lbl $nm" 'interrompue' 'warn'
+        Start-DiagCollector; return
+    }
     $where = $(if ($nm -eq 'Sophos') { 'console Sophos Endpoint sur le poste ou Sophos Central' } else { 'Sécurité Windows > Protection contre les virus et menaces > Historique de protection' })
     if ($r -and $r.Ok) {
         $n = @($r.Threats).Count

@@ -533,7 +533,12 @@
       </Border>
 
       <!-- nouvelle version publiée sur GitHub : bandeau proposant la mise à jour (94-mise-a-jour.ps1) -->
-      <Border x:Name="UpdBar" Grid.Row="3" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="0,0,0,2" Padding="16,6" Visibility="Collapsed">
+      <StackPanel Grid.Row="3">
+      <!-- opérations longues en arrière-plan (chiffrement BitLocker, analyse antivirus) : avancement visible de tous les onglets -->
+      <Border x:Name="BgBar" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="16,6,16,8" Visibility="Collapsed">
+        <StackPanel x:Name="BgList"/>
+      </Border>
+      <Border x:Name="UpdBar" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="0,0,0,2" Padding="16,6" Visibility="Collapsed">
         <DockPanel LastChildFill="True">
           <Button x:Name="UpdLater" DockPanel.Dock="Right" Content="Plus tard" Style="{StaticResource ActionBtn}" Height="28" Margin="6,0,0,0"/>
           <Button x:Name="UpdNotes" DockPanel.Dock="Right" Content="Nouveautés" Style="{StaticResource ActionBtn}" Height="28" Margin="6,0,0,0"/>
@@ -545,6 +550,7 @@
           </StackPanel>
         </DockPanel>
       </Border>
+      </StackPanel>
 
       <Grid Grid.Row="4" Margin="14,10,14,10">
 

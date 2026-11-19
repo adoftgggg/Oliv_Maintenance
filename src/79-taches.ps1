@@ -139,7 +139,7 @@ function Set-TskRowLook([string]$Key) {
     $r.B2.IsEnabled = -not $busy
 }
 function Update-TskFilter {
-    $d = @($TskUI.Data); $q = "$($Ui.TskFind.Text)".Trim() -replace '[\[\]\*\?]', ''
+    $d = @($TskUI.Data | Where-Object { $_ -and $_.Key }); $q = "$($Ui.TskFind.Text)".Trim() -replace '[\[\]\*\?]', ''
     $n = 0
     foreach ($t in $d) {
         $r = $TskUI.Rows[$t.Key]; if (-not $r) { continue }
