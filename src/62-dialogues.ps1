@@ -125,7 +125,7 @@ function Show-Dialog([string]$Message, [string]$Kind = 'Info', [object[]]$Button
     $dlg = [Windows.Markup.XamlReader]::Load([System.Xml.XmlNodeReader]::new($x))
     $dlg.Resources.MergedDictionaries.Add($Window.Resources)
     # propriétaire : fenêtre active de l'application (analyseur d'espace disque ou fenêtre principale)
-    $own = $(if ($TreeUI.Win -and $TreeUI.Win.IsActive) { $TreeUI.Win } elseif ($SoftUI.Win -and $SoftUI.Win.IsActive) { $SoftUI.Win } elseif ($Window.IsVisible) { $Window } else { $null })
+    $own = $(if ($TreeUI.Win -and $TreeUI.Win.IsActive) { $TreeUI.Win } elseif ($SoftUI.Win -and $SoftUI.Win.IsActive) { $SoftUI.Win } elseif ($EnvUI.Win -and $EnvUI.Win.IsActive) { $EnvUI.Win } elseif ($Window.IsVisible) { $Window } else { $null })
     if ($own) { $dlg.Owner = $own } else { $dlg.WindowStartupLocation = 'CenterScreen' }
     if ($AppIcon) { $dlg.Icon = $AppIcon }; Add-WindowAnim $dlg
     $k = @{ Info = @(0xE946, 'AccentBrush'); Question = @(0xE9CE, 'AccentBrush'); Warn = @(0xE7BA, 'WarnFgBrush'); Error = @(0xEA39, 'ErrFgBrush'); Ok = @(0xE930, 'OkFgBrush') }[$Kind]

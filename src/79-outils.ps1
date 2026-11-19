@@ -225,20 +225,83 @@ function Write-HostsFile([string]$Own, [string[]]$Block) {
     [IO.File]::WriteAllText($HostsFile, $txt, [Text.Encoding]::ASCII)
     try { Clear-DnsClientCache -ErrorAction Stop } catch { Write-Ignored 'Vidage du cache DNS' $_ }
 }
+# entrées personnelles : « IP nom [nom...] [# commentaire] » ; une paire (IP, nom) par nom
+function Get-HostsEntry([string]$Own) {
+    $i = 0
+    foreach ($l in ($Own -split "`r?`n")) {
+        $t = $l.Trim()
+        if ($t -and -not $t.StartsWith('#') -and $t -match '^(\S+)\s+([^#]+?)\s*(?:#\s*(.*))?$') { [pscustomobject]@{ Ip = $Matches[1]; Names = @($Matches[2].Trim() -split '\s+'); Comment = "$($Matches[3])".Trim(); Line = $i } }
+        $i++
+    }
+}
+function Get-HostsPair([string]$Own) { @(foreach ($e in (Get-HostsEntry $Own)) { foreach ($n in $e.Names) { '{0} {1}' -f $e.Ip, $n.ToLower() } }) }
+function Get-HostsMeaning([string]$Ip) { $(if ($Ip -in '0.0.0.0', '127.0.0.1', '::', '::1', '0:0:0:0:0:0:0:0') { "bloqué ($Ip)" } else { "redirigé vers $Ip" }) }
+# récapitulatif avant écriture : noms ajoutés, retirés, redirigés ailleurs ; $true si confirmé
+function Confirm-HostsChange([string]$Before, [string]$After, [string]$Head) {
+    $a = @{}; foreach ($x in (Get-HostsPair $Before)) { $p = $x -split ' ', 2; $a[$p[1]] = $p[0] }
+    $b = @{}; foreach ($x in (Get-HostsPair $After)) { $p = $x -split ' ', 2; $b[$p[1]] = $p[0] }
+    $lines = @()
+    foreach ($n in ($b.Keys | Sort-Object)) {
+        if (-not $a.ContainsKey($n)) { $lines += '+ ajouté : {0}  ->  {1}' -f $n, (Get-HostsMeaning $b[$n]) }
+        elseif ($a[$n] -ne $b[$n]) { $lines += '~ modifié : {0}  ->  {1} (avant : {2})' -f $n, (Get-HostsMeaning $b[$n]), (Get-HostsMeaning $a[$n]) }
+    }
+    foreach ($n in ($a.Keys | Sort-Object)) { if (-not $b.ContainsKey($n)) { $lines += '- retiré : {0}  (était {1})' -f $n, (Get-HostsMeaning $a[$n]) } }
+    if (-not $lines.Count) {
+        if ($Before.Trim() -ceq $After.Trim()) { return $false }
+        $lines = @('Aucune entrée modifiée : seuls les commentaires ou la mise en forme changent.')
+    }
+    $ToolsUI.HostsLast = $lines
+    (Show-Dialog "$Head`n`nModifications du fichier hosts :" 'Question' @(@{ T = 'Annuler'; V = $false; C = $true }, @{ T = 'Enregistrer'; V = $true; S = 'PrimaryBtn' }) $lines) -eq $true
+}
+function Save-HostsOwn([string]$Own, $Block, [string]$What) {
+    try {
+        Write-HostsFile $Own $Block
+        Write-UiLog ("Fichier hosts modifié ($What) : " + (@($ToolsUI.HostsLast) -join ' ; ')) 'OK'; Add-SessionEvent 'Réglages' 'Fichier hosts' $What 'ok'
+    } catch { Show-Info "Écriture du fichier hosts impossible (antivirus ?).`n`n$($_.Exception.Message)" 'Error' }
+    Update-HostsCard
+}
 function Update-HostsCard {
     $b = $ToolsUI.HostsBody; $b.Children.Clear()
     $p = Split-HostsContent (Read-HostsFile)
-    $own = @($p.Own -split "`r`n" | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') }).Count
     $nb = @($p.Block | Where-Object { $_ -match '^0\.0\.0\.0\s' }).Count
     $date = $(if ($p.Block.Count -and $p.Block[0] -match '\((\d{2}/\d{2}/\d{4})\)') { $Matches[1] } else { '' })
-    [void](Add-KV $b 'Entrées personnelles' $(if ($own) { "$own" } else { 'aucune' }))
     [void](Add-KV $b 'Blocage pubs et traqueurs' $(if ($nb) { '{0:N0} domaines bloqués (liste du {1})' -f $nb, $date } else { 'désactivé' }) $(if ($nb) { 'OkFgBrush' } else { '' }))
+    try { [void](Add-KV $b 'Dernière modification' ('{0:dd/MM/yyyy HH:mm}' -f [IO.File]::GetLastWriteTime($HostsFile))) } catch { Write-Ignored 'Date du fichier hosts' $_ }
+    # entrées personnelles : une ligne par entrée (nom, effet, commentaire), suppression à l'unité
+    $ents = @(Get-HostsEntry $p.Own)
+    $h = New-Text $(if ($ents.Count) { 'Mes entrées ({0})' -f $ents.Count } else { 'Mes entrées : aucune' }); $h.FontWeight = [Windows.FontWeights]::SemiBold; $h.Margin = New-Thickness 46 10 10 4
+    [void]$b.Children.Add($h)
+    foreach ($e in ($ents | Select-Object -First 12)) {
+        $del = New-ToolIconButton 0xE74D 'Retirer cette entrée' $e { param($s, $e2) Remove-HostsEntry $s.Tag }
+        $sub = (Get-HostsMeaning $e.Ip) + $(if ($e.Comment) { '  ·  ' + $e.Comment } else { '' })
+        $r = New-ToolRow ($e.Names -join ', ') $sub @($del) $null; [void]$b.Children.Add($r.Row)
+    }
+    if ($ents.Count -gt 12) { $t = New-Text ('+ {0} autres entrées (Modifier le texte)' -f ($ents.Count - 12)) 'Muted'; $t.Margin = New-Thickness 46 2 10 0; [void]$b.Children.Add($t) }
     $btns = @()
     $btns += $(if ($nb) { New-ToolButton 'Mettre à jour la liste' $null { Start-HostsBlock $true } 'PrimaryBtn' } else { New-ToolButton 'Bloquer pubs et traqueurs' $null { Start-HostsBlock $true } 'PrimaryBtn' })
     if ($nb) { $btns += New-ToolButton 'Retirer le blocage' $null { Start-HostsBlock $false } }
-    $btns += New-ToolButton 'Modifier mes entrées' $null { Edit-HostsFile }
+    $btns += New-ToolButton 'Ajouter une entrée' $null { Add-HostsEntry }
+    $btns += New-ToolButton 'Modifier le texte' $null { Edit-HostsFile }
     if (Test-Path -LiteralPath $HostsBackup) { $btns += New-ToolButton 'Restaurer l''original' $null { Restore-HostsFile } }
     [void]$b.Children.Add((New-ToolBar $btns))
+}
+function Add-HostsEntry {
+    $v = Read-ToolInput "Ajouter une entrée au fichier hosts`n`nBloquer un site : adresse 0.0.0.0. Nom local (NAS, serveur) : son adresse IP, ex. 192.168.1.20." @(@{ L = 'Nom (ex. nas.maison ou publicite.exemple.com)'; V = '' }, @{ L = 'Adresse IP'; V = '0.0.0.0' }, @{ L = 'Commentaire (facultatif)'; V = '' }) 'Suivant' 600
+    if (-not $v) { return }
+    $n = "$($v[0])".Trim().ToLower(); $ip = "$($v[1])".Trim(); $cm = "$($v[2])".Trim()
+    $ipo = $null
+    if ($n -notmatch '^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$') { Show-Info 'Nom invalide : lettres, chiffres, tirets et points uniquement.' 'Warn'; return }
+    if (-not [Net.IPAddress]::TryParse($ip, [ref]$ipo)) { Show-Info 'Adresse IP invalide.' 'Warn'; return }
+    $p = Split-HostsContent (Read-HostsFile)
+    $new = $p.Own.TrimEnd() + "`r`n" + ("{0}`t{1}{2}" -f $ip, $n, $(if ($cm) { "`t# $cm" } else { '' }))
+    if (Confirm-HostsChange $p.Own $new 'Ajouter cette entrée ?') { Save-HostsOwn $new $p.Block "ajout de $n" }
+}
+function Remove-HostsEntry($E) {
+    $p = Split-HostsContent (Read-HostsFile)
+    $ls = [Collections.Generic.List[string]]::new([string[]]($p.Own -split "`r?`n"))
+    if ($E.Line -ge $ls.Count) { Update-HostsCard; return }
+    $ls.RemoveAt($E.Line); $new = $ls -join "`r`n"
+    if (Confirm-HostsChange $p.Own $new 'Retirer cette entrée ?') { Save-HostsOwn $new $p.Block ('retrait de ' + ($E.Names -join ', ')) }
 }
 $HostsScript = @'
 $r = @{}
@@ -269,19 +332,23 @@ $BgJobDone['Hosts'] = {
     if (-not $r -or $r.Error) { $m = $(if ($r) { $r.Error } else { 'tâche interrompue' }); Write-UiLog "Fichier hosts : liste de blocage non téléchargée - $m" 'ERROR'; Show-Info "Téléchargement de la liste impossible.`n`n$m" 'Error'; Update-HostsCard; return }
     try {
         $p = Split-HostsContent (Read-HostsFile)
+        $old = [Collections.Generic.HashSet[string]]::new([string[]]@($p.Block | Where-Object { $_ -match '^0\.0\.0\.0\s' }))
+        $newSet = [Collections.Generic.HashSet[string]]::new([string[]]@($r.Lines))
+        $plus = @($r.Lines | Where-Object { -not $old.Contains($_) }).Count; $moins = @($old | Where-Object { -not $newSet.Contains($_) }).Count
         $blk = @("$HostsMarkA ($((Get-Date).ToString('dd/MM/yyyy'))) - source : $HostsListUrl - ne pas modifier") + @($r.Lines) + @($HostsMarkB)
         Write-HostsFile $p.Own $blk
-        Write-UiLog ('Fichier hosts : {0:N0} domaines de pubs et traqueurs bloqués.' -f $r.Lines.Count) 'OK'; Add-SessionEvent 'Réglages' 'Blocage pubs et traqueurs (hosts)' ('{0:N0} domaines' -f $r.Lines.Count) 'ok'
+        $chg = $(if ($old.Count) { '{0:N0} domaines ajoutés, {1:N0} retirés depuis la liste précédente' -f $plus, $moins } else { 'blocage activé' })
+        Write-UiLog ('Fichier hosts : {0:N0} domaines de pubs et traqueurs bloqués ({1}).' -f $r.Lines.Count, $chg) 'OK'
+        Show-Info ("Liste de blocage à jour : {0:N0} domaines bloqués.`n`n{1}. Vos entrées personnelles ne sont pas modifiées." -f $r.Lines.Count, $chg.Substring(0, 1).ToUpper() + $chg.Substring(1)) 'Ok'; Add-SessionEvent 'Réglages' 'Blocage pubs et traqueurs (hosts)' ('{0:N0} domaines' -f $r.Lines.Count) 'ok'
     } catch { Write-UiLog "Fichier hosts : $($_.Exception.Message)" 'ERROR'; Show-Info "Écriture du fichier hosts impossible (antivirus ?).`n`n$($_.Exception.Message)" 'Error' }
     Update-HostsCard
 }
 function Edit-HostsFile {
     $p = Split-HostsContent (Read-HostsFile)
-    $v = Read-ToolInput "Fichier hosts : vos entrées`n`nUne entrée par ligne : adresse IP, espace, nom (ex. 192.168.1.20 nas.maison ; 0.0.0.0 site-a-bloquer.com). Lignes commençant par # = commentaires. La liste de blocage, si elle est active, est conservée à part." @(@{ V = $p.Own; M = $true; H = 380 }) 'Enregistrer' 860
+    $v = Read-ToolInput "Fichier hosts : mes entrées (texte)`n`nUne entrée par ligne : adresse IP, espace, nom (ex. 192.168.1.20 nas.maison ; 0.0.0.0 site-a-bloquer.com). Lignes commençant par # = commentaires. La liste de blocage, si elle est active, est conservée à part. Récapitulatif des changements avant enregistrement." @(@{ V = $p.Own; M = $true; H = 380 }) 'Suivant' 860
     if (-not $v) { return }
-    try { Write-HostsFile "$($v[0])" $p.Block; Write-UiLog 'Fichier hosts modifié.' 'OK'; Add-SessionEvent 'Réglages' 'Fichier hosts' 'modifié' 'ok' }
-    catch { Show-Info "Écriture du fichier hosts impossible (antivirus ?).`n`n$($_.Exception.Message)" 'Error' }
-    Update-HostsCard
+    $new = "$($v[0])"
+    if (Confirm-HostsChange $p.Own $new 'Enregistrer ces changements ?') { Save-HostsOwn $new $p.Block 'édition du texte' }
 }
 function Restore-HostsFile {
     if (-not (Confirm-Action "Remettre le fichier hosts d'origine (sauvegardé avant la 1re modification par l'application) ?`n`nVos entrées et le blocage ajoutés depuis sont retirés.")) { return }
@@ -394,55 +461,167 @@ function Restart-Explorer {
     $t.Start(); Write-UiLog 'Explorateur Windows redémarré.' 'APP'
 }
 
-# ================= Variables d'environnement (utilisateur ciblé : HKCU\Environment ; système : Session Manager\Environment)
+# ================= Variables d'environnement : fenêtre dédiée, 2 portées bien séparées
+# Utilisateur (compte ciblé, HKCU\Environment) et Système (tous les comptes, HKLM\...\Session Manager\Environment).
+# Listes (PATH...) présentées un dossier par ligne, dossiers introuvables signalés. Carte de l'onglet Outils : résumé et
+# bouton d'ouverture.
 $EnvSys = 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
 $EnvUsr = 'HKCU\Environment'
 $EnvProtected = @('Path', 'ComSpec', 'windir', 'SystemRoot', 'OS', 'PATHEXT', 'PSModulePath', 'TEMP', 'TMP', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'PROCESSOR_LEVEL', 'PROCESSOR_REVISION', 'DriverData', 'USERNAME', 'OneDrive')
+$EnvUI = @{ Win = $null; Scope = 'U' }
 function Get-EnvVar([string]$Path) {
     $k = Open-RegKey $Path; if (-not $k) { return @() }
     try { @($k.GetValueNames() | Where-Object { $_ } | Sort-Object | ForEach-Object { [pscustomobject]@{ Name = $_; Value = "$($k.GetValue($_, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))"; Kind = "$($k.GetValueKind($_))" } }) } finally { $k.Close() }
 }
+function Test-EnvList($V) { $V.Value -like '*;*' -or $V.Name -in 'Path', 'PSModulePath', 'PATHEXT' }
+function Test-EnvDir([string]$P) { $x = [Environment]::ExpandEnvironmentVariables($P); if ($x -notmatch '^[A-Za-z]:\\|^\\\\') { return $true }; Test-Path -LiteralPath $x }
 function Update-EnvCard {
-    $b = $ToolsUI.EnvBody; $b.Children.Clear()
-    foreach ($sc in @(@{ P = $EnvUsr; T = "Utilisateur ($UserName)"; S = 'U' }, @{ P = $EnvSys; T = 'Système (tous les comptes)'; S = 'S' })) {
-        $hd = [Windows.Controls.Grid]::new(); $hd.Margin = New-Thickness 38 8 10 4
-        [void]$hd.ColumnDefinitions.Add((New-SvcCol 0)); $c = [Windows.Controls.ColumnDefinition]::new(); $c.Width = [Windows.GridLength]::Auto; [void]$hd.ColumnDefinitions.Add($c)
-        $t = New-Text $sc.T; $t.FontWeight = [Windows.FontWeights]::SemiBold; $t.VerticalAlignment = 'Center'; [void]$hd.Children.Add($t)
-        $ab = New-ToolButton 'Ajouter' $sc { param($s, $e) Edit-EnvVar $s.Tag.P $null }; $ab.Height = 28; $ab.Margin = New-Thickness 0 0 0 0
-        [Windows.Controls.Grid]::SetColumn($ab, 1); [void]$hd.Children.Add($ab)
-        [void]$b.Children.Add($hd)
-        foreach ($v in (Get-EnvVar $sc.P)) {
-            $multi = $v.Value -like '*;*'
-            $sub = $(if ($multi) { $parts = @($v.Value -split ';' | Where-Object { $_ }); '{0} éléments  ·  {1}' -f $parts.Count, ($parts -join ' ; ') } else { $v.Value })
-            $ed = New-ToolIconButton 0xE70F 'Modifier' @{ P = $sc.P; V = $v } { param($s, $e) Edit-EnvVar $s.Tag.P $s.Tag.V }
-            $prot = $v.Name -in $EnvProtected
-            $dl = New-ToolIconButton 0xE74D $(if ($prot) { 'Variable indispensable : suppression non proposée' } else { 'Supprimer' }) @{ P = $sc.P; V = $v } { param($s, $e) Remove-EnvVar $s.Tag.P $s.Tag.V }
-            $dl.IsEnabled = -not $prot; [Windows.Controls.ToolTipService]::SetShowOnDisabled($dl, $true)
-            $row = New-ToolRow $v.Name $sub @($ed, $dl) $(if ($multi) { ($v.Value -split ';' | Where-Object { $_ }) -join "`n" } else { $v.Value })
-            $row.Row.Cursor = [Windows.Input.Cursors]::Hand; $row.Row.Tag = @{ P = $sc.P; V = $v }
-            $row.Row.Add_MouseLeftButtonUp({ param($s, $e) if (-not (Test-InButton $e.OriginalSource)) { Edit-EnvVar $s.Tag.P $s.Tag.V } })
-            [void]$b.Children.Add($row.Row)
-        }
-    }
-    $n = New-Text 'Clic sur une variable pour la modifier. Effectif pour les programmes ouverts ensuite.' 'Muted'; $n.FontSize = 12; $n.Margin = New-Thickness 40 8 10 12
-    [void]$b.Children.Add($n)
+    $b = $ToolsUI.EnvBody; if (-not $b) { return }; $b.Children.Clear()
+    $u = @(Get-EnvVar $EnvUsr); $s = @(Get-EnvVar $EnvSys)
+    $miss = 0; foreach ($v in @($u + $s | Where-Object { $_.Name -eq 'Path' })) { $miss += @($v.Value -split ';' | Where-Object { $_ -and -not (Test-EnvDir $_) }).Count }
+    [void](Add-KV $b "Utilisateur ($UserName)" ('{0} variables' -f $u.Count))
+    [void](Add-KV $b 'Système (tous les comptes)' ('{0} variables' -f $s.Count))
+    [void](Add-KV $b 'Dossiers du PATH introuvables' $(if ($miss) { "$miss" } else { 'aucun' }) $(if ($miss) { 'WarnFgBrush' } else { '' }))
+    [void]$b.Children.Add((New-ToolBar @((New-ToolButton 'Gérer les variables...' $null { Show-EnvWindow } 'PrimaryBtn'))))
 }
-# édition : listes (« ; ») présentées un élément par ligne ; dossiers absents signalés avant l'enregistrement
+function Update-EnvView { Update-EnvCard; if ($EnvUI.Win) { Update-EnvList } }
+$EnvXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Oliv_Maintenance - Variables d'environnement" Width="1000" Height="700" MinWidth="720" MinHeight="460"
+        Background="{DynamicResource BgBrush}" Foreground="{DynamicResource FgBrush}" FontFamily="Segoe UI" FontSize="13">
+  <Grid Margin="16,12,16,12">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <DockPanel Margin="0,0,0,10">
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+        <Border x:Name="FindBox" Width="220" Height="34" CornerRadius="17" Background="{DynamicResource BgBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1.5" VerticalAlignment="Center" Cursor="IBeam">
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="{DynamicResource AccentBrush}" Margin="12,0,8,0" VerticalAlignment="Center"/>
+            <TextBox x:Name="Find" Grid.Column="1" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource FgBrush}" CaretBrush="{DynamicResource FgBrush}" VerticalAlignment="Center" Margin="0,0,12,0">
+              <TextBox.Template><ControlTemplate TargetType="TextBox"><ScrollViewer x:Name="PART_ContentHost" Focusable="False" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden" Background="Transparent"/></ControlTemplate></TextBox.Template>
+            </TextBox>
+            <TextBlock x:Name="FindHint" Grid.Column="1" Text="Filtrer (nom ou valeur)" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" IsHitTestVisible="False"/>
+          </Grid>
+        </Border>
+        <Button x:Name="Add" Style="{DynamicResource PrimaryBtn}" Height="34" Padding="14,0" Margin="8,0,0,0" Content="Ajouter une variable"/>
+      </StackPanel>
+      <StackPanel Orientation="Horizontal">
+        <Button x:Name="ScopeU" Style="{DynamicResource ActionBtn}" Height="34" Padding="14,0" Margin="0,0,8,0" Tag="on">
+          <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBlock x:Name="ScopeUTxt" VerticalAlignment="Center"/></StackPanel>
+        </Button>
+        <Button x:Name="ScopeS" Style="{DynamicResource ActionBtn}" Height="34" Padding="14,0">
+          <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7F4;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBlock x:Name="ScopeSTxt" VerticalAlignment="Center"/></StackPanel>
+        </Button>
+      </StackPanel>
+    </DockPanel>
+    <!-- portée affichée : bandeau de couleur différente pour l'utilisateur et pour l'ordinateur -->
+    <Border x:Name="Info" Grid.Row="1" Margin="0,0,0,10" Padding="14,8" CornerRadius="6" BorderThickness="4,0,0,0" Background="{DynamicResource PanelBrush}">
+      <StackPanel>
+        <TextBlock x:Name="InfoHead" FontWeight="SemiBold" FontSize="14"/>
+        <TextBlock x:Name="InfoText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+      </StackPanel>
+    </Border>
+    <Border Grid.Row="2" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6">
+      <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Grid x:Name="Head" Margin="14,8,28,6">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="*"/><ColumnDefinition Width="76"/></Grid.ColumnDefinitions>
+          <TextBlock Text="NOM" Foreground="{DynamicResource MutedBrush}" FontSize="11" FontWeight="SemiBold"/>
+          <TextBlock Grid.Column="1" Text="VALEUR" Foreground="{DynamicResource MutedBrush}" FontSize="11" FontWeight="SemiBold"/>
+        </Grid>
+        <Border Grid.Row="1" Height="1" VerticalAlignment="Top" Background="{DynamicResource LineBrush}"/>
+        <ScrollViewer x:Name="Scroll" Grid.Row="1" VerticalScrollBarVisibility="Visible" Focusable="False"><StackPanel x:Name="List" Margin="4"/></ScrollViewer>
+      </Grid>
+    </Border>
+    <TextBlock x:Name="Status" Grid.Row="3" Margin="0,8,0,0" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"
+               Text="Clic sur une variable pour la modifier. Effectif pour les programmes ouverts ensuite (fenêtres et programmes déjà ouverts : à relancer)."/>
+  </Grid>
+</Window>
+'@
+function Show-EnvWindow {
+    if ($EnvUI.Win) { if ($EnvUI.Win.WindowState -eq 'Minimized') { $EnvUI.Win.WindowState = 'Normal' }; [void]$EnvUI.Win.Activate(); return }
+    $w = [Windows.Markup.XamlReader]::Parse($EnvXaml)
+    $w.Resources.MergedDictionaries.Add($Window.Resources)
+    Set-ChildWindow $w 'Variables'
+    if ($AppIcon) { $w.Icon = $AppIcon }
+    foreach ($n in 'FindBox', 'Find', 'FindHint', 'Add', 'ScopeU', 'ScopeS', 'ScopeUTxt', 'ScopeSTxt', 'Info', 'InfoHead', 'InfoText', 'Head', 'Scroll', 'List', 'Status') { $EnvUI[$n] = $w.FindName($n) }
+    $EnvUI.Win = $w
+    $EnvUI.ScopeU.Add_Click({ $EnvUI.Scope = 'U'; Update-EnvList })
+    $EnvUI.ScopeS.Add_Click({ $EnvUI.Scope = 'S'; Update-EnvList })
+    $EnvUI.Add.Add_Click({ Edit-EnvVar $(if ($EnvUI.Scope -eq 'S') { $EnvSys } else { $EnvUsr }) $null })
+    $EnvUI.Find.Add_TextChanged({ $EnvUI.FindHint.Visibility = $(if ($EnvUI.Find.Text) { 'Collapsed' } else { 'Visible' }); Update-EnvList })
+    $EnvUI.FindBox.Add_MouseLeftButtonDown({ [void]$EnvUI.Find.Focus() })
+    $EnvUI.Scroll.Add_SizeChanged({ $sb = [math]::Max([double]0, $EnvUI.Scroll.ActualWidth - $EnvUI.Scroll.ViewportWidth); $EnvUI.Head.Margin = New-Thickness 14 8 (10 + $sb) 6 })
+    $w.Add_Closed({ $EnvUI.Win = $null })
+    Update-EnvList
+    $w.Show()
+}
+function Update-EnvList {
+    if (-not $EnvUI.Win) { return }
+    $sys = $EnvUI.Scope -eq 'S'; $path = $(if ($sys) { $EnvSys } else { $EnvUsr })
+    $u = @(Get-EnvVar $EnvUsr); $s = @(Get-EnvVar $EnvSys)
+    $EnvUI.ScopeUTxt.Text = "Utilisateur : $UserName ($($u.Count))"; $EnvUI.ScopeSTxt.Text = "Ordinateur : tous les comptes ($($s.Count))"
+    $EnvUI.ScopeU.Tag = $(if ($sys) { '' } else { 'on' }); $EnvUI.ScopeS.Tag = $(if ($sys) { 'on' } else { '' })
+    $EnvUI.Info.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, $(if ($sys) { 'WarnFgBrush' } else { 'AccentBrush' }))
+    $EnvUI.InfoHead.Text = $(if ($sys) { 'Variables de l''ordinateur (système)' } else { "Variables de l'utilisateur $UserName" })
+    $EnvUI.InfoText.Text = $(if ($sys) { "Communes à tous les comptes du PC ; une erreur ici peut empêcher Windows ou des programmes de démarrer. Registre : $EnvSys" }
+        else { "Propres à ce compte. Une variable utilisateur remplace la variable système de même nom, sauf PATH : le PATH utilisateur s'ajoute à la fin du PATH système. Registre : HKCU\Environment" })
+    $EnvUI.Add.Content = $(if ($sys) { 'Ajouter une variable système' } else { 'Ajouter une variable utilisateur' })
+    $q = "$($EnvUI.Find.Text)".Trim()
+    $EnvUI.List.Children.Clear()
+    foreach ($v in $(if ($sys) { $s } else { $u })) {
+        if ($q -and $v.Name -notlike "*$q*" -and $v.Value -notlike "*$q*") { continue }
+        $b = [Windows.Controls.Border]::new(); $b.Style = $Window.FindResource('SvcRow'); $b.Padding = New-Thickness 10 6 6 6; $b.Cursor = [Windows.Input.Cursors]::Hand
+        $g = [Windows.Controls.Grid]::new(); foreach ($wd in 260, 0, 76) { [void]$g.ColumnDefinitions.Add((New-SvcCol $wd)) }
+        $n = New-Text $v.Name; $n.FontWeight = [Windows.FontWeights]::SemiBold; $n.TextTrimming = 'CharacterEllipsis'; $n.VerticalAlignment = 'Top'; $n.Margin = New-Thickness 0 0 10 0
+        [void]$g.Children.Add($n)
+        $vp = [Windows.Controls.StackPanel]::new(); [Windows.Controls.Grid]::SetColumn($vp, 1)
+        if (Test-EnvList $v) {
+            # liste : un élément par ligne, dossier introuvable en rouge
+            foreach ($it in @($v.Value -split ';' | Where-Object { $_ })) {
+                $ok = $v.Name -eq 'PATHEXT' -or (Test-EnvDir $it)
+                $t = New-Text $(if ($ok) { $it } else { $it + '   (introuvable)' }); $t.TextTrimming = 'CharacterEllipsis'; $t.FontFamily = [Windows.Media.FontFamily]::new('Consolas')
+                if (-not $ok) { $t.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'ErrFgBrush') }
+                [void]$vp.Children.Add($t)
+            }
+        } else { $t = New-Text $v.Value; $t.TextWrapping = 'Wrap'; $t.FontFamily = [Windows.Media.FontFamily]::new('Consolas'); [void]$vp.Children.Add($t) }
+        [void]$g.Children.Add($vp)
+        $bp = [Windows.Controls.StackPanel]::new(); $bp.Orientation = 'Horizontal'; $bp.HorizontalAlignment = 'Right'; $bp.VerticalAlignment = 'Top'; [Windows.Controls.Grid]::SetColumn($bp, 2)
+        $tag = @{ P = $path; V = $v }
+        [void]$bp.Children.Add((New-ToolIconButton 0xE70F 'Modifier' $tag { param($s, $e) Edit-EnvVar $s.Tag.P $s.Tag.V }))
+        $prot = $v.Name -in $EnvProtected
+        $dl = New-ToolIconButton 0xE74D $(if ($prot) { 'Variable indispensable : suppression non proposée' } else { 'Supprimer' }) $tag { param($s, $e) Remove-EnvVar $s.Tag.P $s.Tag.V }
+        $dl.IsEnabled = -not $prot; [Windows.Controls.ToolTipService]::SetShowOnDisabled($dl, $true); [void]$bp.Children.Add($dl)
+        [void]$g.Children.Add($bp)
+        $b.Child = $g; $b.Tag = $tag
+        $b.Add_MouseLeftButtonUp({ param($s, $e) if (-not (Test-InButton $e.OriginalSource)) { Edit-EnvVar $s.Tag.P $s.Tag.V } })
+        [void]$EnvUI.List.Children.Add($b)
+    }
+}
+# édition : listes présentées un élément par ligne ; récapitulatif des changements avant enregistrement
 function Edit-EnvVar([string]$Path, $Var) {
-    $isNew = -not $Var; $multi = (-not $isNew) -and ($Var.Value -like '*;*' -or $Var.Name -in 'Path', 'PSModulePath', 'PATHEXT')
+    $isNew = -not $Var; $multi = (-not $isNew) -and (Test-EnvList $Var)
     $val = $(if ($isNew) { '' } elseif ($multi) { (@($Var.Value -split ';' | Where-Object { $_ }) -join "`r`n") } else { $Var.Value })
-    $where = $(if ($Path -eq $EnvSys) { 'système' } else { 'utilisateur' })
-    $msg = $(if ($isNew) { "Nouvelle variable ($where)" } else { "Variable $($Var.Name) ($where)" }) + $(if ($multi) { "`n`nUn élément par ligne (dossiers du PATH...). %VARIABLE% est remplacé à l'utilisation." } else { "`n`n%VARIABLE% est remplacé à l'utilisation." })
-    $f = @(@{ L = 'Nom'; V = $(if ($isNew) { '' } else { $Var.Name }); RO = -not $isNew }, @{ L = 'Valeur'; V = $val; M = $multi; H = 260 })
-    $r = Read-ToolInput $msg $f 'Enregistrer' 760
+    $where = $(if ($Path -eq $EnvSys) { 'système, tous les comptes' } else { "utilisateur $UserName" })
+    $msg = $(if ($isNew) { "Nouvelle variable ($where)" } else { "$($Var.Name) ($where)" }) + $(if ($multi) { "`n`nUn élément par ligne (dossiers du PATH...). %VARIABLE% est remplacé à l'utilisation." } else { "`n`n%VARIABLE% est remplacé à l'utilisation." })
+    $f = @(@{ L = 'Nom'; V = $(if ($isNew) { '' } else { $Var.Name }); RO = -not $isNew }, @{ L = 'Valeur'; V = $val; M = $multi; H = 300 })
+    $r = Read-ToolInput $msg $f 'Enregistrer' 780
     if (-not $r) { return }
     $name = "$($r[0])".Trim(); if (-not $name -or $name -match '[=\s]') { Show-Info 'Nom invalide : ni espace ni signe =.' 'Warn'; return }
     $value = $(if ($multi) { (@("$($r[1])" -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join ';') } else { "$($r[1])" })
-    if ($multi -and $name -in 'Path', 'PSModulePath') {
-        $miss = @($value -split ';' | Where-Object { $_ -and -not (Test-Path -LiteralPath ([Environment]::ExpandEnvironmentVariables($_))) })
-        if ($miss.Count -and -not (Confirm-Action ("Dossiers introuvables :`n`n" + ($miss -join "`n") + "`n`nEnregistrer quand même ?"))) { return }
-    }
+    if (-not $isNew -and $value -ceq $Var.Value) { return }
+    if ($isNew -and @(Get-EnvVar $Path | Where-Object { $_.Name -eq $name }).Count -and -not (Confirm-Action "La variable $name existe déjà ($where) : la remplacer ?")) { return }
     if ($Var -and $Var.Name -eq 'Path' -and $Path -eq $EnvSys -and $value.Length -lt 20) { Show-Info 'PATH système presque vide : enregistrement refusé (Windows ne trouverait plus ses propres programmes).' 'Warn'; return }
+    # récapitulatif : éléments ajoutés / retirés (listes) ou ancienne / nouvelle valeur
+    $lines = @()
+    if ($multi) {
+        $a = @($Var.Value -split ';' | Where-Object { $_ }); $b2 = @($value -split ';' | Where-Object { $_ })
+        foreach ($x in $b2) { if ($x -notin $a) { $lines += '+ ajouté : ' + $x + $(if (-not (Test-EnvDir $x)) { '   (dossier introuvable)' } else { '' }) } }
+        foreach ($x in $a) { if ($x -notin $b2) { $lines += '- retiré : ' + $x } }
+        if (-not $lines.Count) { $lines += 'ordre des éléments modifié' }
+    } elseif ($isNew) { $lines += "+ $name = $value" }
+    else { $lines += "- avant : $($Var.Value)"; $lines += "+ après : $value" }
+    if ((Show-Dialog "Enregistrer $name ($where) ?`n`nModifications :" 'Question' @(@{ T = 'Annuler'; V = $false; C = $true }, @{ T = 'Enregistrer'; V = $true; S = 'PrimaryBtn' }) $lines) -ne $true) { return }
     try {
         $k = Open-RegKey $Path $true $true
         try {
@@ -450,19 +629,20 @@ function Edit-EnvVar([string]$Path, $Var) {
             $k.SetValue($name, $value, $kind)
         } finally { $k.Close() }
         [void][_OlivM.Shell]::NotifySettingChange('Environment')
-        Write-UiLog ('Variable d''environnement {0} ({1}) enregistrée.' -f $name, $where) 'OK'; Add-SessionEvent 'Réglages' 'Variable d''environnement' "$name ($where)" 'ok'
+        Write-UiLog ('Variable d''environnement {0} ({1}) enregistrée : {2}' -f $name, $where, ($lines -join ' ; ')) 'OK'; Add-SessionEvent 'Réglages' 'Variable d''environnement' "$name ($where)" 'ok'
     } catch { Show-Info "Enregistrement impossible.`n`n$($_.Exception.Message)" 'Error' }
-    Update-EnvCard
+    Update-EnvView
 }
 function Remove-EnvVar([string]$Path, $Var) {
     if ($Var.Name -in $EnvProtected) { return }
-    if (-not (Confirm-Action "Supprimer la variable $($Var.Name) ?`n`nValeur : $($Var.Value)")) { return }
+    $where = $(if ($Path -eq $EnvSys) { 'système, tous les comptes' } else { "utilisateur $UserName" })
+    if (-not (Confirm-Action "Supprimer la variable $($Var.Name) ($where) ?`n`nValeur : $($Var.Value)")) { return }
     try {
         $k = Open-RegKey $Path $true; try { $k.DeleteValue($Var.Name, $false) } finally { $k.Close() }
         [void][_OlivM.Shell]::NotifySettingChange('Environment')
-        Write-UiLog "Variable d'environnement $($Var.Name) supprimée." 'OK'
+        Write-UiLog "Variable d'environnement $($Var.Name) ($where) supprimée (valeur : $($Var.Value))." 'OK'
     } catch { Show-Info "Suppression impossible.`n`n$($_.Exception.Message)" 'Error' }
-    Update-EnvCard
+    Update-EnvView
 }
 
 # ================= Comptes locaux : type (administrateur / standard), compte Microsoft ou local, dernière connexion ;

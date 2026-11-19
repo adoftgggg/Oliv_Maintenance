@@ -84,6 +84,8 @@ function Update-SearchIndex {
     $list = [Collections.ArrayList]::new()
     foreach ($p in $PageNames) { Add-SearchUnit $Ui["Page$p"] $p '' $list }
     Add-SearchUnit $Ui.SettingsPanel 'Settings' '' $list
+    # Paramètres : cartes des rubriques non affichées (détachées) indexées aussi
+    if ($SetUI.SecCards) { foreach ($c in $SetUI.SecCards.Values) { if (-not $c.Parent) { Add-SearchUnit $c 'Settings' '' $list } } }
     # logiciels installés (dernier inventaire) : ouverture de la fenêtre Logiciels filtrée sur le nom
     $r = $Sync.WgResult
     if ($r -and -not $r.Error) {
@@ -219,6 +221,10 @@ function Open-SearchResult([int]$I) {
     if ($u.Kind -eq 'app') { Set-AppsMode 'Mine'; Show-Page 'Apps'; if ($SoftUI.Win) { $SoftUI.Find.Text = "$($u.App.Name)" }; return }
     Show-Page $u.Page
     $el = $u.El
+    # Paramètres : rubrique contenant l'élément affichée d'abord
+    if ($u.Page -eq 'Settings' -and $SetUI.SecCards) {
+        foreach ($k in $SettingsSections.Keys) { foreach ($t in $SettingsSections[$k].C) { $c = $SetUI.SecCards[$t]; $x = $el; while ($x -and $x -ne $c) { $x = [Windows.LogicalTreeHelper]::GetParent($x) }; if ($x) { Show-SettingsSection $k } } }
+    }
     [void]$Window.Dispatcher.BeginInvoke([Action]{
         try {
             # parents repliés (catégorie du Nettoyage, liste réduite) : rouverts pour rendre l'élément visible

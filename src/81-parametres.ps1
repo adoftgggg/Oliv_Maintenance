@@ -207,7 +207,52 @@ function New-SettingsPage {
     $sig.TextAlignment = 'Center'
     [void]$c.Body.Children.Add($sig)
     [void]$p.Children.Add($c.Card)
+    Set-SettingsLayout $p $cols
     $SetUI.Built = $true
+}
+# Disposition des Paramètres : rubriques à gauche (une seule affichée à la fois, en pleine largeur), cartes à droite.
+# Cartes construites comme avant puis déplacées dans leur rubrique.
+$SettingsSections = [ordered]@{
+    Look   = @{ T = 'Apparence'; G = 0xE790; C = @('Apparence', 'Cartes affichées') }
+    Start  = @{ T = 'Démarrage et fermeture'; G = 0xE7E8; C = @('Démarrage') }
+    Update = @{ T = 'Mises à jour'; G = 0xE895; C = @('Mises à jour de l''application') }
+    Save   = @{ T = 'Sauvegarde et réinitialisation'; G = 0xE777; C = @('Restauration des réglages', 'Réinitialisation') }
+    About  = @{ T = 'À propos'; G = 0xE946; C = @('À propos') }
+}
+function Set-SettingsLayout($P, $Cols) {
+    $cards = @{}
+    foreach ($el in @(@($Cols.Children) + @($P.Children))) {
+        if ($el -is [Windows.Controls.Border] -and "$($el.Tag)" -like 'card:*') { $cards["$($el.Tag)".Substring(5)] = $el }
+    }
+    foreach ($el in $cards.Values) { [void]$el.Parent.Children.Remove($el); $el.Margin = New-Thickness 0 0 0 12; $el.HorizontalAlignment = 'Stretch' }
+    [void]$P.Children.Remove($Cols)
+    $g = [Windows.Controls.Grid]::new()
+    $c0 = [Windows.Controls.ColumnDefinition]::new(); $c0.Width = [Windows.GridLength]::new(250); [void]$g.ColumnDefinitions.Add($c0)
+    [void]$g.ColumnDefinitions.Add([Windows.Controls.ColumnDefinition]::new())
+    $nav = [Windows.Controls.StackPanel]::new(); $nav.Margin = New-Thickness 0 0 16 0
+    $sh = [Windows.Controls.StackPanel]::new(); $sh.MaxWidth = 960; $sh.HorizontalAlignment = 'Stretch'; [Windows.Controls.Grid]::SetColumn($sh, 1)
+    $SetUI.SecHost = $sh; $SetUI.SecCards = $cards; $SetUI.SecBtns = @{}
+    foreach ($k in $SettingsSections.Keys) {
+        $sec = $SettingsSections[$k]
+        $b = [Windows.Controls.Button]::new(); $b.Style = $Window.FindResource('ActionBtn'); $b.Height = 42; $b.Margin = New-Thickness 0 0 0 6
+        $b.HorizontalContentAlignment = 'Left'; $b.Padding = New-Thickness 14 0 14 0; $b.DataContext = $k
+        $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'
+        $ic = New-Text ([string][char]$sec.G); $ic.FontFamily = [Windows.Media.FontFamily]::new('Segoe MDL2 Assets'); $ic.FontSize = 15; $ic.Margin = New-Thickness 0 0 12 0; $ic.VerticalAlignment = 'Center'
+        $tx = New-Text $sec.T; $tx.FontSize = 14; $tx.VerticalAlignment = 'Center'
+        [void]$sp.Children.Add($ic); [void]$sp.Children.Add($tx); $b.Content = $sp
+        $b.Add_Click({ param($s, $e) Show-SettingsSection "$($s.DataContext)" })
+        [void]$nav.Children.Add($b); $SetUI.SecBtns[$k] = $b
+    }
+    [void]$g.Children.Add($nav); [void]$g.Children.Add($sh)
+    [void]$P.Children.Add($g)
+    Show-SettingsSection $(if ($SetUI.Sec) { $SetUI.Sec } else { 'Look' })
+}
+function Show-SettingsSection([string]$Key) {
+    if (-not $SetUI.SecHost -or -not $SettingsSections.Contains($Key)) { return }
+    $SetUI.Sec = $Key; $SetUI.SecHost.Children.Clear()
+    foreach ($t in $SettingsSections[$Key].C) { $c = $SetUI.SecCards[$t]; if ($c) { [void]$SetUI.SecHost.Children.Add($c) } }
+    foreach ($k in $SetUI.SecBtns.Keys) { $SetUI.SecBtns[$k].Tag = $(if ($k -eq $Key) { 'on' } else { '' }) }
+    if ($Ui.PageSettings -is [Windows.Controls.ScrollViewer]) { $Ui.PageSettings.ScrollToTop() }
 }
 function Get-TweakSnapshot {
     if (-not (Test-Path -LiteralPath $SnapDir)) { return @() }
