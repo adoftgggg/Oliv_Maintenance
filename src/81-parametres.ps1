@@ -210,8 +210,8 @@ function New-SettingsPage {
     Set-SettingsLayout $p $cols
     $SetUI.Built = $true
 }
-# Disposition des Paramètres : rubriques à gauche (une seule affichée à la fois, en pleine largeur), cartes à droite.
-# Cartes construites comme avant puis déplacées dans leur rubrique.
+# Disposition des Paramètres : toutes les cartes à droite, rubrique par rubrique ; sommaire à gauche, qui reste visible
+# pendant le défilement, amène à la rubrique choisie et suit la rubrique affichée.
 $SettingsSections = [ordered]@{
     Look   = @{ T = 'Apparence'; G = 0xE790; C = @('Apparence', 'Cartes affichées') }
     Start  = @{ T = 'Démarrage et fermeture'; G = 0xE7E8; C = @('Démarrage') }
@@ -229,9 +229,10 @@ function Set-SettingsLayout($P, $Cols) {
     $g = [Windows.Controls.Grid]::new()
     $c0 = [Windows.Controls.ColumnDefinition]::new(); $c0.Width = [Windows.GridLength]::new(250); [void]$g.ColumnDefinitions.Add($c0)
     [void]$g.ColumnDefinitions.Add([Windows.Controls.ColumnDefinition]::new())
-    $nav = [Windows.Controls.StackPanel]::new(); $nav.Margin = New-Thickness 0 0 16 0
+    $nav = [Windows.Controls.StackPanel]::new(); $nav.Margin = New-Thickness 0 0 16 0; $nav.VerticalAlignment = 'Top'
+    $nav.RenderTransform = [Windows.Media.TranslateTransform]::new()
     $sh = [Windows.Controls.StackPanel]::new(); $sh.MaxWidth = 960; $sh.HorizontalAlignment = 'Stretch'; [Windows.Controls.Grid]::SetColumn($sh, 1)
-    $SetUI.SecHost = $sh; $SetUI.SecCards = $cards; $SetUI.SecBtns = @{}
+    $SetUI.SecHost = $sh; $SetUI.SecCards = $cards; $SetUI.SecBtns = @{}; $SetUI.SecFirst = [ordered]@{}; $SetUI.SecNav = $nav; $SetUI.SecGrid = $g
     foreach ($k in $SettingsSections.Keys) {
         $sec = $SettingsSections[$k]
         $b = [Windows.Controls.Button]::new(); $b.Style = $Window.FindResource('ActionBtn'); $b.Height = 42; $b.Margin = New-Thickness 0 0 0 6
@@ -242,17 +243,37 @@ function Set-SettingsLayout($P, $Cols) {
         [void]$sp.Children.Add($ic); [void]$sp.Children.Add($tx); $b.Content = $sp
         $b.Add_Click({ param($s, $e) Show-SettingsSection "$($s.DataContext)" })
         [void]$nav.Children.Add($b); $SetUI.SecBtns[$k] = $b
+        # cartes de la rubrique, dans l'ordre ; 1re carte = point d'arrivée du sommaire
+        foreach ($t in $sec.C) { $c = $cards[$t]; if ($c) { [void]$sh.Children.Add($c); if (-not $SetUI.SecFirst.Contains($k)) { $SetUI.SecFirst[$k] = $c } } }
     }
     [void]$g.Children.Add($nav); [void]$g.Children.Add($sh)
     [void]$P.Children.Add($g)
-    Show-SettingsSection $(if ($SetUI.Sec) { $SetUI.Sec } else { 'Look' })
+    # sommaire fixe à l'écran (décalé de la hauteur défilée) et rubrique en cours surlignée
+    if (-not $SetUI.SecScrollHooked -and $Ui.PageSettings -is [Windows.Controls.ScrollViewer]) {
+        $SetUI.SecScrollHooked = $true
+        $Ui.PageSettings.Add_ScrollChanged({ Update-SettingsNav })
+    }
+    Set-SettingsNavOn 'Look'
+}
+function Get-SettingsTop($El) { try { $El.TranslatePoint([Windows.Point]::new(0, 0), $Ui.SettingsPanel).Y } catch { 0 } }
+function Set-SettingsNavOn([string]$Key) { foreach ($k in $SetUI.SecBtns.Keys) { $SetUI.SecBtns[$k].Tag = $(if ($k -eq $Key) { 'on' } else { '' }) } }
+function Update-SettingsNav {
+    if (-not $SetUI.SecNav) { return }
+    $off = $Ui.PageSettings.VerticalOffset; $top = Get-SettingsTop $SetUI.SecGrid
+    $SetUI.SecNav.RenderTransform.Y = [math]::Max([double]0, $off - $top)
+    if ($SetUI.SecJump -and ([DateTime]::Now - $SetUI.SecJump).TotalMilliseconds -lt 400) { return }
+    # rubrique en cours : dernière dont la 1re carte est passée sous le haut de la zone visible (fin de page : la dernière)
+    $cur = $null
+    foreach ($k in $SetUI.SecFirst.Keys) { if ((Get-SettingsTop $SetUI.SecFirst[$k]) -le $off + 60) { $cur = $k } }
+    if ($off -ge $Ui.PageSettings.ScrollableHeight - 2 -and $Ui.PageSettings.ScrollableHeight -gt 0) { $cur = @($SetUI.SecFirst.Keys)[-1] }
+    if (-not $cur) { $cur = @($SetUI.SecFirst.Keys)[0] }
+    Set-SettingsNavOn $cur
 }
 function Show-SettingsSection([string]$Key) {
-    if (-not $SetUI.SecHost -or -not $SettingsSections.Contains($Key)) { return }
-    $SetUI.Sec = $Key; $SetUI.SecHost.Children.Clear()
-    foreach ($t in $SettingsSections[$Key].C) { $c = $SetUI.SecCards[$t]; if ($c) { [void]$SetUI.SecHost.Children.Add($c) } }
-    foreach ($k in $SetUI.SecBtns.Keys) { $SetUI.SecBtns[$k].Tag = $(if ($k -eq $Key) { 'on' } else { '' }) }
-    if ($Ui.PageSettings -is [Windows.Controls.ScrollViewer]) { $Ui.PageSettings.ScrollToTop() }
+    if (-not $SetUI.SecFirst -or -not $SetUI.SecFirst.Contains($Key)) { return }
+    $SetUI.Sec = $Key; Set-SettingsNavOn $Key; $SetUI.SecJump = [DateTime]::Now
+    $y = (Get-SettingsTop $SetUI.SecFirst[$Key]) - 4
+    if ($Ui.PageSettings -is [Windows.Controls.ScrollViewer]) { $Ui.PageSettings.ScrollToVerticalOffset([math]::Max([double]0, $y)) }
 }
 function Get-TweakSnapshot {
     if (-not (Test-Path -LiteralPath $SnapDir)) { return @() }
