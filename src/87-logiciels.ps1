@@ -983,7 +983,9 @@ function Update-SoftView {
     $isHist = $SoftUI.Filter -eq 'Hist'
     # recherche en cours : aucune interaction tant que le résultat n'est pas là (onglets, filtre, encart et liste masqués ou
     # grisés, ancien résultat non affiché), seul état visible : recherche en cours
-    $busy = [bool]$Sync.WgRunning -and -not $Sync.WgCancel -and $SoftUI.Filter -ne 'All'
+    # recherche en cours : liste précédente gardée à l'écran (actualisée à l'arrivée du résultat) ; écran d'attente seulement
+    # sans aucun inventaire
+    $busy = [bool]$Sync.WgRunning -and -not $Sync.WgCancel -and $SoftUI.Filter -ne 'All' -and -not $apps.Count
     # onglets non désactivés (le style désactivé effaçait le bleu de l'onglet actif et rendait son texte illisible) : clics et
     # clavier bloqués, onglets inactifs et filtre estompés, onglet actif inchangé
     foreach ($c in $SoftUI.FUpd, $SoftUI.FAll, $SoftUI.FExcl, $SoftUI.FHist, $SoftUI.FindBox) {

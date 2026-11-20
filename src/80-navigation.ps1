@@ -40,7 +40,7 @@ function Show-PageContent([string]$Name) {
         try { New-DeferredPage } finally { $Window.Cursor = $null }
     }
     if ($Name -eq 'Settings' -and -not $SetUI.Built) { New-SettingsPage }
-    if ($Name -eq 'Svc' -and -not $SvcUI.Data -and -not $SvcUI.Reading) { Start-SvcRead }
+    if ($Name -eq 'Svc' -and -not $SvcUI.Fresh -and -not $SvcUI.Reading) { Start-SvcRead }
     if ($Name -eq 'Tools' -and -not $ToolsUI.Built) { New-ToolsPage }
     # Applications : ouverture sur les applications installées (Mes applications)
     if ($Name -eq 'Apps' -and -not $AppsUI.Mode) { Set-AppsMode 'Mine' }

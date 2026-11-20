@@ -9,6 +9,38 @@ $SvcStateFile = Join-Path (Get-LogPath 'Etat') 'services-desactives.json'
 $SvcCritical = @('RpcSs', 'RpcEptMapper', 'DcomLaunch', 'LSM', 'SamSs', 'EventLog', 'EventSystem', 'PlugPlay', 'Power', 'BrokerInfrastructure',
     'CoreMessagingRegistrar', 'SystemEventsBroker', 'Schedule', 'ProfSvc', 'gpsvc', 'Winmgmt', 'UserManager', 'StateRepository', 'TimeBrokerSvc',
     'Dhcp', 'Dnscache', 'nsi', 'BFE', 'mpssvc', 'WinDefend', 'WdNisSvc', 'SecurityHealthService', 'Sense', 'TrustedInstaller', 'CryptSvc', 'KeyIso', 'AppXSvc', 'ClipSVC')
+# importance affichée à côté du nom : Critique (arrêt et désactivation bloqués), Désactivable si... (service de Windows
+# inutile dans un cas précis), Windows (à laisser par défaut), Logiciel (installé par un logiciel : utile tant qu'il sert)
+$SvcOptional = @{
+    Fax = 'aucun fax n''est utilisé'; Spooler = 'aucune imprimante (ni impression PDF) n''est utilisée'; PrintNotify = 'aucune imprimante n''est utilisée'
+    bthserv = 'aucun appareil Bluetooth n''est utilisé'; BTAGService = 'aucun casque Bluetooth n''est utilisé'; WSearch = 'la recherche de fichiers n''est pas utilisée (recherche alors plus lente)'
+    SysMain = 'le disque système est un SSD rapide (préchargement des programmes)'; DiagTrack = 'télémétrie envoyée à Microsoft : désactivable'; dmwappushservice = 'télémétrie : désactivable'
+    MapsBroker = 'l''application Cartes n''est pas utilisée'; RetailDemo = 'toujours (mode démo des magasins)'; WMPNetworkSvc = 'le partage de bibliothèque Windows Media n''est pas utilisé'
+    XblAuthManager = 'aucun jeu Xbox / Game Pass'; XblGameSave = 'aucun jeu Xbox / Game Pass'; XboxNetApiSvc = 'aucun jeu Xbox / Game Pass'; XboxGipSvc = 'aucune manette ou accessoire Xbox'
+    RemoteRegistry = 'toujours sur un PC personnel (accès au registre à distance)'; PhoneSvc = 'aucune téléphonie (Mobile connecté, appels)'; lfsvc = 'la localisation n''est pas utilisée'
+    WbioSrvc = 'aucun lecteur d''empreinte ni reconnaissance faciale (Windows Hello biométrique)'; wisvc = 'pas d''inscription au programme Windows Insider'
+    SCardSvr = 'aucune carte à puce'; ScDeviceEnum = 'aucune carte à puce'; stisvc = 'aucun scanner ni appareil photo branché'; TermService = 'le Bureau à distance entrant n''est pas utilisé'
+    SessionEnv = 'le Bureau à distance entrant n''est pas utilisé'; UmRdpService = 'le Bureau à distance entrant n''est pas utilisé'; WerSvc = 'les rapports d''erreurs envoyés à Microsoft ne sont pas souhaités'
+    PcaSvc = 'l''assistant de compatibilité des anciens programmes n''est pas souhaité'; icssvc = 'le point d''accès mobile (partage de connexion) n''est pas utilisé'
+    SharedAccess = 'le partage de connexion Internet n''est pas utilisé'; WpcMonSvc = 'le contrôle parental n''est pas utilisé'; Wecsvc = 'toujours sur un PC personnel (collecte d''événements d''entreprise)'
+    TrkWks = 'aucun partage de fichiers en réseau d''entreprise'; edgeupdate = 'jamais conseillé : Edge ne serait plus mis à jour'; edgeupdatem = 'jamais conseillé : Edge ne serait plus mis à jour'
+    gupdate = 'jamais conseillé : Google Chrome ne serait plus mis à jour'; gupdatem = 'jamais conseillé : Google Chrome ne serait plus mis à jour'; Netlogon = 'le PC n''est pas joint à un domaine'
+    WinRM = 'aucune administration à distance (PowerShell à distance)'; AJRouter = 'aucun appareil connecté AllJoyn'; FrameServerMonitor = 'aucune caméra'; MixedRealityOpenXRSvc = 'aucun casque de réalité mixte'
+}
+function Get-SvcLevel($S) {
+    if ($S.Name -in $SvcCritical) { return @{ L = 'Critique'; B = 'ErrFgBrush'; T = 'Indispensable à Windows ou à sa sécurité : arrêt et désactivation bloqués.' } }
+    $n = ("$($S.Name)" -split '_')[0]
+    if ($SvcOptional.ContainsKey($n)) { $c = $SvcOptional[$n]; return @{ L = $(if ($c -like 'jamais*') { 'À garder' } else { 'Désactivable' }); B = $(if ($c -like 'jamais*') { 'WarnFgBrush' } else { 'OkFgBrush' }); T = $(if ($c -like 'jamais*' -or $c -like 'toujours*') { $c.Substring(0, 1).ToUpper() + $c.Substring(1) + '.' } else { "Désactivable si $c." }) } }
+    if ($S.Ms) { return @{ L = 'Windows'; B = 'MutedBrush'; T = 'Service de Windows : à laisser tel quel sauf besoin précis.' } }
+    @{ L = 'Logiciel'; B = 'AccentBrush'; T = 'Installé par ' + $(if ($S.Co) { $S.Co } else { 'un logiciel' }) + ' : utile tant que ce logiciel est utilisé ; s''il ne sert plus, le désinstaller plutôt que désactiver le service.' }
+}
+# pastille d'importance (petit cadre coloré, explication au survol)
+function New-LevelBadge($Lv) {
+    $b = [Windows.Controls.Border]::new(); $b.CornerRadius = [Windows.CornerRadius]::new(8); $b.BorderThickness = New-Thickness 1 1 1 1; $b.Padding = New-Thickness 6 0 6 1; $b.Margin = New-Thickness 8 1 0 0; $b.VerticalAlignment = 'Center'
+    $b.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, $Lv.B)
+    $t = New-Text $Lv.L; $t.FontSize = 10.5; $t.TextWrapping = 'NoWrap'; $t.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $Lv.B)
+    $b.Child = $t; $b.ToolTip = $Lv.T; $b
+}
 $SvcStartText = @{ Auto = 'Automatique'; Delayed = 'Automatique (différé)'; Manual = 'Manuel'; Disabled = 'Désactivé'; Boot = 'Démarrage'; System = 'Système' }
 
 $SvcReadScript = @'
@@ -73,11 +105,34 @@ try {
 $Sync.SvcActRes = $r
 '@
 
+# ---- listes gardées en local (services, tâches) : affichées tout de suite à l'ouverture, puis actualisées en arrière-plan ;
+# lignes existantes mises à jour sur place (pas de reconstruction), reconstruction seulement si des éléments
+# apparaissent ou disparaissent
+function Read-ListCache([string]$Name) {
+    $f = Join-Path (Get-LogPath 'Etat') "liste-$Name.json"
+    try { if (Test-Path -LiteralPath $f) { $j = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json; return @{ Items = @($j.Items | Where-Object { $_ }); Stamp = [DateTime]::Parse("$($j.Stamp)", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) } } } catch { Write-Ignored "Liste enregistrée ($Name)" $_ }
+    $null
+}
+function Save-ListCache([string]$Name, $Items, $Stamp) {
+    $f = Join-Path (Get-LogPath 'Etat') "liste-$Name.json"
+    try { ConvertTo-Json -InputObject @{ Stamp = ([DateTime]$Stamp).ToString('o'); Items = @($Items) } -Depth 3 -Compress | Set-Content -LiteralPath $f -Encoding UTF8 } catch { Write-Ignored "Liste enregistrée ($Name)" $_ }
+}
+function Merge-ListData($UI, [string]$KeyProp, $New, [scriptblock]$Rebuild, [scriptblock]$Look) {
+    $nk = @($New | ForEach-Object { "$($_.$KeyProp)" } | Sort-Object); $ok = @($UI.Data | Where-Object { $_ } | ForEach-Object { "$($_.$KeyProp)" } | Sort-Object)
+    if (-not $UI.Rows -or -not $UI.Rows.Count -or ($nk -join '|') -ne ($ok -join '|')) { $UI.Data = @($New); & $Rebuild; return }
+    foreach ($n in $New) {
+        $k = "$($n.$KeyProp)"; $r = $UI.Rows[$k]; if (-not $r) { continue }
+        $o = $r.Row.DataContext
+        foreach ($p in $n.PSObject.Properties) { $o | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value -Force }
+        & $Look $k
+    }
+}
 function Start-SvcRead {
     if ($SvcUI.Reading -or $SvcUI.Busy) { return }
+    if (-not $SvcUI.Data) { $c = Read-ListCache 'services'; if ($c -and $c.Items.Count) { $SvcUI.Data = $c.Items; $SvcUI.Stamp = $c.Stamp; Update-SvcList } }
     $SvcUI.Reading = $true; $Sync.SvcRead = $null
     $Ui.SvcProg.IsIndeterminate = $true; $Ui.SvcProg.Visibility = 'Visible'; $Ui.SvcRefresh.IsEnabled = $false
-    $Ui.SvcStatus.Text = 'Lecture des services...'
+    $Ui.SvcStatus.Text = $(if ($SvcUI.Data) { 'Liste du {0:dd/MM HH:mm} affichée  ·  actualisation en cours...' -f $SvcUI.Stamp } else { 'Lecture des services...' })
     if (-not $SvcUI.Data) { $Ui.SvcEmpty.Text = 'Lecture des services...'; $Ui.SvcEmpty.Visibility = 'Visible' }
     Start-BgJob 'SvcRead' $SvcReadScript
 }
@@ -89,8 +144,10 @@ $BgJobDone['SvcRead'] = {
         $Ui.SvcStatus.Text = $m; if (-not $SvcUI.Data) { $Ui.SvcEmpty.Text = $m }
         Write-UiLog $m 'ERROR'; return
     }
-    $SvcUI.Data = @($r.Items | Sort-Object Disp); $SvcUI.Stamp = $r.Stamp
-    Update-SvcList
+    $SvcUI.Stamp = $r.Stamp; $SvcUI.Fresh = $true
+    Merge-ListData $SvcUI 'Name' @($r.Items | Sort-Object Disp) { Update-SvcList } { param($k) Set-SvcRowLook $k }
+    Update-SvcFilter
+    Save-ListCache 'services' $SvcUI.Data $SvcUI.Stamp
 }
 
 # ligne : nom affiché + nom court, état (pastille), démarrage, éditeur, 2 boutons (Démarrer/Arrêter, Désactiver/Réactiver)
@@ -100,8 +157,9 @@ function New-SvcRow($S) {
     $g = [Windows.Controls.Grid]::new(); foreach ($w in 0, 120, 160, 190, 206) { [void]$g.ColumnDefinitions.Add((New-SvcCol $w)) }
     $np = [Windows.Controls.StackPanel]::new(); $np.Margin = New-Thickness 0 0 10 0; $np.VerticalAlignment = 'Center'
     $t1 = New-Text $S.Disp; $t1.FontWeight = [Windows.FontWeights]::SemiBold; $t1.TextTrimming = 'CharacterEllipsis'
-    $t2 = New-Text $S.Name 'Muted'; $t2.FontSize = 11; $t2.TextTrimming = 'CharacterEllipsis'
-    [void]$np.Children.Add($t1); [void]$np.Children.Add($t2); [void]$g.Children.Add($np)
+    $t2 = New-Text $S.Name 'Muted'; $t2.FontSize = 11; $t2.TextTrimming = 'CharacterEllipsis'; $t2.TextWrapping = 'NoWrap'
+    $l2 = [Windows.Controls.StackPanel]::new(); $l2.Orientation = 'Horizontal'; [void]$l2.Children.Add($t2); [void]$l2.Children.Add((New-LevelBadge (Get-SvcLevel $S)))
+    [void]$np.Children.Add($t1); [void]$np.Children.Add($l2); [void]$g.Children.Add($np)
     $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; $sp.VerticalAlignment = 'Center'
     $dot = [Windows.Shapes.Ellipse]::new(); $dot.Width = 8; $dot.Height = 8; $dot.Margin = New-Thickness 0 0 8 0; $dot.VerticalAlignment = 'Center'
     $st = New-Text ''; $st.VerticalAlignment = 'Center'

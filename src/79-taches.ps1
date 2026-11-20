@@ -8,8 +8,8 @@ function Set-SvcMode([string]$Mode) {
     $SvcUI.Mode = $Mode
     $Ui.SvcModeSvc.Tag = $(if ($Mode -eq 'Svc') { 'on' } else { '' }); $Ui.SvcModeTsk.Tag = $(if ($Mode -eq 'Tsk') { 'on' } else { '' })
     $Ui.SvcView.Visibility = $(if ($Mode -eq 'Svc') { 'Visible' } else { 'Collapsed' }); $Ui.TskView.Visibility = $(if ($Mode -eq 'Tsk') { 'Visible' } else { 'Collapsed' })
-    if ($Mode -eq 'Tsk' -and -not $TskUI.Data -and -not $TskUI.Reading) { Start-TskRead }
-    if ($Mode -eq 'Svc' -and -not $SvcUI.Data -and -not $SvcUI.Reading) { Start-SvcRead }
+    if ($Mode -eq 'Tsk' -and -not $TskUI.Fresh -and -not $TskUI.Reading) { Start-TskRead }
+    if ($Mode -eq 'Svc' -and -not $SvcUI.Fresh -and -not $SvcUI.Reading) { Start-SvcRead }
 }
 $Ui.SvcModeSvc.Add_Click({ Set-SvcMode 'Svc' })
 $Ui.SvcModeTsk.Add_Click({ Set-SvcMode 'Tsk' })
@@ -31,7 +31,7 @@ try {
                 $last = [DateTime]$t.LastRunTime; $next = [DateTime]$t.NextRunTime
                 $items.Add([pscustomobject]@{
                     Key = "$($t.Path)"; Name = "$($t.Name)"; Folder = "$($f.Path)"; State = [int]$t.State; Enabled = [bool]$t.Enabled
-                    Last = $(if ($last.Year -gt 1900) { $last } else { $null }); Next = $(if ($next.Year -gt 1900) { $next } else { $null }); Res = [int]$t.LastTaskResult
+                    Last = $(if ($last.Year -gt 1900) { $last.ToString('o') } else { $null }); Next = $(if ($next.Year -gt 1900) { $next.ToString('o') } else { $null }); Res = [int]$t.LastTaskResult
                     Author = $au; Desc = (Get-Ind "$($d.RegistrationInfo.Description)"); Act = ($act -join "`n")
                     Ms = "$($f.Path)" -like '\Microsoft*' -or $au -match '^Microsoft'
                 })
@@ -66,9 +66,10 @@ $Sync.TskActRes = $r
 
 function Start-TskRead {
     if ($TskUI.Reading -or $TskUI.Busy) { return }
+    if (-not $TskUI.Data) { $c = Read-ListCache 'taches'; if ($c -and $c.Items.Count) { $TskUI.Data = $c.Items; $TskUI.Stamp = $c.Stamp; Update-TskList } }
     $TskUI.Reading = $true; $Sync.TskRead = $null
     $Ui.TskProg.IsIndeterminate = $true; $Ui.TskProg.Visibility = 'Visible'; $Ui.TskRefresh.IsEnabled = $false
-    $Ui.TskStatus.Text = 'Lecture des tâches planifiées...'
+    $Ui.TskStatus.Text = $(if ($TskUI.Data) { 'Liste du {0:dd/MM HH:mm} affichée  ·  actualisation en cours...' -f $TskUI.Stamp } else { 'Lecture des tâches planifiées...' })
     if (-not $TskUI.Data) { $Ui.TskEmpty.Text = 'Lecture des tâches planifiées...'; $Ui.TskEmpty.Visibility = 'Visible' }
     Start-BgJob 'TskRead' $TskReadScript
 }
@@ -80,9 +81,14 @@ $BgJobDone['TskRead'] = {
         $Ui.TskStatus.Text = $m; if (-not $TskUI.Data) { $Ui.TskEmpty.Text = $m }
         Write-UiLog $m 'ERROR'; return
     }
-    $TskUI.Data = @($r.Items | Sort-Object Ms, Name); $TskUI.Stamp = $r.Stamp
+    $TskUI.Stamp = $r.Stamp; $TskUI.Fresh = $true
+    Merge-ListData $TskUI 'Key' @($r.Items | Sort-Object Ms, Name) { Update-TskList } { param($k) Set-TskRowLook $k }
+    Update-TskFilter
+    Save-ListCache 'taches' $TskUI.Data $TskUI.Stamp
+}
+function Update-TskList {
     $Ui.TskList.Children.Clear(); $TskUI.Rows = @{}
-    foreach ($t in $TskUI.Data) { [void]$Ui.TskList.Children.Add((New-TskRow $t)) }
+    foreach ($t in @($TskUI.Data | Where-Object { $_ })) { [void]$Ui.TskList.Children.Add((New-TskRow $t)) }
     Update-TskFilter
 }
 # date courte : aujourd'hui / hier / date
@@ -96,13 +102,45 @@ function Get-TskResultText([int]$Res, $Last) {
     if (-not $Last) { return '' }
     switch ($Res) { 0 { 'réussie' } 267009 { 'en cours' } 267011 { 'pas encore lancée' } 267014 { 'arrêtée' } -2147020576 { 'opérateur ou administrateur a refusé' } default { 'code 0x{0:X8}' -f $Res } }
 }
+# importance des tâches : Importante (mise à jour, sécurité, entretien de Windows), Désactivable si..., Windows, Logiciel
+$TskImportant = @('\Microsoft\Windows\WindowsUpdate\*', '\Microsoft\Windows\UpdateOrchestrator\*', '\Microsoft\Windows\Windows Defender\*', '\Microsoft\Windows\TPM\*',
+    '\Microsoft\Windows\BitLocker\*', '\Microsoft\Windows\Time Synchronization\*', '\Microsoft\Windows\WaaSMedic\*', '\Microsoft\Windows\Servicing\*',
+    '\Microsoft\Windows\SoftwareProtectionPlatform\*', '\Microsoft\Windows\Plug and Play\*', '\Microsoft\Windows\TaskScheduler\*', '\Microsoft\Windows\Registry\*',
+    '\Microsoft\Windows\SystemRestore\*', '\Microsoft\Windows\Chkdsk\*', '\Microsoft\Windows\InstallService\*', '\Microsoft\Windows\Shell\*', '\Microsoft\Windows\User Profile Service\*')
+$TskOptional = [ordered]@{
+    '\Microsoft\Windows\Customer Experience Improvement Program\*' = 'télémétrie (programme d''amélioration) : désactivable'
+    '\Microsoft\Windows\Application Experience\*' = 'télémétrie de compatibilité : désactivable'
+    '\Microsoft\Windows\Feedback\Siuf\*' = 'demandes d''avis de Windows : désactivable'
+    '\Microsoft\Windows\DiskDiagnostic\*' = 'diagnostic disque envoyé à Microsoft : désactivable'
+    '\Microsoft\Windows\Autochk\Proxy' = 'télémétrie : désactivable'
+    '\Microsoft\Windows\PI\Sqm-Tasks' = 'télémétrie : désactivable'
+    '\Microsoft\Windows\Windows Error Reporting\*' = 'rapports d''erreurs envoyés à Microsoft : désactivable'
+    '\Microsoft\Windows\CloudExperienceHost\*' = 'suggestions de configuration du compte : désactivable'
+    '\Microsoft\Windows\Maps\*' = 'si l''application Cartes n''est pas utilisée'
+    '\Microsoft\XblGameSave\*' = 'si aucun jeu Xbox / Game Pass'
+    '\Microsoft\Office\Office*Telemetry*' = 'télémétrie d''Office : désactivable'
+    '\Microsoft\Office\OfficeTelemetry*' = 'télémétrie d''Office : désactivable'
+    '\OneDrive*' = 'si OneDrive n''est pas utilisé'
+    '\MicrosoftEdgeUpdate*' = 'à garder : Edge ne serait plus mis à jour'
+    '\GoogleUpdate*' = 'à garder : Google Chrome ne serait plus mis à jour'
+    '\GoogleSystem\*' = 'à garder : Google Chrome ne serait plus mis à jour'
+}
+function Get-TskLevel($T) {
+    foreach ($p in $TskImportant) { if ($T.Key -like $p) { return @{ L = 'Importante'; B = 'ErrFgBrush'; T = 'Mise à jour, sécurité ou entretien de Windows : ne pas désactiver.' } } }
+    foreach ($p in $TskOptional.Keys) {
+        if ($T.Key -like $p) { $c = $TskOptional[$p]; return @{ L = $(if ($c -like 'à garder*') { 'À garder' } else { 'Désactivable' }); B = $(if ($c -like 'à garder*') { 'WarnFgBrush' } else { 'OkFgBrush' }); T = $c.Substring(0, 1).ToUpper() + $c.Substring(1) + '.' } }
+    }
+    if ($T.Ms) { return @{ L = 'Windows'; B = 'MutedBrush'; T = 'Tâche de Windows : à laisser telle quelle sauf besoin précis.' } }
+    @{ L = 'Logiciel'; B = 'AccentBrush'; T = 'Créée par un logiciel (auteur : ' + $(if ($T.Author) { $T.Author } else { 'inconnu' }) + ') : souvent sa recherche de mises à jour ; désactivable si le logiciel ne sert plus ou se met à jour autrement.' }
+}
 function New-TskRow($T) {
     $b = [Windows.Controls.Border]::new(); $b.Style = $Window.FindResource('SvcRow'); $b.Padding = New-Thickness 10 5 6 5; $b.DataContext = $T
     $g = [Windows.Controls.Grid]::new(); foreach ($w in 0, 120, 160, 190, 206) { [void]$g.ColumnDefinitions.Add((New-SvcCol $w)) }
     $np = [Windows.Controls.StackPanel]::new(); $np.Margin = New-Thickness 0 0 10 0; $np.VerticalAlignment = 'Center'
     $t1 = New-Text $T.Name; $t1.FontWeight = [Windows.FontWeights]::SemiBold; $t1.TextTrimming = 'CharacterEllipsis'
-    $t2 = New-Text $T.Folder 'Muted'; $t2.FontSize = 11; $t2.TextTrimming = 'CharacterEllipsis'
-    [void]$np.Children.Add($t1); [void]$np.Children.Add($t2); [void]$g.Children.Add($np)
+    $t2 = New-Text $T.Folder 'Muted'; $t2.FontSize = 11; $t2.TextTrimming = 'CharacterEllipsis'; $t2.TextWrapping = 'NoWrap'
+    $l2 = [Windows.Controls.StackPanel]::new(); $l2.Orientation = 'Horizontal'; [void]$l2.Children.Add($t2); [void]$l2.Children.Add((New-LevelBadge (Get-TskLevel $T)))
+    [void]$np.Children.Add($t1); [void]$np.Children.Add($l2); [void]$g.Children.Add($np)
     $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; $sp.VerticalAlignment = 'Center'
     $dot = [Windows.Shapes.Ellipse]::new(); $dot.Width = 8; $dot.Height = 8; $dot.Margin = New-Thickness 0 0 8 0; $dot.VerticalAlignment = 'Center'
     $st = New-Text ''; $st.VerticalAlignment = 'Center'
@@ -179,7 +217,7 @@ $BgJobDone['TskAct'] = {
         $row = $TskUI.Rows[$b.Key]
         $v = $(switch ($b.Op) { 'run' { 'lancée' } 'stop' { 'arrêtée' } 'disable' { 'désactivée' } default { 'activée' } })
         if ($r.Ok) {
-            if ($row) { $o = $row.Row.DataContext; $o.State = $r.State; $o.Enabled = $r.Enabled; $o.Res = $r.Res; $o.Last = $r.Last; $o.Next = $r.Next }
+            if ($row) { $o = $row.Row.DataContext; $o.State = $r.State; $o.Enabled = $r.Enabled; $o.Res = $r.Res; $o.Last = $(if ($r.Last) { ([DateTime]$r.Last).ToString('o') } else { $null }); $o.Next = $(if ($r.Next) { ([DateTime]$r.Next).ToString('o') } else { $null }) }
             Write-UiLog ('Tâche planifiée « {0} » {1}.' -f $b.Name, $v) 'OK'; Add-SessionEvent 'Réglages' ('Tâche ' + $b.Name) $v 'ok'
         } else {
             Write-UiLog ('Tâche planifiée « {0} » non {1} : {2}' -f $b.Name, $v, $r.Msg) 'ERROR'

@@ -585,9 +585,15 @@ function Update-EnvList {
             # liste : un élément par ligne, dossier introuvable en rouge
             foreach ($it in @($v.Value -split ';' | Where-Object { $_ })) {
                 $ok = $v.Name -eq 'PATHEXT' -or (Test-EnvDir $it)
-                $t = New-Text $(if ($ok) { $it } else { $it + '   (introuvable)' }); $t.TextTrimming = 'CharacterEllipsis'; $t.FontFamily = [Windows.Media.FontFamily]::new('Consolas')
+                $t = New-Text $(if ($ok) { $it } else { $it + '   (dossier introuvable)' }); $t.TextWrapping = 'NoWrap'; $t.TextTrimming = 'CharacterEllipsis'; $t.FontFamily = [Windows.Media.FontFamily]::new('Consolas'); $t.ToolTip = $it
                 if (-not $ok) { $t.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'ErrFgBrush') }
                 [void]$vp.Children.Add($t)
+            }
+            # dossiers introuvables (souvent laissés par une désinstallation) : retrait en un clic, avec récapitulatif
+            $miss = @($v.Value -split ';' | Where-Object { $_ -and $v.Name -ne 'PATHEXT' -and -not (Test-EnvDir $_) })
+            if ($miss.Count) {
+                $cl = New-Button ('Retirer les dossiers introuvables ({0})' -f $miss.Count); $cl.Height = 26; $cl.MinWidth = 0; $cl.Padding = New-Thickness 10 0 10 0; $cl.Margin = New-Thickness 0 6 0 2; $cl.HorizontalAlignment = 'Left'
+                $cl.Tag = @{ P = $path; V = $v }; $cl.Add_Click({ param($s, $e) Remove-EnvMissingDir $s.Tag.P $s.Tag.V }); [void]$vp.Children.Add($cl)
             }
         } else { $t = New-Text $v.Value; $t.TextWrapping = 'Wrap'; $t.FontFamily = [Windows.Media.FontFamily]::new('Consolas'); [void]$vp.Children.Add($t) }
         [void]$g.Children.Add($vp)
@@ -638,6 +644,20 @@ function Edit-EnvVar([string]$Path, $Var) {
     } catch { Show-Info "Enregistrement impossible.`n`n$($_.Exception.Message)" 'Error' }
     Update-EnvView
 }
+function Remove-EnvMissingDir([string]$Path, $Var) {
+    $all = @($Var.Value -split ';' | Where-Object { $_ }); $miss = @($all | Where-Object { -not (Test-EnvDir $_) })
+    if (-not $miss.Count) { return }
+    $where = $(if ($Path -eq $EnvSys) { 'système, tous les comptes' } else { "utilisateur $UserName" })
+    $lines = @($miss | ForEach-Object { '- retiré : ' + $_ })
+    if ((Show-Dialog "Retirer de $($Var.Name) ($where) les dossiers qui n'existent plus ?`n`nCes dossiers ont été supprimés (souvent par la désinstallation d'un logiciel) mais sont restés dans la variable :" 'Question' @(@{ T = 'Annuler'; V = $false; C = $true }, @{ T = 'Retirer'; V = $true; S = 'PrimaryBtn' }) $lines) -ne $true) { return }
+    $value = (@($all | Where-Object { $_ -notin $miss }) -join ';')
+    try {
+        $k = Open-RegKey $Path $true; try { $k.SetValue($Var.Name, $value, $(if ($Var.Kind -eq 'ExpandString' -or $value -match '%[^%]+%') { [Microsoft.Win32.RegistryValueKind]::ExpandString } else { [Microsoft.Win32.RegistryValueKind]::String })) } finally { $k.Close() }
+        [void][_OlivM.Shell]::NotifySettingChange('Environment')
+        Write-UiLog ('{0} ({1}) : {2} dossier(s) introuvable(s) retiré(s) : {3}' -f $Var.Name, $where, $miss.Count, ($miss -join ' ; ')) 'OK'
+    } catch { Show-Info "Modification impossible.`n`n$($_.Exception.Message)" 'Error' }
+    Update-EnvView
+}
 function Remove-EnvVar([string]$Path, $Var) {
     if ($Var.Name -in $EnvProtected) { return }
     $where = $(if ($Path -eq $EnvSys) { 'système, tous les comptes' } else { "utilisateur $UserName" })
@@ -686,7 +706,7 @@ function Update-AccCard($R) {
     $ToolsUI.AccAdmins = @($items | Where-Object { $_.Admin -and $_.Enabled }).Count
     foreach ($a in $items) {
         $me = $a.Sid -in $UserSid, $AccSelf
-        $sub = @($(if ($a.Admin) { 'Administrateur' } else { 'Standard' }), $(if ($a.Ms) { 'compte Microsoft' } elseif ($a.Builtin) { 'compte intégré' } else { 'compte local' }),
+        $sub = @($(if ($a.Admin) { 'Compte administrateur' } else { 'Compte utilisateur standard' }), $(if ($a.Ms) { 'compte Microsoft' } elseif ($a.Builtin) { 'compte intégré' } else { 'compte local' }),
             $(if ($a.Last) { 'connexion ' + (Format-TskDate $a.Last) } else { 'jamais connecté' }), $(if (-not $a.Enabled) { 'désactivé' }), $(if ($me) { 'compte en cours' })) | Where-Object { $_ }
         $mb = New-ToolIconButton 0xE712 'Actions' $a { param($s, $e) Show-AccMenu $s }
         $mb.LayoutTransform = [Windows.Media.RotateTransform]::new(90)
@@ -706,7 +726,7 @@ function Show-AccMenu($Btn) {
         if (-not $On -and $Why) { $mi.ToolTip = $Why; [Windows.Controls.ToolTipService]::SetShowOnDisabled($mi, $true) }
         $mi.Add_Click({ param($s, $e) Invoke-AccAction $s.Tag.A $s.Tag.Op }); [void]$cm.Items.Add($mi) }
     $why = $(if ($me) { 'Compte en cours d''utilisation' } elseif ($lastAdm) { 'Dernier administrateur actif du PC' } else { '' })
-    if ($a.Admin) { & $add 'Rendre standard' 'std' (-not $me -and -not $lastAdm -and -not ($a.Sid -match '-500$')) $why } else { & $add 'Rendre administrateur' 'adm' $true '' }
+    if ($a.Admin) { & $add 'Convertir en compte utilisateur standard' 'std' (-not $me -and -not $lastAdm -and -not ($a.Sid -match '-500$')) $why } else { & $add 'Convertir en compte administrateur' 'adm' $true '' }
     if ($a.Enabled) { & $add 'Désactiver le compte' 'off' (-not $me -and -not $lastAdm) $why } else { & $add 'Activer le compte' 'on' $true '' }
     & $add 'Changer le mot de passe...' 'pwd' (-not $a.Ms) 'Compte Microsoft : mot de passe à changer sur account.microsoft.com'
     [void]$cm.Items.Add([Windows.Controls.Separator]::new())
@@ -737,10 +757,10 @@ function Invoke-AccAction($A, [string]$Op) {
     try {
         Import-Module Microsoft.PowerShell.LocalAccounts -ErrorAction SilentlyContinue
         switch ($Op) {
-            'adm' { if (-not (Confirm-Action "Rendre « $nm » administrateur ?`n`nCe compte pourra installer des logiciels et modifier tout le PC.")) { return }; Add-LocalGroupMember -SID 'S-1-5-32-544' -Member (Get-LocalUser -SID $A.Sid) -ErrorAction Stop; $v = 'administrateur' }
-            'std' { if (-not (Confirm-Action "Rendre « $nm » utilisateur standard ?`n`nIl ne pourra plus modifier le PC sans les identifiants d'un administrateur.")) { return }
+            'adm' { if (-not (Confirm-Action "Convertir « $nm » en compte administrateur ?`n`nCe compte pourra installer des logiciels et modifier tout le PC.")) { return }; Add-LocalGroupMember -SID 'S-1-5-32-544' -Member (Get-LocalUser -SID $A.Sid) -ErrorAction Stop; $v = 'converti en compte administrateur' }
+            'std' { if (-not (Confirm-Action "Convertir « $nm » en compte utilisateur standard ?`n`nIl pourra toujours utiliser le PC et ses logiciels, mais plus installer de logiciel ni modifier les réglages de Windows sans les identifiants d'un administrateur.")) { return }
                     Add-LocalGroupMember -SID 'S-1-5-32-545' -Member (Get-LocalUser -SID $A.Sid) -ErrorAction SilentlyContinue
-                    Remove-LocalGroupMember -SID 'S-1-5-32-544' -Member (Get-LocalUser -SID $A.Sid) -ErrorAction Stop; $v = 'standard' }
+                    Remove-LocalGroupMember -SID 'S-1-5-32-544' -Member (Get-LocalUser -SID $A.Sid) -ErrorAction Stop; $v = 'converti en compte utilisateur standard' }
             'off' { if (-not (Confirm-Action "Désactiver le compte « $nm » ?`n`nPlus aucune ouverture de session possible avec ce compte ; ses fichiers sont conservés. Réactivable ici.")) { return }; Disable-LocalUser -SID $A.Sid -ErrorAction Stop; $v = 'désactivé' }
             'on' { if ($A.Builtin -and -not (Confirm-Action "Activer le compte intégré « $nm » ?`n`n" + $(if ($A.Sid -match '-500$') { 'Compte administrateur intégré : définir un mot de passe solide ensuite, il est souvent ciblé.' } else { 'Compte Invité : accès sans mot de passe au PC.' }))) { return }; Enable-LocalUser -SID $A.Sid -ErrorAction Stop; $v = 'activé' }
             'pwd' { $p = Read-AccPassword "Nouveau mot de passe de « $nm »`n`nLaisser vide pour retirer le mot de passe. Attention : les fichiers chiffrés (EFS) et mots de passe enregistrés par Windows pour ce compte deviennent illisibles." $true $null
