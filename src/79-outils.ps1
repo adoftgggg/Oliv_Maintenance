@@ -266,6 +266,18 @@ function Update-HostsCard {
     $nb = @($p.Block | Where-Object { $_ -match '^0\.0\.0\.0\s' }).Count
     $date = $(if ($p.Block.Count -and $p.Block[0] -match '\((\d{2}/\d{2}/\d{4})\)') { $Matches[1] } else { '' })
     [void](Add-KV $b 'Blocage pubs et traqueurs' $(if ($nb) { '{0:N0} domaines bloqués (liste du {1})' -f $nb, $date } else { 'désactivé' }) $(if ($nb) { 'OkFgBrush' } else { '' }))
+    if ($nb) {
+        # mise à jour de la liste : automatique (tâche hebdomadaire) ou manuelle (bouton Mettre à jour la liste)
+        $auto = [bool](Get-HostsAutoTask); $last = Get-HostsAutoLast
+        [void](Add-KV $b 'Mise à jour de la liste' $(if ($auto) { 'automatique, chaque semaine' + $(if ($last) { "  ·  dernier passage : $last" } else { '' }) } else { 'manuelle (bouton Mettre à jour la liste)' }) $(if ($auto) { '' } else { 'WarnFgBrush' }))
+        $ToolsUI.HostsAuto = Add-SettingsChoice $b 'Actualisation de la liste' 'La liste StevenBlack évolue chaque semaine (nouveaux domaines de pub et de pistage). Automatique : tâche planifiée hebdomadaire, rattrapée au démarrage si le PC était éteint.' ([ordered]@{ On = 'Automatique'; Off = 'Manuelle' }) $(if ($auto) { 'On' } else { 'Off' }) {
+            param($s, $e)
+            $on = "$($s.DataContext)" -eq 'On'
+            try { Set-HostsAuto $on; Write-UiLog $(if ($on) { "Fichier hosts : mise à jour automatique hebdomadaire de la liste activée (tâche \Oliv_Maintenance\$HostsTaskName)." } else { 'Fichier hosts : mise à jour automatique de la liste désactivée.' }) 'APP' }
+            catch { Show-Info "Réglage impossible.`n`n$($_.Exception.Message)" 'Error' }
+            Update-HostsCard
+        }
+    }
     try { [void](Add-KV $b 'Dernière modification' ('{0:dd/MM/yyyy HH:mm}' -f [IO.File]::GetLastWriteTime($HostsFile))) } catch { Write-Ignored 'Date du fichier hosts' $_ }
     # entrées personnelles : une ligne par entrée (nom, effet, commentaire), suppression à l'unité
     $ents = @(Get-HostsEntry $p.Own)
@@ -315,10 +327,54 @@ try {
 } catch { $r.Error = $_.Exception.Message }
 $Sync.HostsDl = $r
 '@
+# ---- mise à jour automatique de la liste de blocage : tâche planifiée hebdomadaire (compte SYSTEM, rattrapée au
+# démarrage si le PC était éteint, seulement avec un réseau) ; script dans ProgramData\Oliv_Maintenance\Outils (écriture
+# réservée aux administrateurs), journal hosts-maj.log à côté. Sans effet si le blocage a été retiré.
+$HostsTaskName = 'Mise à jour du blocage pubs et traqueurs (hosts)'
+$HostsAutoDir = Join-Path $env:ProgramData 'Oliv_Maintenance\Outils'
+$HostsAutoScript = Join-Path $HostsAutoDir 'hosts-maj.ps1'
+$HostsAutoCode = @'
+$h = Join-Path $env:windir 'System32\drivers\etc\hosts'; $log = Join-Path $PSScriptRoot 'hosts-maj.log'
+$A = '# >>> Oliv_Maintenance : blocage pubs et traqueurs'; $B = '# <<< Oliv_Maintenance'; $url = 'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts'
+function Write-Line([string]$M) { Add-Content -LiteralPath $log -Value ('{0:yyyy-MM-dd HH:mm} {1}' -f (Get-Date), $M) -Encoding UTF8 }
+try {
+    $txt = [IO.File]::ReadAllText($h)
+    if (-not $txt.Contains($A)) { Write-Line 'blocage non actif : rien à faire'; exit 0 }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $t = (New-Object Net.WebClient).DownloadString($url)
+    $l = @($t -split "`r?`n" | Where-Object { $_ -match '^0\.0\.0\.0\s+[^\s#]+' -and $_ -notmatch '^0\.0\.0\.0\s+0\.0\.0\.0' } | ForEach-Object { ($_ -replace '\s*#.*$', '').Trim() } | Select-Object -Unique)
+    if ($l.Count -lt 1000) { throw "liste inattendue ($($l.Count) entrées)" }
+    $own = [Collections.Generic.List[string]]::new(); $in = $false
+    foreach ($x in ($txt -split "`r?`n")) { if ($x.StartsWith($A)) { $in = $true; continue }; if ($in) { if ($x.StartsWith($B)) { $in = $false }; continue }; [void]$own.Add($x) }
+    $blk = @("$A ($((Get-Date).ToString('dd/MM/yyyy'))) - source : $url - ne pas modifier") + $l + @($B)
+    $fi = [IO.FileInfo]::new($h); if ($fi.IsReadOnly) { $fi.IsReadOnly = $false }
+    [IO.File]::WriteAllText($h, (($own -join "`r`n").TrimEnd() + "`r`n`r`n" + ($blk -join "`r`n") + "`r`n"), [Text.Encoding]::ASCII)
+    try { Clear-DnsClientCache } catch { $null = $_ }
+    Write-Line ('liste mise à jour : {0} domaines bloqués' -f $l.Count)
+} catch { Write-Line ('échec : ' + $_.Exception.Message); exit 1 }
+'@
+function Get-HostsAutoTask { try { $svc = New-Object -ComObject Schedule.Service; $svc.Connect(); $svc.GetFolder('\Oliv_Maintenance').GetTask($HostsTaskName) } catch { $null } }
+function Set-HostsAuto([bool]$On) {
+    $svc = New-Object -ComObject Schedule.Service; $svc.Connect()
+    $f = $null; try { $f = $svc.GetFolder('\Oliv_Maintenance') } catch { if ($On) { $f = $svc.GetFolder('\').CreateFolder('Oliv_Maintenance') } }
+    if (-not $On) { if ($f) { try { $f.DeleteTask($HostsTaskName, 0) } catch { $null = $_ } }; return }
+    [void][IO.Directory]::CreateDirectory($HostsAutoDir); [IO.File]::WriteAllText($HostsAutoScript, $HostsAutoCode, [Text.UTF8Encoding]::new($true))
+    $td = $svc.NewTask(0)
+    $td.RegistrationInfo.Description = 'Met à jour chaque semaine la liste StevenBlack/hosts ajoutée au fichier hosts par Oliv_Maintenance (Outils > Fichier hosts).'
+    $td.Settings.StartWhenAvailable = $true; $td.Settings.RunOnlyIfNetworkAvailable = $true; $td.Settings.ExecutionTimeLimit = 'PT30M'
+    $td.Settings.DisallowStartIfOnBatteries = $false; $td.Settings.StopIfGoingOnBatteries = $false
+    $tr = $td.Triggers.Create(2); $tr.DaysInterval = 7; $tr.StartBoundary = (Get-Date).Date.AddDays(1).AddHours(12).ToString('yyyy-MM-ddTHH:mm:ss')
+    $td.Principal.UserId = 'S-1-5-18'; $td.Principal.LogonType = 5; $td.Principal.RunLevel = 1
+    $ac = $td.Actions.Create(0); $ac.Path = Join-Path $env:windir 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $ac.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f $HostsAutoScript
+    [void]$f.RegisterTaskDefinition($HostsTaskName, $td, 6, 'SYSTEM', $null, 5)
+}
+function Get-HostsAutoLast { try { $l = @(Get-Content -LiteralPath (Join-Path $HostsAutoDir 'hosts-maj.log') -Encoding UTF8 -Tail 1); "$($l[-1])" } catch { '' } }
 function Start-HostsBlock([bool]$On) {
     if (-not $On) {
         if (-not (Confirm-Action 'Retirer le blocage des pubs et traqueurs du fichier hosts ?')) { return }
         try { $p = Split-HostsContent (Read-HostsFile); Write-HostsFile $p.Own @(); Write-UiLog 'Fichier hosts : blocage des pubs et traqueurs retiré.' 'OK' } catch { Show-Info "Écriture du fichier hosts impossible.`n`n$($_.Exception.Message)" 'Error' }
+        try { Set-HostsAuto $false } catch { Write-Ignored 'Tâche de mise à jour du fichier hosts' $_ }
         Update-HostsCard; return
     }
     if ($BgJobs.ContainsKey('Hosts')) { return }
@@ -339,6 +395,8 @@ $BgJobDone['Hosts'] = {
         Write-HostsFile $p.Own $blk
         $chg = $(if ($old.Count) { '{0:N0} domaines ajoutés, {1:N0} retirés depuis la liste précédente' -f $plus, $moins } else { 'blocage activé' })
         Write-UiLog ('Fichier hosts : {0:N0} domaines de pubs et traqueurs bloqués ({1}).' -f $r.Lines.Count, $chg) 'OK'
+        # 1re activation : mise à jour automatique hebdomadaire mise en place d'office (désactivable dans la carte)
+        if (-not $old.Count -and -not (Get-HostsAutoTask)) { try { Set-HostsAuto $true; Write-UiLog 'Fichier hosts : mise à jour automatique hebdomadaire de la liste activée.' 'APP' } catch { Write-Ignored 'Tâche de mise à jour du fichier hosts' $_ } }
         Show-Info ("Liste de blocage à jour : {0:N0} domaines bloqués.`n`n{1}. Vos entrées personnelles ne sont pas modifiées." -f $r.Lines.Count, $chg.Substring(0, 1).ToUpper() + $chg.Substring(1)) 'Ok'; Add-SessionEvent 'Réglages' 'Blocage pubs et traqueurs (hosts)' ('{0:N0} domaines' -f $r.Lines.Count) 'ok'
     } catch { Write-UiLog "Fichier hosts : $($_.Exception.Message)" 'ERROR'; Show-Info "Écriture du fichier hosts impossible (antivirus ?).`n`n$($_.Exception.Message)" 'Error' }
     Update-HostsCard

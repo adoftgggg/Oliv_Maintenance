@@ -117,11 +117,13 @@ function Save-ListCache([string]$Name, $Items, $Stamp) {
     $f = Join-Path (Get-LogPath 'Etat') "liste-$Name.json"
     try { ConvertTo-Json -InputObject @{ Stamp = ([DateTime]$Stamp).ToString('o'); Items = @($Items) } -Depth 3 -Compress | Set-Content -LiteralPath $f -Encoding UTF8 } catch { Write-Ignored "Liste enregistrée ($Name)" $_ }
 }
-function Merge-ListData($UI, [string]$KeyProp, $New, [scriptblock]$Rebuild, [scriptblock]$Look) {
-    $nk = @($New | ForEach-Object { "$($_.$KeyProp)" } | Sort-Object); $ok = @($UI.Data | Where-Object { $_ } | ForEach-Object { "$($_.$KeyProp)" } | Sort-Object)
-    if (-not $UI.Rows -or -not $UI.Rows.Count -or ($nk -join '|') -ne ($ok -join '|')) { $UI.Data = @($New); & $Rebuild; return }
+# (paramètre $ListUI et non $UI : PowerShell ne distingue pas la casse, $UI masquerait $Ui de la fenêtre principale
+# pour les fonctions appelées pendant la fusion)
+function Merge-ListData($ListUI, [string]$KeyProp, $New, [scriptblock]$Rebuild, [scriptblock]$Look) {
+    $nk = @($New | ForEach-Object { "$($_.$KeyProp)" } | Sort-Object); $ok = @($ListUI.Data | Where-Object { $_ } | ForEach-Object { "$($_.$KeyProp)" } | Sort-Object)
+    if (-not $ListUI.Rows -or -not $ListUI.Rows.Count -or ($nk -join '|') -ne ($ok -join '|')) { $ListUI.Data = @($New); & $Rebuild; return }
     foreach ($n in $New) {
-        $k = "$($n.$KeyProp)"; $r = $UI.Rows[$k]; if (-not $r) { continue }
+        $k = "$($n.$KeyProp)"; $r = $ListUI.Rows[$k]; if (-not $r) { continue }
         $o = $r.Row.DataContext
         foreach ($p in $n.PSObject.Properties) { $o | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value -Force }
         & $Look $k
