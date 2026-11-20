@@ -98,6 +98,15 @@ function Complete-Run {
         # (bouton Rechercher, libellé « Nouvelle recherche » tant que le bilan est affiché)
         $its = @($Sync.SoftRun.Items.Values)
         $SoftUI.Done = @{ Ok = @($its | Where-Object { $_.State -in 'ok', 'pend' }).Count; Fail = @($its | Where-Object { $_.State -eq 'fail' }).Count; Skip = @($its | Where-Object { $_.State -in 'skip', 'wait' }).Count }
+        # logiciels désinstallés (absents de l'inventaire après coup) : retirés tout de suite de la liste et de l'inventaire enregistré
+        $gone = @($its | Where-Object { $_.Removed } | ForEach-Object { "$($_.Id)" })
+        if ($gone.Count -and $Sync.WgResult -and $Sync.WgResult.Apps) {
+            $Sync.WgResult.Apps = @($Sync.WgResult.Apps | Where-Object { "$($_.Id)" -notin $gone })
+            foreach ($g in $gone) { [void]$Sync.SoftRun.Items.Remove($g) }
+            try { $o = @{} + $Sync.WgResult; $o.Stamp = ([DateTime]$Sync.WgResult.Stamp).ToString('o'); ConvertTo-Json -InputObject $o -Depth 4 | Set-Content -LiteralPath $SoftFile -Encoding UTF8 } catch { Write-Ignored 'Inventaire des logiciels' $_ }
+            $SoftUI.CacheStamp = $null
+            Write-UiLog ('Retiré(s) de la liste : {0} logiciel(s) désinstallé(s).' -f $gone.Count) 'APP'
+        }
         $SoftUI.Stale = $true; Update-SoftCard
         if ($SoftUI.Win) { Update-SoftView }
     }

@@ -126,6 +126,18 @@ function New-SettingsPage {
         foreach ($b in $SetUI.TrayClose) { $b.Tag = $(if ($b.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
         Write-UiLog $(if ($Tray.Close) { 'Bouton Fermer : réduit dans la zone de notification.' } else { 'Bouton Fermer : ferme l''application.' }) 'APP'
     }
+    $SetUI.AutoStart = Add-SettingsChoice $c.Body 'Ouverture de session' ('Ouvre Oliv_Maintenance à l''ouverture de session de ' + ("$UserName" -split '\\')[-1] + ', sans demande d''autorisation (tâche planifiée aux droits administrateur).') ([ordered]@{ Off = 'Désactivée'; On = 'Activée' }) $(if (Get-AutoStartTask) { 'On' } else { 'Off' }) {
+        param($s, $e)
+        $on = "$($s.DataContext)" -eq 'On'
+        try { Set-AutoStart $on } catch { Write-UiLog "Ouverture de session : $($_.Exception.Message)" 'ERROR'; Show-Info "Réglage impossible.`n`n$($_.Exception.Message)" 'Error'; return }
+        foreach ($b in $SetUI.AutoStart) { $b.Tag = $(if ($b.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
+        Write-UiLog $(if ($on) { "Lancement à l'ouverture de session activé (tâche \Oliv_Maintenance\$AutoTaskName, exe $StableExe)." } else { 'Lancement à l''ouverture de session désactivé.' }) 'APP'
+    }
+    $lb = [Windows.Controls.WrapPanel]::new(); $lb.Margin = New-Thickness 46 0 10 14
+    $b1 = New-Button 'Épingler à la barre des tâches...'; $b1.Height = 30; $b1.Margin = New-Thickness 0 0 8 4; $b1.Add_Click({ Request-TaskbarPin })
+    $b2 = New-Button 'Raccourci dans le menu Démarrer'; $b2.Height = 30; $b2.Margin = New-Thickness 0 0 8 4
+    $b2.Add_Click({ try { New-StartMenuShortcut; Write-UiLog "Raccourci du menu Démarrer créé : $StartLnk." 'OK'; Show-Info 'Raccourci Oliv_Maintenance ajouté au menu Démarrer (Toutes les applications).' 'Ok' } catch { Show-Info "Raccourci impossible.`n`n$($_.Exception.Message)" 'Error' } })
+    [void]$lb.Children.Add($b1); [void]$lb.Children.Add($b2); [void]$c.Body.Children.Add($lb)
     & $setCell $c 0 2
 
     $c = New-Card 'Restauration des réglages' '' ([string][char]0xE777)

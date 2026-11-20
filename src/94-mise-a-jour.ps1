@@ -108,7 +108,10 @@ $BgJobDone['UpdDl'] = {
     if (-not $p.Old) { Start-Process explorer.exe -ArgumentList ('/select,"{0}"' -f $p.Dest); $Ui.UpdBar.Visibility = 'Collapsed'; return }
     if (-not (Confirm-Action "Mise à jour prête.`n`nL'application se ferme puis s'ouvre dans sa nouvelle version (quelques secondes).")) { $Ui.UpdBar.Visibility = 'Collapsed'; return }
     $same = [string]::Equals($p.Old, $p.Dest, [StringComparison]::OrdinalIgnoreCase)
-    $cmd = 'timeout /t 3 /nobreak >nul' + $(if (-not $same) { ' & del /f /q "{0}"' -f $p.Old } else { '' }) + (' & start "" "{0}"' -f $p.Dest)
+    $stable = [string]::Equals($p.Old, $StableExe, [StringComparison]::OrdinalIgnoreCase)
+    # lancé par l'exe stable (raccourci, ouverture de session) : nouvelle version copiée à sa place, raccourcis inchangés
+    $cmd = $(if ($stable) { 'timeout /t 3 /nobreak >nul & copy /y "{0}" "{1}" >nul & del /f /q "{0}" & start "" "{1}"' -f $p.Dest, $StableExe }
+        else { 'timeout /t 3 /nobreak >nul' + $(if (-not $same) { ' & del /f /q "{0}"' -f $p.Old } else { '' }) + (' & start "" "{0}"' -f $p.Dest) })
     Start-Process -FilePath (Join-Path $env:windir 'System32\cmd.exe') -ArgumentList @('/c', $cmd) -WindowStyle Hidden
     Write-UiLog 'Fermeture pour mise à jour.' 'APP'
     $Tray.Quit = $true; $Window.Close()

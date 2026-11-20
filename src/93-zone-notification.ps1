@@ -66,19 +66,64 @@ function Exit-FromTray {
     if ($Window.IsVisible) { $Tray.Quit = $false }
 }
 
-# Lancement à l'ouverture de session (0.118.0, retiré en 0.118.1) : tâche planifiée créée par cette version supprimée
-function Remove-AutoStartTask {
+# ---------- Lancement à l'ouverture de session, raccourci du menu Démarrer, épinglage
+# Exe stable : copie de l'exe en cours dans C:\ProgramData\Oliv_Maintenance\Oliv_Maintenance.exe (écriture réservée aux
+# administrateurs) ; tâche planifiée et raccourcis pointent dessus, sans dépendre du nom versionné de l'exe téléchargé.
+# Tâche \Oliv_Maintenance\<nom> : déclencheur ouverture de session du compte ciblé (10 s après), droits les plus élevés
+# (pas d'invite UAC au démarrage), action = exe stable.
+$StableExe = Join-Path $env:ProgramData 'Oliv_Maintenance\Oliv_Maintenance.exe'
+$StartLnk = Join-Path $UserProfilePath 'AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Oliv_Maintenance.lnk'
+function Sync-StableExe {
+    $cur = "$env:_OLIVM_EXE"
+    if (-not $cur -or -not (Test-Path -LiteralPath $cur)) { return (Test-Path -LiteralPath $StableExe) }
+    if ([string]::Equals([IO.Path]::GetFullPath($cur), $StableExe, [StringComparison]::OrdinalIgnoreCase)) { return $true }
     try {
-        $svc = New-Object -ComObject Schedule.Service; $svc.Connect()
-        $f = $null; try { $f = $svc.GetFolder('\Oliv_Maintenance') } catch { return }
-        $t = $null; try { $t = $f.GetTask($AutoTaskName) } catch { return }
-        if ($t) { $f.DeleteTask($AutoTaskName, 0); Write-UiLog "Tâche planifiée \Oliv_Maintenance\$AutoTaskName (lancement à l'ouverture de session) supprimée." 'APP' }
-    } catch { Write-Ignored 'Suppression du lancement à l''ouverture de session' $_ }
+        $same = (Test-Path -LiteralPath $StableExe) -and ((Get-FileHash -LiteralPath $StableExe -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $cur -Algorithm SHA256).Hash)
+        if (-not $same) { Copy-Item -LiteralPath $cur -Destination $StableExe -Force -ErrorAction Stop }
+        $true
+    } catch { Write-Ignored 'Copie de l''exe dans ProgramData' $_; Test-Path -LiteralPath $StableExe }
+}
+function Get-AutoStartTask {
+    try { $svc = New-Object -ComObject Schedule.Service; $svc.Connect(); $f = $svc.GetFolder('\Oliv_Maintenance'); $f.GetTask($AutoTaskName) } catch { $null }
+}
+function Set-AutoStart([bool]$On) {
+    $svc = New-Object -ComObject Schedule.Service; $svc.Connect()
+    $f = $null; try { $f = $svc.GetFolder('\Oliv_Maintenance') } catch { if ($On) { $f = $svc.GetFolder('\').CreateFolder('Oliv_Maintenance') } }
+    if (-not $On) { if ($f) { try { $f.DeleteTask($AutoTaskName, 0) } catch { $null = $_ } }; return }
+    if (-not (Sync-StableExe)) { throw 'exe de l''application introuvable (lancement par le fichier .cmd : utiliser l''exe)' }
+    $acct = $(if ($HkuSidOk) { $UserName } else { [Security.Principal.WindowsIdentity]::GetCurrent().Name })
+    $td = $svc.NewTask(0)
+    $td.RegistrationInfo.Description = 'Ouvre Oliv_Maintenance à l''ouverture de session (réglage Paramètres > Démarrage et fermeture).'
+    $td.Settings.ExecutionTimeLimit = 'PT0S'; $td.Settings.DisallowStartIfOnBatteries = $false; $td.Settings.StopIfGoingOnBatteries = $false; $td.Settings.MultipleInstances = 2
+    $tr = $td.Triggers.Create(9); $tr.UserId = $acct; $tr.Delay = 'PT10S'
+    $td.Principal.UserId = $acct; $td.Principal.LogonType = 3; $td.Principal.RunLevel = 1
+    $ac = $td.Actions.Create(0); $ac.Path = $StableExe
+    [void]$f.RegisterTaskDefinition($AutoTaskName, $td, 6, $acct, $null, 3)
+}
+# au démarrage : exe stable à jour ; tâche existante ramenée sur l'exe stable (anciennes versions : nom versionné)
+function Update-AutoStart {
+    $ok = Sync-StableExe
+    $t = Get-AutoStartTask; if (-not $t) { return }
+    try { $p = "$(@($t.Definition.Actions)[0].Path)"; if ($ok -and $p -ne $StableExe) { Set-AutoStart $true; Write-UiLog 'Lancement à l''ouverture de session : tâche mise à jour.' 'APP' } } catch { Write-Ignored 'Lancement à l''ouverture de session' $_ }
+}
+function New-StartMenuShortcut {
+    if (-not (Sync-StableExe)) { throw 'exe de l''application introuvable (lancement par le fichier .cmd : utiliser l''exe)' }
+    [void][IO.Directory]::CreateDirectory((Split-Path $StartLnk))
+    $ws = New-Object -ComObject WScript.Shell; $l = $ws.CreateShortcut($StartLnk)
+    $l.TargetPath = $StableExe; $l.WorkingDirectory = Split-Path $StableExe; $l.IconLocation = "$StableExe,0"; $l.Description = 'Oliv_Maintenance : maintenance et réglages de Windows'; $l.Save()
+}
+# épinglage : Windows ne permet à aucun programme de s'épingler lui-même ; raccourci du menu Démarrer créé, puis
+# affiché dans l'Explorateur avec la marche à suivre (clic droit > Épingler à la barre des tâches)
+function Request-TaskbarPin {
+    try { New-StartMenuShortcut } catch { Show-Info "Raccourci impossible.`n`n$($_.Exception.Message)" 'Error'; return }
+    Write-UiLog "Raccourci du menu Démarrer : $StartLnk." 'APP'
+    Start-Process explorer.exe -ArgumentList ('/select,"{0}"' -f $StartLnk)
+    Show-Info "Épingler Oliv_Maintenance à la barre des tâches`n`nWindows réserve l'épinglage à l'utilisateur : aucun programme ne peut s'épingler lui-même. Dans la fenêtre de l'Explorateur qui vient de s'ouvrir, le raccourci Oliv_Maintenance est sélectionné : clic droit dessus > Afficher plus d'options > Épingler à la barre des tâches. Autre chemin : menu Démarrer > Toutes les applications > Oliv_Maintenance > clic droit > Épingler à la barre des tâches. Le raccourci suit les mises à jour de l'application." 'Info'
 }
 
 function Start-MainWindow {
     try { Read-TraySetting } catch { Write-Ignored 'Réglages de la zone de notification' $_ }
     if ($Tray.Min -or $Tray.Close) { [void](Initialize-AppNotifier) }
     $Window.Show()
-    [void]$Window.Dispatcher.BeginInvoke([Action]{ Remove-AutoStartTask }, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
+    [void]$Window.Dispatcher.BeginInvoke([Action]{ try { Update-AutoStart } catch { Write-Ignored 'Lancement à l''ouverture de session' $_ } }, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
 }

@@ -874,7 +874,12 @@ function Invoke-SoftRemoveItem($X, $Wg) {
         $state = 'fail'
         Write-TaskLog ('Désinstallation en échec : code {0} (0x{0:X8}){1}.' -f $rc, $(if ($re) { ', logiciel non réinstallé' } else { '' })) 'WARN'
     } elseif (-not $re) {
-        $note = 'désinstallé'; Write-TaskLog 'Désinstallé.' 'OK'
+        # contrôle : logiciel encore inventorié par winget (désinstalleur de l'éditeur ouvert à part, installation pour un
+        # autre compte...) = signalé, ligne gardée ; absent = ligne retirée de la liste dès la fin de la tâche
+        $still = $false
+        try { Import-Module Microsoft.WinGet.Client -ErrorAction Stop; $still = @(Get-WinGetPackage -Id "$($X.LocalId)" -MatchOption Equals -ErrorAction Stop).Count -gt 0 } catch { Write-Ignored 'Contrôle après désinstallation' $_ }
+        if ($still) { $note = 'encore présent'; Write-TaskLog 'Désinstallation lancée (code 0), mais le logiciel est toujours inventorié : terminer son désinstalleur s''il est ouvert, ou le désinstaller depuis Paramètres > Applications.' 'WARN' }
+        else { $note = 'désinstallé'; Set-SoftItem $id @{ Removed = $true }; Write-TaskLog 'Désinstallé (absent de l''inventaire).' 'OK' }
     } else {
         Write-TaskLog 'Désinstallé, réinstallation...'
         $pkg = "$id"; $src = @()
@@ -899,7 +904,7 @@ function Invoke-SoftRemoveItem($X, $Wg) {
             }
         }
     }
-    if ($state -eq 'ok') { $Sync.SoftRun.Ok++; Set-SoftItem $id @{ State = 'ok'; Note = $note; NoteBrush = 'OkFgBrush'; Phase = ''; Pct = 100; End = [DateTime]::Now } }
+    if ($state -eq 'ok') { $Sync.SoftRun.Ok++; Set-SoftItem $id @{ State = 'ok'; Note = $note; NoteBrush = $(if ($note -eq 'encore présent') { 'WarnFgBrush' } else { 'OkFgBrush' }); Phase = ''; Pct = 100; End = [DateTime]::Now } }
     else { $Sync.SoftRun.Fail++; Set-SoftItem $id @{ State = 'fail'; Code = $rc; End = [DateTime]::Now } }
     try {
         $rec = @{ Date = (Get-Date).ToString('o'); Name = "$($X.Name)"; Id = $id; From = "$($X.From)"; To = $(if ($note) { $note } elseif ($re) { 'réinstallation' } else { 'désinstallation' }); Ok = ($state -eq 'ok'); Code = [int64]$rc; User = "$env:USERNAME"; Computer = "$env:COMPUTERNAME" }

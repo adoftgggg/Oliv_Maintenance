@@ -150,6 +150,8 @@ $Timer.Add_Tick({
     # notifications relevées au plus 1 s plus tard)
     # nouvelle ouverture de l'application (instance unique) : fenêtre existante ramenée au premier plan
     if ($AppShowEvent.WaitOne(0)) { Invoke-TickStep 'ouverture de la fenêtre' { Show-MainWindow } }
+    # autre version lancée, fermeture acceptée : fermeture normale (avertissement si une tâche tourne)
+    if ($AppQuitEvent.WaitOne(0)) { Invoke-TickStep 'fermeture pour une autre version' { Write-UiLog 'Fermeture demandée par une autre version de l''application.' 'APP'; $Tray.Quit = $true; Show-MainWindow; $Window.Close(); if ($Window.IsVisible) { $Tray.Quit = $false } } }
     if (($Window.WindowState -eq 'Minimized' -or -not $Window.IsVisible) -and -not $Sync.Running -and $Sync.Tick % 4) { return }
     Invoke-TickStep 'journal' { Receive-LogQueue }
     Invoke-TickStep 'informations du poste' { Watch-InfoRequest }
