@@ -198,7 +198,9 @@ function New-HelpMark([string]$Text) {
     $b.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'AccentBrush')
     $q = New-Text '?'; $q.FontSize = 11; $q.FontWeight = [Windows.FontWeights]::SemiBold; $q.HorizontalAlignment = 'Center'; $q.VerticalAlignment = 'Center'; $q.Margin = New-Thickness 0 -1 0 0
     $q.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'AccentBrush'); $b.Child = $q
-    $tt = [Windows.Controls.ToolTip]::new(); $tx = New-Text $Text; $tx.MaxWidth = 460; $tt.Content = $tx
+    # contenu = texte brut : le style global des infobulles l'affiche dans un TextBlock enveloppé (un TextBlock passé en contenu
+    # s'affichait « System.Windows.Controls.TextBlock »)
+    $tt = [Windows.Controls.ToolTip]::new(); $tt.Content = $Text
     $b.ToolTip = $tt; [Windows.Controls.ToolTipService]::SetShowDuration($b, 60000); [Windows.Controls.ToolTipService]::SetInitialShowDelay($b, 150)
     $b.Add_MouseLeftButtonDown({ param($s, $e) $e.Handled = $true })
     $b.Add_MouseLeftButtonUp({ param($s, $e) $t = $s.ToolTip; $t.PlacementTarget = $s; $t.IsOpen = -not $t.IsOpen; $e.Handled = $true })
