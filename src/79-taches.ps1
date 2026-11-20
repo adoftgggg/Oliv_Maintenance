@@ -83,12 +83,14 @@ $BgJobDone['TskRead'] = {
     }
     $TskUI.Stamp = $r.Stamp; $TskUI.Fresh = $true
     Merge-ListData $TskUI 'Key' @($r.Items | Sort-Object Ms, Name) { Update-TskList } { param($k) Set-TskRowLook $k }
+    if ($TskUI.SortKey -in 'State', 'Last', 'Next') { Set-TskOrder }
     Update-TskFilter
     Save-ListCache 'taches' $TskUI.Data $TskUI.Stamp
 }
 function Update-TskList {
     $Ui.TskList.Children.Clear(); $TskUI.Rows = @{}
     foreach ($t in @($TskUI.Data | Where-Object { $_ })) { [void]$Ui.TskList.Children.Add((New-TskRow $t)) }
+    Set-TskOrder
     Update-TskFilter
 }
 # date courte : aujourd'hui / hier / date
@@ -135,29 +137,29 @@ function Get-TskLevel($T) {
 }
 function New-TskRow($T) {
     $b = [Windows.Controls.Border]::new(); $b.Style = $Window.FindResource('SvcRow'); $b.Padding = New-Thickness 10 5 6 5; $b.DataContext = $T
-    $g = [Windows.Controls.Grid]::new(); foreach ($w in 0, 120, 160, 190, 206) { [void]$g.ColumnDefinitions.Add((New-SvcCol $w)) }
+    $g = [Windows.Controls.Grid]::new(); foreach ($w in $SvcColW) { [void]$g.ColumnDefinitions.Add((New-SvcCol $w)) }
     $np = [Windows.Controls.StackPanel]::new(); $np.Margin = New-Thickness 0 0 10 0; $np.VerticalAlignment = 'Center'
-    $t1 = New-Text $T.Name; $t1.FontWeight = [Windows.FontWeights]::SemiBold; $t1.TextTrimming = 'CharacterEllipsis'
+    $t1 = New-Text $T.Name; $t1.FontWeight = [Windows.FontWeights]::SemiBold; $t1.TextTrimming = 'CharacterEllipsis'; $t1.TextWrapping = 'NoWrap'
+    $help = (@($T.Desc, $(if ($T.Author) { 'Auteur : ' + $T.Author }), $(if ($T.Act) { "Action :`n" + $T.Act })) | Where-Object { $_ }) -join "`n`n"
     $t2 = New-Text $T.Folder 'Muted'; $t2.FontSize = 11; $t2.TextTrimming = 'CharacterEllipsis'; $t2.TextWrapping = 'NoWrap'
-    $l2 = [Windows.Controls.StackPanel]::new(); $l2.Orientation = 'Horizontal'; [void]$l2.Children.Add($t2); [void]$l2.Children.Add((New-LevelBadge (Get-TskLevel $T)))
-    [void]$np.Children.Add($t1); [void]$np.Children.Add($l2); [void]$g.Children.Add($np)
+    [void]$np.Children.Add((New-LabelWithHelp $t1 $help)); [void]$np.Children.Add($t2); [void]$g.Children.Add($np)
+    $lv = Get-TskLevel $T; $lb = New-LevelCell $lv; [Windows.Controls.Grid]::SetColumn($lb, 1); [void]$g.Children.Add($lb)
     $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; $sp.VerticalAlignment = 'Center'
     $dot = [Windows.Shapes.Ellipse]::new(); $dot.Width = 8; $dot.Height = 8; $dot.Margin = New-Thickness 0 0 8 0; $dot.VerticalAlignment = 'Center'
     $st = New-Text ''; $st.VerticalAlignment = 'Center'
-    [void]$sp.Children.Add($dot); [void]$sp.Children.Add($st); [Windows.Controls.Grid]::SetColumn($sp, 1); [void]$g.Children.Add($sp)
+    [void]$sp.Children.Add($dot); [void]$sp.Children.Add($st); [Windows.Controls.Grid]::SetColumn($sp, 2); [void]$g.Children.Add($sp)
     $lp = [Windows.Controls.StackPanel]::new(); $lp.VerticalAlignment = 'Center'; $lp.Margin = New-Thickness 0 0 8 0
     $l1 = New-Text ''; $l2 = New-Text '' 'Muted'; $l2.FontSize = 11
-    [void]$lp.Children.Add($l1); [void]$lp.Children.Add($l2); [Windows.Controls.Grid]::SetColumn($lp, 2); [void]$g.Children.Add($lp)
-    $nx = New-Text ''; $nx.VerticalAlignment = 'Center'; [Windows.Controls.Grid]::SetColumn($nx, 3); [void]$g.Children.Add($nx)
+    [void]$lp.Children.Add($l1); [void]$lp.Children.Add($l2); [Windows.Controls.Grid]::SetColumn($lp, 3); [void]$g.Children.Add($lp)
+    $nx = New-Text ''; $nx.VerticalAlignment = 'Center'; [Windows.Controls.Grid]::SetColumn($nx, 4); [void]$g.Children.Add($nx)
     $bp = [Windows.Controls.StackPanel]::new(); $bp.Orientation = 'Horizontal'; $bp.HorizontalAlignment = 'Right'; $bp.VerticalAlignment = 'Center'
     $b1 = New-Button 'Lancer'; $b2 = New-Button 'Désactiver'
     foreach ($x in $b1, $b2) { $x.Width = 98; $x.MinWidth = 0; $x.Height = 28; $x.Padding = New-Thickness 6 0 6 0; $x.Margin = New-Thickness 4 0 0 0; $x.Tag = $T.Key; [void]$bp.Children.Add($x) }
     $b1.Add_Click({ param($s, $e) Invoke-TskAction "$($s.Tag)" "$($s.DataContext)" })
     $b2.Add_Click({ param($s, $e) Invoke-TskAction "$($s.Tag)" "$($s.DataContext)" })
-    [Windows.Controls.Grid]::SetColumn($bp, 4); [void]$g.Children.Add($bp)
+    [Windows.Controls.Grid]::SetColumn($bp, 5); [void]$g.Children.Add($bp)
     $b.Child = $g
-    $b.ToolTip = (@($T.Desc, $(if ($T.Author) { 'Auteur : ' + $T.Author }), $(if ($T.Act) { "Action :`n" + $T.Act })) | Where-Object { $_ }) -join "`n`n"
-    $TskUI.Rows[$T.Key] = @{ Row = $b; Dot = $dot; State = $st; L1 = $l1; L2 = $l2; Next = $nx; B1 = $b1; B2 = $b2 }
+    $TskUI.Rows[$T.Key] = @{ Row = $b; Dot = $dot; State = $st; L1 = $l1; L2 = $l2; Next = $nx; B1 = $b1; B2 = $b2; Level = $lv }
     Set-TskRowLook $T.Key
     $b
 }
@@ -239,3 +241,20 @@ $Ui.TskFind.Add_GotKeyboardFocus({ $Ui.TskFindBox.SetResourceReference([Windows.
 $Ui.TskFind.Add_LostKeyboardFocus({ $Ui.TskFindBox.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'LineBrush') })
 $Ui.TskFindBox.Add_MouseLeftButtonDown({ [void]$Ui.TskFind.Focus() })
 $Ui.TskScroll.Add_SizeChanged({ $sb = [math]::Max([double]0, $Ui.TskScroll.ActualWidth - $Ui.TskScroll.ViewportWidth); $Ui.TskHead.Margin = New-Thickness 14 8 (10 + $sb) 6 })
+
+# en-tête des tâches : colonnes triables (tri par défaut : logiciels d'abord, puis nom)
+function Set-TskOrder {
+    Set-ListOrder $TskUI $Ui.TskList 'Key' {
+        param($o)
+        switch ($TskUI.SortKey) {
+            'Level' { $LevelRank[$TskUI.Rows[$o.Key].Level.L] }
+            'State' { $(if ($o.State -eq 4) { 0 } elseif ($o.Enabled) { 1 } else { 2 }) }
+            'Last' { $(if ($o.Last) { [DateTime]$o.Last } else { [DateTime]::MinValue }) }
+            'Next' { $(if ($o.Next) { [DateTime]$o.Next } else { [DateTime]::MaxValue }) }
+            'Name' { "$($o.Name)" }
+            default { '{0}|{1}' -f [int][bool]$o.Ms, $o.Name }
+        }
+    }
+}
+$TskUI.SortKey = 'Default'; $TskUI.SortDesc = $false
+Set-ListHeader $Ui.TskHead @(@{ T = 'TÂCHE'; W = 0; K = 'Name' }, @{ T = 'IMPORTANCE'; W = 140; K = 'Level' }, @{ T = 'ÉTAT'; W = 110; K = 'State' }, @{ T = 'DERNIÈRE EXÉCUTION'; W = 160; K = 'Last' }, @{ T = 'PROCHAINE'; W = 170; K = 'Next' }, @{ T = ''; W = 206 }) $TskUI { Set-TskOrder }

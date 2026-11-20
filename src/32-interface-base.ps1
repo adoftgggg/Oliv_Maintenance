@@ -190,6 +190,26 @@ function Add-EffectHeader($C) {
     $t.ToolTip = 'Moment où le réglage s''applique réellement une fois « Appliquer » cliqué : immédiatement, après relance d''une application, déconnexion ou redémarrage'
     [Windows.Controls.Grid]::SetColumn($t, $ib); [void]$hdr.Children.Add($t)
 }
+# Aide contextuelle : point d'interrogation à côté d'un libellé, explication au survol ou au clic (clic suivant : refermée),
+# à la place des info-bulles sur toute la ligne
+function New-HelpMark([string]$Text) {
+    $b = [Windows.Controls.Border]::new(); $b.Width = 18; $b.Height = 18; $b.CornerRadius = [Windows.CornerRadius]::new(9); $b.BorderThickness = New-Thickness 1 1 1 1
+    $b.Margin = New-Thickness 8 0 0 0; $b.VerticalAlignment = 'Center'; $b.Cursor = [Windows.Input.Cursors]::Hand; $b.Background = [Windows.Media.Brushes]::Transparent
+    $b.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'AccentBrush')
+    $q = New-Text '?'; $q.FontSize = 11; $q.FontWeight = [Windows.FontWeights]::SemiBold; $q.HorizontalAlignment = 'Center'; $q.VerticalAlignment = 'Center'; $q.Margin = New-Thickness 0 -1 0 0
+    $q.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'AccentBrush'); $b.Child = $q
+    $tt = [Windows.Controls.ToolTip]::new(); $tx = New-Text $Text; $tx.MaxWidth = 460; $tt.Content = $tx
+    $b.ToolTip = $tt; [Windows.Controls.ToolTipService]::SetShowDuration($b, 60000); [Windows.Controls.ToolTipService]::SetInitialShowDelay($b, 150)
+    $b.Add_MouseLeftButtonDown({ param($s, $e) $e.Handled = $true })
+    $b.Add_MouseLeftButtonUp({ param($s, $e) $t = $s.ToolTip; $t.PlacementTarget = $s; $t.IsOpen = -not $t.IsOpen; $e.Handled = $true })
+    $b
+}
+# libellé + point d'interrogation sur une ligne (texte enveloppé à gauche, aide alignée en haut)
+function New-LabelWithHelp($TextEl, [string]$Help) {
+    if (-not $Help) { return $TextEl }
+    $d = [Windows.Controls.DockPanel]::new(); $m = New-HelpMark $Help; [Windows.Controls.DockPanel]::SetDock($m, 'Right'); $m.VerticalAlignment = 'Top'; $m.Margin = New-Thickness 8 1 0 0
+    $d.HorizontalAlignment = 'Left'; [void]$d.Children.Add($m); [void]$d.Children.Add($TextEl); $d
+}
 function New-SettingRow([string]$Label, [string]$Desc, [string]$Tip, [string]$Effect) {
     $row = [Windows.Controls.Border]::new()
     $row.BorderThickness = New-Thickness 0 1 0 0
@@ -198,7 +218,6 @@ function New-SettingRow([string]$Label, [string]$Desc, [string]$Tip, [string]$Ef
     $row.Padding = New-Thickness 16 4 16 4; $row.MinHeight = 40
     $row.Style = $Window.FindResource('HoverLine')
     $row.Add_MouseLeftButtonUp($SettingRowUp)
-    if ($Tip) { $row.ToolTip = $Tip; [Windows.Controls.ToolTipService]::SetShowDuration($row, 30000) }
     $g = [Windows.Controls.Grid]::new()
     $c0 = [Windows.Controls.ColumnDefinition]::new()
     # colonnes : libellé | choix (boutons, à gauche de la pastille) | pastille (largeur partagée dans la carte) |
@@ -211,7 +230,7 @@ function New-SettingRow([string]$Label, [string]$Desc, [string]$Tip, [string]$Ef
     $sp = [Windows.Controls.StackPanel]::new()
     $sp.VerticalAlignment = 'Center'; $sp.Margin = New-Thickness 34 0 12 0
     $lb = New-Text $Label; $lb.TextWrapping = 'Wrap'
-    [void]$sp.Children.Add($lb)
+    [void]$sp.Children.Add((New-LabelWithHelp $lb $Tip))
     if ($Desc) { [void]$sp.Children.Add((New-Text $Desc 'Muted')) }
     $badge = [Windows.Controls.Border]::new()
     $badge.CornerRadius = [Windows.CornerRadius]::new(10)

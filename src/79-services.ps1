@@ -39,7 +39,13 @@ function New-LevelBadge($Lv) {
     $b = [Windows.Controls.Border]::new(); $b.CornerRadius = [Windows.CornerRadius]::new(8); $b.BorderThickness = New-Thickness 1 1 1 1; $b.Padding = New-Thickness 6 0 6 1; $b.Margin = New-Thickness 8 1 0 0; $b.VerticalAlignment = 'Center'
     $b.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, $Lv.B)
     $t = New-Text $Lv.L; $t.FontSize = 10.5; $t.TextWrapping = 'NoWrap'; $t.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $Lv.B)
-    $b.Child = $t; $b.ToolTip = $Lv.T; $b
+    $b.Child = $t; $b
+}
+# cellule « importance » : pastille + « ? » (explication au survol ou au clic)
+function New-LevelCell($Lv) {
+    $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; $sp.VerticalAlignment = 'Center'
+    $bd = New-LevelBadge $Lv; $bd.Margin = New-Thickness 0 1 0 0; [void]$sp.Children.Add($bd)
+    $hm = New-HelpMark $Lv.T; $hm.Margin = New-Thickness 6 0 0 0; [void]$sp.Children.Add($hm); $sp
 }
 $SvcStartText = @{ Auto = 'Automatique'; Delayed = 'Automatique (différé)'; Manual = 'Manuel'; Disabled = 'Désactivé'; Boot = 'Démarrage'; System = 'Système' }
 
@@ -148,36 +154,82 @@ $BgJobDone['SvcRead'] = {
     }
     $SvcUI.Stamp = $r.Stamp; $SvcUI.Fresh = $true
     Merge-ListData $SvcUI 'Name' @($r.Items | Sort-Object Disp) { Update-SvcList } { param($k) Set-SvcRowLook $k }
+    if ($SvcUI.SortKey -in 'State', 'Start') { Set-SvcOrder }
     Update-SvcFilter
     Save-ListCache 'services' $SvcUI.Data $SvcUI.Stamp
 }
 
 # ligne : nom affiché + nom court, état (pastille), démarrage, éditeur, 2 boutons (Démarrer/Arrêter, Désactiver/Réactiver)
+# colonnes (largeurs) et en-têtes triables : clic = tri sur la colonne, nouveau clic = ordre inverse ; flèche sur la colonne
+$SvcColW = @(0, 140, 110, 160, 170, 206)
+$LevelRank = @{ 'Critique' = 0; 'Importante' = 0; 'À garder' = 1; 'Windows' = 2; 'Logiciel' = 3; 'Désactivable' = 4 }
+function Set-ListHeader($Head, $Cols, $ListUI, [scriptblock]$Apply) {
+    $Head.Children.Clear(); $Head.ColumnDefinitions.Clear(); $ListUI.HeadCells = @{}
+    $i = 0
+    foreach ($c in $Cols) {
+        [void]$Head.ColumnDefinitions.Add((New-SvcCol $c.W))
+        if ($c.T) {
+            $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; $sp.Background = [Windows.Media.Brushes]::Transparent
+            $t = New-Text $c.T 'Muted'; $t.FontSize = 11; $t.FontWeight = [Windows.FontWeights]::SemiBold; $t.TextWrapping = 'NoWrap'
+            $ar = New-Text ''; $ar.FontFamily = [Windows.Media.FontFamily]::new('Segoe MDL2 Assets'); $ar.FontSize = 9; $ar.Margin = New-Thickness 6 2 0 0; $ar.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'AccentBrush')
+            [void]$sp.Children.Add($t); [void]$sp.Children.Add($ar)
+            if ($c.K) {
+                $sp.Cursor = [Windows.Input.Cursors]::Hand; $sp.ToolTip = 'Trier sur cette colonne (nouveau clic : ordre inverse)'
+                $sp.Tag = @{ K = $c.K; U = $ListUI; A = $Apply }
+                $sp.Add_MouseLeftButtonUp({ param($s, $e) $x = $s.Tag; if ($x.U.SortKey -eq $x.K) { $x.U.SortDesc = -not $x.U.SortDesc } else { $x.U.SortKey = $x.K; $x.U.SortDesc = $false }; & $x.A })
+                $ListUI.HeadCells[$c.K] = $ar
+            }
+            [Windows.Controls.Grid]::SetColumn($sp, $i); [void]$Head.Children.Add($sp)
+        }
+        $i++
+    }
+}
+function Update-HeadArrow($ListUI) { foreach ($k in @($ListUI.HeadCells.Keys)) { $ListUI.HeadCells[$k].Text = $(if ($k -eq $ListUI.SortKey) { [string][char]$(if ($ListUI.SortDesc) { 0xE70D } else { 0xE70E }) } else { '' }) } }
+# réordonne les lignes déjà construites (pas de reconstruction) selon la clé de tri
+function Set-ListOrder($ListUI, $Panel, [string]$KeyProp, [scriptblock]$SortVal) {
+    $d = @($ListUI.Data | Where-Object { $_ -and $ListUI.Rows["$($_.$KeyProp)"] })
+    $sorted = @($d | Sort-Object -Property @{ Expression = { & $SortVal $_ }; Descending = [bool]$ListUI.SortDesc }, @{ Expression = { "$($_.$KeyProp)" } })
+    $Panel.Children.Clear()
+    foreach ($o in $sorted) { [void]$Panel.Children.Add($ListUI.Rows["$($o.$KeyProp)"].Row) }
+    Update-HeadArrow $ListUI
+}
+function Set-SvcOrder {
+    Set-ListOrder $SvcUI $Ui.SvcList 'Name' {
+        param($o)
+        switch ($SvcUI.SortKey) {
+            'Level' { $LevelRank[$SvcUI.Rows[$o.Name].Level.L] }
+            'State' { $(if ($o.State -eq 'Running') { 0 } else { 1 }) }
+            'Start' { $v = @{ Boot = 0; System = 0; Auto = 1; Delayed = 2; Manual = 3; Disabled = 4 }["$($o.Start)"]; $(if ($null -eq $v) { 9 } else { $v }) }
+            'Co' { "$($o.Co)" }
+            default { "$($o.Disp)" }
+        }
+    }
+}
 function New-SvcCol([double]$W) { $c = [Windows.Controls.ColumnDefinition]::new(); $c.Width = $(if ($W -gt 0) { [Windows.GridLength]::new($W) } else { [Windows.GridLength]::new(1, 'Star') }); $c }
 function New-SvcRow($S) {
     $b = [Windows.Controls.Border]::new(); $b.Style = $Window.FindResource('SvcRow'); $b.Padding = New-Thickness 10 5 6 5; $b.DataContext = $S
-    $g = [Windows.Controls.Grid]::new(); foreach ($w in 0, 120, 160, 190, 206) { [void]$g.ColumnDefinitions.Add((New-SvcCol $w)) }
+    $g = [Windows.Controls.Grid]::new(); foreach ($w in $SvcColW) { [void]$g.ColumnDefinitions.Add((New-SvcCol $w)) }
     $np = [Windows.Controls.StackPanel]::new(); $np.Margin = New-Thickness 0 0 10 0; $np.VerticalAlignment = 'Center'
-    $t1 = New-Text $S.Disp; $t1.FontWeight = [Windows.FontWeights]::SemiBold; $t1.TextTrimming = 'CharacterEllipsis'
+    $t1 = New-Text $S.Disp; $t1.FontWeight = [Windows.FontWeights]::SemiBold; $t1.TextTrimming = 'CharacterEllipsis'; $t1.TextWrapping = 'NoWrap'
+    $help = (@($S.Desc, ('Fichier : ' + $(if ($S.File) { $S.File } else { 'inconnu' }))) | Where-Object { $_ }) -join "`n`n"
     $t2 = New-Text $S.Name 'Muted'; $t2.FontSize = 11; $t2.TextTrimming = 'CharacterEllipsis'; $t2.TextWrapping = 'NoWrap'
-    $l2 = [Windows.Controls.StackPanel]::new(); $l2.Orientation = 'Horizontal'; [void]$l2.Children.Add($t2); [void]$l2.Children.Add((New-LevelBadge (Get-SvcLevel $S)))
-    [void]$np.Children.Add($t1); [void]$np.Children.Add($l2); [void]$g.Children.Add($np)
+    [void]$np.Children.Add((New-LabelWithHelp $t1 $help)); [void]$np.Children.Add($t2); [void]$g.Children.Add($np)
+    $lv = Get-SvcLevel $S; $lb = New-LevelCell $lv; [Windows.Controls.Grid]::SetColumn($lb, 1); [void]$g.Children.Add($lb)
     $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; $sp.VerticalAlignment = 'Center'
     $dot = [Windows.Shapes.Ellipse]::new(); $dot.Width = 8; $dot.Height = 8; $dot.Margin = New-Thickness 0 0 8 0; $dot.VerticalAlignment = 'Center'
     $st = New-Text ''; $st.VerticalAlignment = 'Center'
-    [void]$sp.Children.Add($dot); [void]$sp.Children.Add($st); [Windows.Controls.Grid]::SetColumn($sp, 1); [void]$g.Children.Add($sp)
-    $sm = New-Text ''; $sm.VerticalAlignment = 'Center'; [Windows.Controls.Grid]::SetColumn($sm, 2); [void]$g.Children.Add($sm)
+    [void]$sp.Children.Add($dot); [void]$sp.Children.Add($st); [Windows.Controls.Grid]::SetColumn($sp, 2); [void]$g.Children.Add($sp)
+    $sm = New-Text ''; $sm.VerticalAlignment = 'Center'; [Windows.Controls.Grid]::SetColumn($sm, 3); [void]$g.Children.Add($sm)
     $co = New-Text $(if ($S.Co) { $S.Co } else { 'inconnu' }) 'Muted'; $co.VerticalAlignment = 'Center'; $co.TextTrimming = 'CharacterEllipsis'; $co.Margin = New-Thickness 0 0 10 0
-    [Windows.Controls.Grid]::SetColumn($co, 3); [void]$g.Children.Add($co)
+    [Windows.Controls.Grid]::SetColumn($co, 4); [void]$g.Children.Add($co)
     $bp = [Windows.Controls.StackPanel]::new(); $bp.Orientation = 'Horizontal'; $bp.HorizontalAlignment = 'Right'; $bp.VerticalAlignment = 'Center'
     $b1 = New-Button 'Démarrer'; $b2 = New-Button 'Désactiver'
     foreach ($x in $b1, $b2) { $x.Width = 98; $x.MinWidth = 0; $x.Height = 28; $x.Padding = New-Thickness 6 0 6 0; $x.Margin = New-Thickness 4 0 0 0; $x.Tag = $S.Name; [void]$bp.Children.Add($x) }
     $b1.Add_Click({ param($s, $e) Invoke-SvcAction "$($s.Tag)" $(if ($s.DataContext -eq 'stop') { 'stop' } else { 'start' }) })
     $b2.Add_Click({ param($s, $e) Invoke-SvcAction "$($s.Tag)" "$($s.DataContext)" })
-    [Windows.Controls.Grid]::SetColumn($bp, 4); [void]$g.Children.Add($bp)
+    [Windows.Controls.Grid]::SetColumn($bp, 5); [void]$g.Children.Add($bp)
     $b.Child = $g
-    $b.ToolTip = (@($S.Desc, ('Fichier : ' + $(if ($S.File) { $S.File } else { 'inconnu' }))) | Where-Object { $_ }) -join "`n`n"
-    $SvcUI.Rows[$S.Name] = @{ Row = $b; Dot = $dot; State = $st; Start = $sm; B1 = $b1; B2 = $b2 }
+    $SvcUI.Rows[$S.Name] = @{ Row = $b; Dot = $dot; State = $st; Start = $sm; B1 = $b1; B2 = $b2; Level = $lv }
     Set-SvcRowLook $S.Name
     $b
 }
@@ -210,6 +262,7 @@ function Update-SvcList {
     # lignes reconstruites à chaque lecture (données neuves), puis filtrées par visibilité
     $Ui.SvcList.Children.Clear(); $SvcUI.Rows = @{}
     foreach ($s in $d) { [void]$Ui.SvcList.Children.Add((New-SvcRow $s)) }
+    Set-SvcOrder
     Update-SvcFilter
 }
 function Update-SvcFilter {
@@ -311,3 +364,8 @@ $Ui.SvcFind.Add_LostKeyboardFocus({ $Ui.SvcFindBox.SetResourceReference([Windows
 $Ui.SvcFindBox.Add_MouseLeftButtonDown({ [void]$Ui.SvcFind.Focus() })
 # en-tête aligné sur les lignes : marge droite = largeur réelle de la barre de défilement
 $Ui.SvcScroll.Add_SizeChanged({ $sb = [math]::Max([double]0, $Ui.SvcScroll.ActualWidth - $Ui.SvcScroll.ViewportWidth); $Ui.SvcHead.Margin = New-Thickness 14 8 (10 + $sb) 6 })
+
+# en-tête des services : colonnes triables (tri par défaut : nom)
+$SvcUI.SortKey = 'Name'; $SvcUI.SortDesc = $false
+Set-ListHeader $Ui.SvcHead @(@{ T = 'SERVICE'; W = 0; K = 'Name' }, @{ T = 'IMPORTANCE'; W = 140; K = 'Level' }, @{ T = 'ÉTAT'; W = 110; K = 'State' }, @{ T = 'DÉMARRAGE'; W = 160; K = 'Start' }, @{ T = 'ÉDITEUR'; W = 170; K = 'Co' }, @{ T = ''; W = 206 }) $SvcUI { Set-SvcOrder }
+Update-HeadArrow $SvcUI

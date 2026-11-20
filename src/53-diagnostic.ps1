@@ -70,7 +70,7 @@ function Show-DiagResult($D) {
     Update-DiagAge
 }
 
-# ---------- Clé de récupération BitLocker : blocs 3 à 6 masqués, affichage après authentification administrateur ----------
+# ---------- Clé de récupération BitLocker : blocs 3 à 6 masqués, bouton Afficher / Masquer ----------
 function Get-MaskedKey([string]$K) {
     $b = $K -split '-'
     if ($b.Count -ne 8) { return $K }
@@ -90,18 +90,8 @@ $KeyRevealClick = {
     param($s, $e)
     $t = $s.Tag
     if ($t.Shown) { $t.Box.Text = Get-MaskedKey $t.Key; $t.Shown = $false; $s.Content = 'Afficher'; return }
-    $acc = Request-AdminAuth 'Afficher la clé de récupération BitLocker'
-    if (-not $acc) { return }
     $t.Box.Text = $t.Key; $t.Shown = $true; $s.Content = 'Masquer'
-    Write-UiLog ("Clé de récupération BitLocker affichée (authentification : $acc)." ) 'WARN'
-    # masquage automatique au bout de 20 secondes
-    $tm = [Windows.Threading.DispatcherTimer]::new(); $tm.Interval = [TimeSpan]::FromSeconds(20); $tm.Tag = $s
-    $tm.Add_Tick({ param($x, $y)
-        $x.Stop()
-        $b = $x.Tag
-        if ($b.Tag.Shown) { $b.Tag.Box.Text = Get-MaskedKey $b.Tag.Key; $b.Tag.Shown = $false; $b.Content = 'Afficher' }
-    })
-    $tm.Start()
+    Write-UiLog 'Clé de récupération BitLocker affichée.' 'APP'
 }
 # Vérification d'un compte administrateur : ouverture de session réseau (sinon interactive) avec LogonUser,
 # puis présence du SID Administrateurs (S-1-5-32-544) dans le jeton, y compris en « refus seul » (jeton filtré par l'UAC).
@@ -167,9 +157,7 @@ function Invoke-BitLockerAction([string]$Action) {
         'disable' {
             $msg = "Désactiver BitLocker sur $vol ?`n`nLe volume est entièrement déchiffré en arrière-plan (de quelques minutes à plus d'une heure selon le disque). Les données ne sont plus protégées en cas de perte ou de vol du poste."
             if ((Show-Dialog $msg 'Warn' @(@{ T = 'Annuler'; V = $false; D = $true; C = $true }, @{ T = 'Désactiver'; V = $true; S = 'WarnBtn' })) -ne $true) { return }
-            $acc = Request-AdminAuth 'Désactiver BitLocker'
-            if (-not $acc) { return }
-            Write-UiLog "BitLocker : désactivation demandée (authentification : $acc)." 'WARN'
+            Write-UiLog 'BitLocker : désactivation demandée.' 'WARN'
         }
         'resume' { }
         default { return }

@@ -12,13 +12,13 @@ function New-ToolRow([string]$Main, [string]$Sub, [object[]]$Buttons, [string]$T
     $b = [Windows.Controls.Border]::new(); $b.Style = $Window.FindResource('SvcRow'); $b.Padding = New-Thickness 10 4 6 4; $b.Margin = New-Thickness 30 1 10 1
     $g = [Windows.Controls.Grid]::new(); foreach ($w in 0, -1) { [void]$g.ColumnDefinitions.Add($(if ($w) { $c = [Windows.Controls.ColumnDefinition]::new(); $c.Width = [Windows.GridLength]::Auto; $c } else { New-SvcCol 0 })) }
     $sp = [Windows.Controls.StackPanel]::new(); $sp.VerticalAlignment = 'Center'; $sp.Margin = New-Thickness 0 0 8 0
-    $t1 = New-Text $Main; $t1.FontWeight = [Windows.FontWeights]::SemiBold; $t1.TextTrimming = 'CharacterEllipsis'; [void]$sp.Children.Add($t1)
+    $t1 = New-Text $Main; $t1.FontWeight = [Windows.FontWeights]::SemiBold; $t1.TextTrimming = 'CharacterEllipsis'; [void]$sp.Children.Add((New-LabelWithHelp $t1 $Tip))
     $t2 = $null; if ($Sub) { $t2 = New-Text $Sub 'Muted'; $t2.FontSize = 12; $t2.TextTrimming = 'CharacterEllipsis'; [void]$sp.Children.Add($t2) }
     [void]$g.Children.Add($sp)
     $bp = [Windows.Controls.StackPanel]::new(); $bp.Orientation = 'Horizontal'; $bp.VerticalAlignment = 'Center'
     foreach ($x in $Buttons) { if ($x) { [void]$bp.Children.Add($x) } }
     [Windows.Controls.Grid]::SetColumn($bp, 1); [void]$g.Children.Add($bp)
-    $b.Child = $g; if ($Tip) { $b.ToolTip = $Tip }
+    $b.Child = $g
     @{ Row = $b; Main = $t1; Sub = $t2; Btns = $bp }
 }
 function New-ToolIconButton([int]$Glyph, [string]$Tip, $Tag, [scriptblock]$Click) {
@@ -109,8 +109,8 @@ function Update-LicCard($R) {
     if ($R.Oa3) {
         $ToolsUI.LicKey = $R.Oa3
         $sec = @{ Shown = $false; Clear = $R.Oa3; Masked = (Get-MaskedText $R.Oa3) }
-        $eye = New-ToolIconButton 0xE7B3 'Afficher / masquer la clé (compte administrateur demandé)' $sec { param($s, $e) Switch-ToolSecret $s.Tag 'Lic' 'Afficher la clé Windows du BIOS' }
-        $cp = New-ToolIconButton 0xE8C8 'Copier la clé (compte administrateur demandé)' $null { if (Request-ToolAuth 'Lic' 'Copier la clé Windows du BIOS') { Set-ClipText $ToolsUI.LicKey; Write-UiLog 'Clé Windows du BIOS copiée dans le presse-papiers.' 'APP' } }
+        $eye = New-ToolIconButton 0xE7B3 'Afficher / masquer la clé' $sec { param($s, $e) Switch-ToolSecret $s.Tag 'Lic' 'Afficher la clé Windows du BIOS' }
+        $cp = New-ToolIconButton 0xE8C8 'Copier la clé' $null { if (Request-ToolAuth 'Lic' 'Copier la clé Windows du BIOS') { Set-ClipText $ToolsUI.LicKey; Write-UiLog 'Clé Windows du BIOS copiée dans le presse-papiers.' 'APP' } }
         $ToolsUI.LicOa3Row = New-ToolRow 'Clé d''origine du BIOS' (Get-MaskedText $R.Oa3) @($eye, $cp) $(if ($R.Oa3Desc) { $R.Oa3Desc } else { $null })
         $ToolsUI.LicOa3Row.Row.Margin = New-Thickness 30 6 10 0; $sec.Box = $ToolsUI.LicOa3Row.Sub
         [void]$b.Children.Add($ToolsUI.LicOa3Row.Row)
@@ -130,21 +130,11 @@ function Update-LicCard($R) {
 }
 # secrets (clé du BIOS, mots de passe Wi-Fi) : compte administrateur demandé, puis valable 20 s pour toute la liste
 # (autre ligne affichée sans nouvelle saisie) ; chaque secret affiché se masque seul au bout de 20 s
-function Request-ToolAuth([string]$Scope, [string]$Purpose) {
-    if (-not $ToolsUI.Auth) { $ToolsUI.Auth = @{} }
-    $u = $ToolsUI.Auth[$Scope]; if ($u -and [DateTime]::Now -lt $u) { return $true }
-    $acc = Request-AdminAuth $Purpose; if (-not $acc) { return $false }
-    $ToolsUI.Auth[$Scope] = [DateTime]::Now.AddSeconds(20)
-    Write-UiLog "$Purpose (authentification : $acc)." 'WARN'
-    $true
-}
+# secrets (clé du BIOS, mots de passe Wi-Fi) : masqués par défaut, affichés / masqués par l'œil (application déjà lancée
+# en administrateur : pas de nouvelle saisie d'identifiants)
+function Request-ToolAuth([string]$Scope, [string]$Purpose) { $true }
 function Switch-ToolSecret($Sec, [string]$Scope, [string]$Purpose) {
-    if ($Sec.Shown) { $Sec.Box.Text = $Sec.Masked; $Sec.Shown = $false; return }
-    if (-not (Request-ToolAuth $Scope $Purpose)) { return }
-    $Sec.Box.Text = $Sec.Clear; $Sec.Shown = $true
-    $tm = [Windows.Threading.DispatcherTimer]::new(); $tm.Interval = [TimeSpan]::FromSeconds(20); $tm.Tag = $Sec
-    $tm.Add_Tick({ param($x, $y) $x.Stop(); $o = $x.Tag; if ($o.Shown) { $o.Box.Text = $o.Masked; $o.Shown = $false } })
-    $tm.Start()
+    if ($Sec.Shown) { $Sec.Box.Text = $Sec.Masked; $Sec.Shown = $false } else { $Sec.Box.Text = $Sec.Clear; $Sec.Shown = $true }
 }
 function Get-MaskedText([string]$S) { ($S -replace '[A-Za-z0-9]', [string][char]0x2022) }
 
@@ -187,8 +177,8 @@ function Update-WifiCard($R) {
     foreach ($w in $items) {
         $hasKey = [bool]$w.Key
         $sec = @{ Shown = $false; Clear = $w.Key + '   ·   ' + (Get-WifiAuthText $w.Auth); Masked = (Get-MaskedText 'xxxxxxxxxx') + '   ·   ' + (Get-WifiAuthText $w.Auth) }
-        $eye = $(if ($hasKey) { New-ToolIconButton 0xE7B3 'Afficher / masquer le mot de passe (compte administrateur demandé, valable 20 s pour toute la liste)' $sec { param($s, $e) Switch-ToolSecret $s.Tag 'Wifi' 'Afficher les mots de passe Wi-Fi enregistrés' } })
-        $cp = $(if ($hasKey) { New-ToolIconButton 0xE8C8 'Copier le mot de passe (compte administrateur demandé)' $w { param($s, $e) if (Request-ToolAuth 'Wifi' 'Copier un mot de passe Wi-Fi') { Set-ClipText $s.Tag.Key; Write-UiLog ('Mot de passe du réseau Wi-Fi « {0} » copié.' -f $s.Tag.Name) 'APP' } } })
+        $eye = $(if ($hasKey) { New-ToolIconButton 0xE7B3 'Afficher / masquer le mot de passe' $sec { param($s, $e) Switch-ToolSecret $s.Tag 'Wifi' 'Afficher les mots de passe Wi-Fi enregistrés' } })
+        $cp = $(if ($hasKey) { New-ToolIconButton 0xE8C8 'Copier le mot de passe' $w { param($s, $e) if (Request-ToolAuth 'Wifi' 'Copier un mot de passe Wi-Fi') { Set-ClipText $s.Tag.Key; Write-UiLog ('Mot de passe du réseau Wi-Fi « {0} » copié.' -f $s.Tag.Name) 'APP' } } })
         $del = New-ToolIconButton 0xE74D 'Oublier ce réseau' $w { param($s, $e) Remove-WifiProfile $s.Tag.Name }
         $sub = $(if ($hasKey) { (Get-MaskedText 'xxxxxxxxxx') + '   ·   ' + (Get-WifiAuthText $w.Auth) } else { Get-WifiAuthText $w.Auth })
         $row = New-ToolRow $w.Name $sub @($eye, $cp, $del) $(if ($w.Auto) { 'Connexion automatique' } else { 'Connexion manuelle' })
@@ -269,7 +259,8 @@ function Update-HostsCard {
     if ($nb) {
         # mise à jour de la liste : automatique (tâche hebdomadaire) ou manuelle (bouton Mettre à jour la liste)
         $auto = [bool](Get-HostsAutoTask); $last = Get-HostsAutoLast
-        [void](Add-KV $b 'Mise à jour de la liste' $(if ($auto) { 'automatique, chaque semaine' + $(if ($last) { "  ·  dernier passage : $last" } else { '' }) } else { 'manuelle (bouton Mettre à jour la liste)' }) $(if ($auto) { '' } else { 'WarnFgBrush' }))
+        $nx = $(if ($auto) { Get-HostsAutoNext } else { '' })
+        [void](Add-KV $b 'Mise à jour de la liste' $(if ($auto) { 'automatique, chaque semaine' + $(if ($nx) { "  ·  prochaine mise à jour programmée $nx" } else { '' }) + $(if ($last) { "`ndernier passage : $last" } else { '' }) } else { 'manuelle (bouton Mettre à jour la liste)' }) $(if ($auto) { '' } else { 'WarnFgBrush' }))
         $ToolsUI.HostsAuto = Add-SettingsChoice $b 'Actualisation de la liste' 'La liste StevenBlack évolue chaque semaine (nouveaux domaines de pub et de pistage). Automatique : tâche planifiée hebdomadaire, rattrapée au démarrage si le PC était éteint.' ([ordered]@{ On = 'Automatique'; Off = 'Manuelle' }) $(if ($auto) { 'On' } else { 'Off' }) {
             param($s, $e)
             $on = "$($s.DataContext)" -eq 'On'
@@ -278,7 +269,7 @@ function Update-HostsCard {
             Update-HostsCard
         }
     }
-    try { [void](Add-KV $b 'Dernière modification' ('{0:dd/MM/yyyy HH:mm}' -f [IO.File]::GetLastWriteTime($HostsFile))) } catch { Write-Ignored 'Date du fichier hosts' $_ }
+    try { $fi = [IO.FileInfo]::new($HostsFile); [void](Add-KV $b 'Fichier hosts' ('{0}  ·  modifié le {1:dd/MM/yyyy HH:mm}' -f (Format-SizeUi $fi.Length), $fi.LastWriteTime)) } catch { Write-Ignored 'Date du fichier hosts' $_ }
     # entrées personnelles : une ligne par entrée (nom, effet, commentaire), suppression à l'unité
     $ents = @(Get-HostsEntry $p.Own)
     $h = New-Text $(if ($ents.Count) { 'Mes entrées ({0})' -f $ents.Count } else { 'Mes entrées : aucune' }); $h.FontWeight = [Windows.FontWeights]::SemiBold; $h.Margin = New-Thickness 46 10 10 4
@@ -319,8 +310,17 @@ $HostsScript = @'
 $r = @{}
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    $wc = New-Object Net.WebClient; $wc.Encoding = [Text.Encoding]::UTF8
-    $t = $wc.DownloadString($Sync.HostsUrl)
+    # téléchargement par blocs : octets reçus / taille annoncée (Content-Length) publiés pour la barre d'avancement
+    $Sync.HostsProg = @{ Done = 0; Total = 0; Step = 'dl' }
+    $rq = [Net.HttpWebRequest]::Create($Sync.HostsUrl); $rq.UserAgent = 'Oliv_Maintenance'; $rq.Timeout = 30000; $rq.ReadWriteTimeout = 30000
+    $rs = $rq.GetResponse()
+    try {
+        $Sync.HostsProg.Total = [long]$rs.ContentLength
+        $st = $rs.GetResponseStream(); $ms = New-Object IO.MemoryStream; $buf = New-Object byte[] 65536
+        while (($n = $st.Read($buf, 0, $buf.Length)) -gt 0) { $ms.Write($buf, 0, $n); $Sync.HostsProg.Done = $ms.Length }
+        $t = [Text.Encoding]::UTF8.GetString($ms.ToArray())
+    } finally { $rs.Close() }
+    $Sync.HostsProg.Step = 'parse'
     $l = @($t -split "`r?`n" | Where-Object { $_ -match '^0\.0\.0\.0\s+[^\s#]+' -and $_ -notmatch '^0\.0\.0\.0\s+0\.0\.0\.0' } | ForEach-Object { ($_ -replace '\s*#.*$', '').Trim() } | Select-Object -Unique)
     if ($l.Count -lt 1000) { throw "liste inattendue ($($l.Count) entrées)" }
     $r.Lines = $l
@@ -379,11 +379,37 @@ function Start-HostsBlock([bool]$On) {
     }
     if ($BgJobs.ContainsKey('Hosts')) { return }
     if (-not (Test-Path -LiteralPath $HostsBackup) -and -not (Confirm-Action "Bloquer les pubs, traqueurs et sites malveillants connus dans le fichier hosts ?`n`nListe StevenBlack/hosts (environ 80 000 domaines, mise à jour régulièrement), ajoutée à la fin du fichier sans toucher à vos entrées ; sauvegarde du fichier d'origine dans le dossier d'état. Un site qui ne s'affiche plus se débloque en retirant le blocage.")) { return }
-    $Sync.HostsUrl = $HostsListUrl; $Sync.HostsDl = $null
-    $ToolsUI.HostsBody.Children.Clear(); $t = New-Text 'Téléchargement de la liste de blocage...' 'Muted'; $t.Margin = New-Thickness 38 0 10 12; [void]$ToolsUI.HostsBody.Children.Add($t)
+    $Sync.HostsUrl = $HostsListUrl; $Sync.HostsDl = $null; $Sync.HostsProg = $null
+    # avancement réel : octets reçus sur la taille annoncée par le serveur, temps écoulé ; barre indéterminée sans taille annoncée
+    $ToolsUI.HostsBody.Children.Clear()
+    $sp = [Windows.Controls.StackPanel]::new(); $sp.Margin = New-Thickness 38 0 10 12
+    $t = New-Text 'Téléchargement de la liste de blocage : connexion...' 'Muted'
+    $pb = [Windows.Controls.ProgressBar]::new(); $pb.Height = 6; $pb.Margin = New-Thickness 0 6 0 0; $pb.Maximum = 100; $pb.IsIndeterminate = $true
+    [void]$sp.Children.Add($t); [void]$sp.Children.Add($pb); [void]$ToolsUI.HostsBody.Children.Add($sp)
+    $t0 = [DateTime]::Now
+    if ($ToolsUI.HostsTimer) { $ToolsUI.HostsTimer.Stop() }
+    $tm = [Windows.Threading.DispatcherTimer]::new(); $tm.Interval = [TimeSpan]::FromMilliseconds(250)
+    $tm.Add_Tick({
+        $g = $Sync.HostsProg; $el = [int]([DateTime]::Now - $t0).TotalSeconds
+        if (-not $g) { return }
+        if ($g.Step -eq 'parse') { $t.Text = 'Liste téléchargée ({0}), vérification et écriture dans le fichier hosts... · {1} s' -f (Format-SizeUi $g.Done), $el; $pb.IsIndeterminate = $true; return }
+        if ($g.Total -gt 0) {
+            $pc = [math]::Min([double]100, 100.0 * $g.Done / $g.Total); $pb.IsIndeterminate = $false; $pb.Value = $pc
+            $t.Text = 'Téléchargement de la liste de blocage : {0} / {1} ({2:N0} %) · {3} s' -f (Format-SizeUi $g.Done '0 Ko'), (Format-SizeUi $g.Total), $pc, $el
+        } else { $t.Text = 'Téléchargement de la liste de blocage : {0} reçus (taille non annoncée par le serveur) · {1} s' -f (Format-SizeUi $g.Done '0 Ko'), $el }
+    }.GetNewClosure())
+    $ToolsUI.HostsTimer = $tm; $tm.Start()
     Start-BgJob 'Hosts' $HostsScript
 }
+# prochaine exécution de la tâche hebdomadaire : « le 24/11 à 12h » (minutes affichées si non nulles)
+function Get-HostsAutoNext {
+    $tk = Get-HostsAutoTask; if (-not $tk -or -not $tk.Enabled) { return '' }
+    try { $d = [DateTime]$tk.NextRunTime } catch { return '' }
+    if ($d.Year -lt 2000) { return '' }
+    'le {0:dd/MM} à {0:HH}h{1}' -f $d, $(if ($d.Minute) { '{0:mm}' -f $d } else { '' })
+}
 $BgJobDone['Hosts'] = {
+    if ($ToolsUI.HostsTimer) { $ToolsUI.HostsTimer.Stop(); $ToolsUI.HostsTimer = $null }
     $r = $Sync.HostsDl
     if (-not $r -or $r.Error) { $m = $(if ($r) { $r.Error } else { 'tâche interrompue' }); Write-UiLog "Fichier hosts : liste de blocage non téléchargée - $m" 'ERROR'; Show-Info "Téléchargement de la liste impossible.`n`n$m" 'Error'; Update-HostsCard; return }
     try {
@@ -397,7 +423,9 @@ $BgJobDone['Hosts'] = {
         Write-UiLog ('Fichier hosts : {0:N0} domaines de pubs et traqueurs bloqués ({1}).' -f $r.Lines.Count, $chg) 'OK'
         # 1re activation : mise à jour automatique hebdomadaire mise en place d'office (désactivable dans la carte)
         if (-not $old.Count -and -not (Get-HostsAutoTask)) { try { Set-HostsAuto $true; Write-UiLog 'Fichier hosts : mise à jour automatique hebdomadaire de la liste activée.' 'APP' } catch { Write-Ignored 'Tâche de mise à jour du fichier hosts' $_ } }
-        Show-Info ("Liste de blocage à jour : {0:N0} domaines bloqués.`n`n{1}. Vos entrées personnelles ne sont pas modifiées." -f $r.Lines.Count, $chg.Substring(0, 1).ToUpper() + $chg.Substring(1)) 'Ok'; Add-SessionEvent 'Réglages' 'Blocage pubs et traqueurs (hosts)' ('{0:N0} domaines' -f $r.Lines.Count) 'ok'
+        $nx = Get-HostsAutoNext
+        $sz = try { Format-SizeUi ([IO.FileInfo]::new($HostsFile).Length) } catch { '?' }
+        Show-Info ("Liste de blocage à jour : {0:N0} domaines bloqués (fichier hosts : {3}).`n`n{1}. Vos entrées personnelles ne sont pas modifiées.`n`n{2}" -f $r.Lines.Count, ($chg.Substring(0, 1).ToUpper() + $chg.Substring(1)), $(if ($nx) { "Prochaine mise à jour programmée $nx." } else { 'Mise à jour automatique désactivée : prochaine mise à jour manuelle (bouton Mettre à jour la liste).' }), $sz) 'Ok'; Add-SessionEvent 'Réglages' 'Blocage pubs et traqueurs (hosts)' ('{0:N0} domaines' -f $r.Lines.Count) 'ok'
     } catch { Write-UiLog "Fichier hosts : $($_.Exception.Message)" 'ERROR'; Show-Info "Écriture du fichier hosts impossible (antivirus ?).`n`n$($_.Exception.Message)" 'Error' }
     Update-HostsCard
 }

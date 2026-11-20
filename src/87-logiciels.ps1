@@ -762,7 +762,7 @@ function Get-SoftRunSummary([bool]$Running) {
 }
 # états appliqués aux lignes affichées (sans reconstruire la liste)
 # intitulé de la 4e colonne : ÉTAT dès qu'une ligne affichée porte l'état d'une mise à jour (en cours ou dernière), sinon SOURCE
-function Get-SoftColTitle([bool]$Hist, [bool]$Shown) { if ($Hist) { 'RÉSULTAT' } elseif ($Shown) { 'ÉTAT' } else { 'SOURCE' } }
+function Get-SoftColTitle([bool]$Hist, [bool]$Shown) { if ($Hist) { 'RÉSULTAT' } elseif ($Shown) { 'ÉTAT' } elseif ($SoftUI.Filter -eq 'All') { '' } else { 'SOURCE' } }
 function Update-SoftRunRow {
     if (-not $SoftUI.SrcCells) { return }
     $shown = $false
@@ -833,7 +833,9 @@ function Update-SoftStatus {
         $SoftUI.Run.ToolTip = $(if ($Sync.Running) { 'Une exécution est déjà en cours' } elseif ($Sync.WgRunning) { 'Recherche des mises à jour en cours' } else { 'Aucune mise à jour à installer' })
     }
     $mine = $SoftUI.Filter -eq 'All'
-    $SoftUI.Reinst.Visibility = $(if ($mine -and -not $upg) { 'Visible' } else { 'Collapsed' })
+    # Mes applications : actions sur chaque ligne (et clic droit pour la sélection multiple), pas de boutons en bas
+    $SoftUI.Reinst.Visibility = 'Collapsed'
+    foreach ($e in @($SoftUI.RowCache.Values)) { if ($e -and $e.Acts) { foreach ($b in $e.Acts.Children) { $b.IsEnabled = -not ($Sync.Running -or $Sync.WgRunning) } } }
     if ($mine) {
         # Mes applications : actions sur la sélection (clic, Ctrl + clic, Maj + clic) ; boutons grisés sans sélection
         $rm = @(Get-SoftRemoveTarget)
@@ -845,6 +847,7 @@ function Update-SoftStatus {
             elseif (-not $rm.Count) { 'Sélection inconnue de winget : désinstallation depuis Paramètres > Applications' }
             else { (@($rm | Select-Object -First 15 | ForEach-Object { Get-SoftShortName $_.Name }) -join "`n") + $(if ($rm.Count -gt 15) { "`n..." } else { '' }) })
         foreach ($b in $SoftUI.Run, $SoftUI.Reinst) { $b.IsEnabled = $rm.Count -gt 0 -and -not $busy; $b.ToolTip = $tip }
+        $SoftUI.Run.Visibility = 'Collapsed'
     }
     $rs = $(if ($mine) { 'WarnBtn' } else { 'PrimaryBtn' })
     if ($SoftUI.RunStyle -ne $rs) { $SoftUI.RunStyle = $rs; $SoftUI.Run.SetResourceReference([Windows.FrameworkElement]::StyleProperty, $rs) }
@@ -860,7 +863,83 @@ function Update-SoftStatus {
 }
 # Ligne de la liste des logiciels : construite une fois par inventaire et conservée (filtres, recherche, exclusions ne
 # recréent que les lignes qui changent). Signature = inventaire, exclusion, versions, source.
-function Get-SoftSrcText($App) { "$($App.SrcLabel)" + $(if ($App.Orphan) { '  ·  reste d''installation' } else { '' }) }
+# Mes applications : source non affichée (seul « reste d'installation » est signalé), actions sur la ligne à la place
+function Get-SoftSrcText($App) {
+    if ($SoftUI.Filter -eq 'All') { return $(if ($App.Orphan) { 'reste d''installation' } else { '' }) }
+    "$($App.SrcLabel)" + $(if ($App.Orphan) { '  ·  reste d''installation' } else { '' })
+}
+# colonne 3 selon la vue : Mes applications = 250 px (boutons Modifier / réparer et Désinstaller), sinon 170 px (source / état)
+function Set-SoftRowMode($E) {
+    $mine = $SoftUI.Filter -eq 'All'
+    $E.Grid.ColumnDefinitions[3].Width = [Windows.GridLength]::new($(if ($mine) { 250 } else { 170 }))
+    $E.Acts.Visibility = $(if ($mine -and -not $E.Row.DataContext.Orphan) { 'Visible' } else { 'Collapsed' })
+    $busy = $Sync.Running -or $Sync.WgRunning
+    foreach ($b in $E.Acts.Children) { $b.IsEnabled = -not $busy }
+    $E.BRm.ToolTip = $(if (-not (Get-SoftLocalId $E.Row.DataContext)) { 'Inconnu de winget : ouvre le désinstalleur du logiciel (Paramètres > Applications)' } else { $null })
+}
+# Modifier / réparer : commande de modification de l'éditeur (clé de désinstallation : ModifyPath), sinon réparation
+# Windows Installer (msiexec /fa), application du Store : Paramètres > Applications installées (Options avancées > Réparer)
+function Get-SoftArpKey($App) {
+    $id = "$(Get-SoftLocalId $App)"
+    $cand = [Collections.Generic.List[object]]::new()
+    if ($id -match '^ARP\\(Machine|User)\\(X64|X86)\\(.+)$') {
+        $root = $(if ($Matches[1] -eq 'User') { 'HKCU\Software' } elseif ($Matches[2] -eq 'X86' -and [Environment]::Is64BitOperatingSystem) { 'HKLM\SOFTWARE\WOW6432Node' } else { 'HKLM\SOFTWARE' })
+        $cand.Add(@{ R = $root + '\Microsoft\Windows\CurrentVersion\Uninstall'; N = $Matches[3] })
+    }
+    foreach ($c in $cand) { $k = Open-RegKey ($c.R + '\' + $c.N); if ($k) { return @{ Key = $k; Name = $c.N } } }
+    foreach ($root in 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall', 'HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall') {
+        $k = Open-RegKey $root; if (-not $k) { continue }
+        try {
+            foreach ($n in $k.GetSubKeyNames()) {
+                $sk = $k.OpenSubKey($n); if (-not $sk) { continue }
+                if ("$($sk.GetValue('DisplayName'))" -eq "$($App.Name)") { return @{ Key = $sk; Name = $n } }
+                $sk.Close()
+            }
+        } finally { $k.Close() }
+    }
+    $null
+}
+function Split-SoftCommand([string]$Cmd) {
+    $c = [Environment]::ExpandEnvironmentVariables($Cmd.Trim())
+    if ($c -match '^"([^"]+)"\s*(.*)$') { return @($Matches[1], $Matches[2]) }
+    if ($c -match '^(.+?\.exe)\s*(.*)$') { return @($Matches[1], $Matches[2]) }
+    @($c, '')
+}
+function Invoke-SoftModify($App) {
+    $nm = Get-SoftShortName "$($App.Name)"
+    if ($App.Pfn) {
+        Start-Process 'ms-settings:appsfeatures'
+        Show-Info "$nm est une application du Microsoft Store : dans Paramètres > Applications installées, menu ... de $nm > Options avancées > Réparer (ou Réinitialiser)."
+        return
+    }
+    $a = Get-SoftArpKey $App
+    if (-not $a) { Start-Process 'ms-settings:appsfeatures'; Show-Info "Entrée de désinstallation de $nm introuvable : modification depuis Paramètres > Applications installées."; return }
+    try {
+        $mp = "$($a.Key.GetValue('ModifyPath'))".Trim(); $msi = [int]('0' + $a.Key.GetValue('WindowsInstaller')) -eq 1
+        $noMod = [int]('0' + $a.Key.GetValue('NoModify')) -eq 1; $noRep = [int]('0' + $a.Key.GetValue('NoRepair')) -eq 1
+        $guid = $(if ($a.Name -match '^\{[0-9A-Fa-f\-]{36}\}$') { $a.Name } else { $null })
+    } finally { $a.Key.Close() }
+    try {
+        if ($msi -and $guid -and ($mp -match '(?i)msiexec' -or -not $mp)) {
+            # MSI : interface de maintenance de l'éditeur (Modifier / Réparer / Supprimer), réparation directe si l'éditeur la masque
+            $arg = $(if ($noMod -and -not $noRep) { "/fa $guid" } else { "/i $guid" })
+            Start-Process "$env:windir\System32\msiexec.exe" $arg
+            Write-UiLog ('{0} : {1} (msiexec {2}).' -f $nm, $(if ($arg -like '/fa*') { 'réparation lancée' } else { 'maintenance lancée' }), $arg) 'INFO'
+        }
+        elseif ($mp -and -not $noMod) {
+            $x = Split-SoftCommand $mp
+            if ($x[1]) { Start-Process $x[0] $x[1] } else { Start-Process $x[0] }
+            Write-UiLog "$nm : modification lancée ($mp)." 'INFO'
+        }
+        else { Show-Info "$nm ne propose ni modification ni réparation : pour repartir d'une installation propre, utiliser Réinstaller (clic droit sur la ligne)." }
+    } catch { Write-UiLog "$nm : modification impossible : $($_.Exception.Message)" 'ERROR'; Show-Info "Modification de $nm impossible : $($_.Exception.Message)" }
+}
+# Désinstaller : winget si le logiciel lui est connu, sinon page Applications installées de Windows
+function Invoke-SoftRowRemove($App) {
+    if (Get-SoftLocalId $App) { Invoke-SoftRemove @($App) 'uninstall'; return }
+    Start-Process 'ms-settings:appsfeatures'
+    Show-Info ('{0} est inconnu de winget : désinstallation depuis Paramètres > Applications installées.' -f (Get-SoftShortName "$($App.Name)"))
+}
 function Get-SoftRowEntry($App, [bool]$Avail) {
     $k = Get-SoftKey $App; $ex = [bool]$SoftExcl[$k]
     $sig = '{0}|{1}|{2}|{3}|{4}|{5}' -f $SoftUI.CacheStamp, $ex, $App.From, $App.To, $App.SrcLabel, $App.Unknown
@@ -873,6 +952,7 @@ function Get-SoftRowEntry($App, [bool]$Avail) {
         $c4.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($App.Orphan) { 'WarnFgBrush' } else { 'MutedBrush' }))
         $c4.FontWeight = [Windows.FontWeights]::Normal
         $c4.ToolTip = $(if ($App.Match) { "Rattaché par le nom au paquet winget $($App.Id)" } else { $null })
+        Set-SoftRowMode $e
         return $e
     }
     $k = Get-SoftKey $App; $ex = [bool]$SoftExcl[$k]; $hasUp = [bool]($App.To -and $App.Src)
@@ -915,7 +995,14 @@ function Get-SoftRowEntry($App, [bool]$Avail) {
     if ($App.Match) { $c4.ToolTip = "Rattaché par le nom au paquet winget $($App.Id)" }
     $c5 = New-Text $(if ($ex) { 'exclu' } else { '' }) 'Muted'; [Windows.Controls.Grid]::SetColumn($c5, 4)
     foreach ($x in $c2, $c3, $c4, $c5) { $x.VerticalAlignment = 'Center'; $x.TextWrapping = 'NoWrap'; $x.TextTrimming = 'CharacterEllipsis' }
-    foreach ($x in $nm, $c2, $c3, $c4, $c5) { [void]$g.Children.Add($x) }
+    # actions de la ligne (Mes applications) : clic sur un bouton sans changer la sélection
+    $acts = [Windows.Controls.StackPanel]::new(); $acts.Orientation = 'Horizontal'; $acts.HorizontalAlignment = 'Right'; $acts.VerticalAlignment = 'Center'
+    $bMod = New-Button 'Modifier / réparer'; $bRm = New-Button 'Désinstaller' 'WarnBtn'
+    foreach ($x in $bMod, $bRm) { $x.MinWidth = 0; $x.Height = 26; $x.Padding = New-Thickness 8 0 8 0; $x.Margin = New-Thickness 4 0 0 0; $x.DataContext = $App; [void]$acts.Children.Add($x) }
+    $bMod.Add_Click({ param($s, $e) $e.Handled = $true; try { Invoke-SoftModify $s.DataContext } catch { Write-UiLog "Modifier / réparer : $($_.Exception.Message)" 'ERROR' } })
+    $bRm.Add_Click({ param($s, $e) $e.Handled = $true; try { Invoke-SoftRowRemove $s.DataContext } catch { Write-UiLog "Désinstaller : $($_.Exception.Message)" 'ERROR' } })
+    $cc = [Windows.Controls.Grid]::new(); [void]$cc.Children.Add($c4); [void]$cc.Children.Add($acts); [Windows.Controls.Grid]::SetColumn($cc, 3)
+    foreach ($x in $nm, $c2, $c3, $cc, $c5) { [void]$g.Children.Add($x) }
     if ($ex) { $g.Opacity = 0.6 }
     $row.Child = $g
     # survol, sélection maintenue (surbrillance), double clic = mettre à jour, clic droit = menu
@@ -937,7 +1024,8 @@ function Get-SoftRowEntry($App, [bool]$Avail) {
         Show-SoftMenu $s
         $e.Handled = $true
     })
-    $e = @{ Row = $row; Grid = $g; C4 = $c4; Sig = $sig; Key = $k }
+    $e = @{ Row = $row; Grid = $g; C4 = $c4; Sig = $sig; Key = $k; Acts = $acts; BRm = $bRm }
+    Set-SoftRowMode $e
     $SoftUI.RowCache[$k] = $e
     $e
 }
@@ -1048,7 +1136,10 @@ function Update-SoftView {
         if (-not $pb.Uid) { $pb.Uid = "$($pb.ToolTip)" }
         $pb.ToolTip = $(if ($isAll) { "$($pb.Uid)" } else { $null })
     }
-    $SoftUI.SumBox.Visibility = $(if ($done -or ($apps.Count -and ($isAll -or ($isUpd -and $upd.Count)))) { 'Visible' } else { 'Collapsed' })
+    # Mes applications : pas d'encart de répartition (winget / Store / non géré)
+    $SoftUI.SumBox.Visibility = $(if ($done -or ($apps.Count -and $isUpd -and $upd.Count)) { 'Visible' } else { 'Collapsed' })
+    if ($isAll -and $SoftUI.SrcFilter) { $SoftUI.SrcFilter = $null }
+    $SoftUI.H3.Parent.ColumnDefinitions[3].Width = [Windows.GridLength]::new($(if ($isAll) { 250 } else { 170 }))
     $SoftUI.H1.Text = $(if ($isHist) { 'VERSION AVANT' } else { 'VERSION INSTALLÉE' })
     $SoftUI.H2.Text = $(if ($isHist) { 'VERSION APRÈS' } else { 'DISPONIBLE' })
     $SoftUI.H3.Text = Get-SoftColTitle $isHist $false

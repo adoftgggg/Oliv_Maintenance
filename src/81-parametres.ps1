@@ -1,17 +1,19 @@
 # Page Paramètres (roue crantée) : thème, onglet d'ouverture, instantanés des réglages, à propos
 $StartPages = [ordered]@{ Info = 'Accueil'; Maint = 'Maintenance'; Perf = 'Système'; Secu = 'Sécurité'; Perso = 'Personnalisation'; Apps = 'Applications'; Svc = 'Services et tâches'; Tools = 'Outils'; Log = 'Journal' }
 function Add-SettingsChoice($Body, [string]$Label, [string]$Desc, $Options, [string]$Current, [scriptblock]$OnPick) {
-    $hb = [Windows.Controls.Border]::new(); $hb.Style = $Window.FindResource('HoverPlain'); $hb.Margin = New-Thickness 38 0 10 6
-    $g = [Windows.Controls.Grid]::new(); $g.Margin = New-Thickness 8 6 8 6; $g.MinHeight = 28
+    # option aérée : retrait de 46 px sous le titre de la carte, 12 px entre options, filet de séparation sous chaque option
+    $hb = [Windows.Controls.Border]::new(); $hb.Style = $Window.FindResource('HoverPlain'); $hb.Margin = New-Thickness 46 4 16 12
+    $hb.BorderThickness = New-Thickness 0 0 0 1; $hb.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'LineBrush')
+    $g = [Windows.Controls.Grid]::new(); $g.Margin = New-Thickness 10 8 10 14; $g.MinHeight = 28
     # libellé puis choix sur la ligne suivante : tient dans une demi-largeur (paramètres sur 2 colonnes)
     [void]$g.RowDefinitions.Add([Windows.Controls.RowDefinition]::new())
     $ra = [Windows.Controls.RowDefinition]::new()
     $ra.Height = [Windows.GridLength]::Auto
     [void]$g.RowDefinitions.Add($ra)
     $tx = [Windows.Controls.StackPanel]::new(); $tx.VerticalAlignment = 'Center'
-    $t1 = New-Text $Label; $t1.FontWeight = [Windows.FontWeights]::SemiBold; [void]$tx.Children.Add($t1)
-    if ($Desc) { $d = New-Text $Desc 'Muted'; $d.TextWrapping = 'Wrap'; [void]$tx.Children.Add($d) }
-    $wp = [Windows.Controls.WrapPanel]::new(); $wp.Margin = New-Thickness 0 6 0 0
+    $t1 = New-Text $Label; $t1.FontWeight = [Windows.FontWeights]::SemiBold; $t1.FontSize = 14; [void]$tx.Children.Add($t1)
+    if ($Desc) { $d = New-Text $Desc 'Muted'; $d.TextWrapping = 'Wrap'; $d.Margin = New-Thickness 0 3 0 0; [void]$tx.Children.Add($d) }
+    $wp = [Windows.Controls.WrapPanel]::new(); $wp.Margin = New-Thickness 0 10 0 0
     [Windows.Controls.Grid]::SetRow($wp, 1)
     $list = [Collections.ArrayList]::new()
     foreach ($k in $Options.Keys) {
@@ -224,10 +226,11 @@ function New-SettingsPage {
 }
 # Disposition des Paramètres : toutes les cartes à droite, rubrique par rubrique ; sommaire à gauche, qui reste visible
 # pendant le défilement, amène à la rubrique choisie et suit la rubrique affichée.
+# rubrique Mises à jour en premier : visible dès l'ouverture des paramètres
 $SettingsSections = [ordered]@{
+    Update = @{ T = 'Mises à jour'; G = 0xE895; C = @('Mises à jour de l''application') }
     Look   = @{ T = 'Apparence'; G = 0xE790; C = @('Apparence', 'Cartes affichées') }
     Start  = @{ T = 'Démarrage et fermeture'; G = 0xE7E8; C = @('Démarrage') }
-    Update = @{ T = 'Mises à jour'; G = 0xE895; C = @('Mises à jour de l''application') }
     Save   = @{ T = 'Sauvegarde et réinitialisation'; G = 0xE777; C = @('Restauration des réglages', 'Réinitialisation') }
     About  = @{ T = 'À propos'; G = 0xE946; C = @('À propos') }
 }
@@ -265,7 +268,7 @@ function Set-SettingsLayout($P, $Cols) {
         $SetUI.SecScrollHooked = $true
         $Ui.PageSettings.Add_ScrollChanged({ Update-SettingsNav })
     }
-    Set-SettingsNavOn 'Look'
+    Set-SettingsNavOn 'Update'
 }
 function Get-SettingsTop($El) { try { $El.TranslatePoint([Windows.Point]::new(0, 0), $Ui.SettingsPanel).Y } catch { 0 } }
 function Set-SettingsNavOn([string]$Key) { foreach ($k in $SetUI.SecBtns.Keys) { $SetUI.SecBtns[$k].Tag = $(if ($k -eq $Key) { 'on' } else { '' }) } }

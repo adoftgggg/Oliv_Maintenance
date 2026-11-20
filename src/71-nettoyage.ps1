@@ -99,8 +99,7 @@ function Initialize-CleanTree {
             $cb.Add_Click($CleanItemClick)
             $line = New-CleanLine 52 $cb 'I' $it.Id
             $row = $line.Grid
-            $line.Border.ToolTip = $it.Tip; [Windows.Controls.ToolTipService]::SetShowDuration($line.Border, 30000)
-            $t = New-Text $it.Label; $t.VerticalAlignment = 'Center'
+            $t = New-LabelWithHelp (New-Text $it.Label) $it.Tip; $t.VerticalAlignment = 'Center'
             $s2 = New-Text '' 'Muted'; $s2.FontSize = 13; $s2.VerticalAlignment = 'Center'; Set-CleanSizePending $s2
             [Windows.Controls.Grid]::SetColumn($cb, 1); [Windows.Controls.Grid]::SetColumn($t, 2); [Windows.Controls.Grid]::SetColumn($s2, 3)
             [void]$row.Children.Add($cb); [void]$row.Children.Add($t); [void]$row.Children.Add($s2)
