@@ -102,7 +102,7 @@ function Complete-Run {
         $gone = @($its | Where-Object { $_.Removed } | ForEach-Object { "$($_.Id)" })
         if ($gone.Count -and $Sync.WgResult -and $Sync.WgResult.Apps) {
             $Sync.WgResult.Apps = @($Sync.WgResult.Apps | Where-Object { "$($_.Id)" -notin $gone })
-            foreach ($g in $gone) { [void]$Sync.SoftRun.Items.Remove($g) }
+            foreach ($g in $gone) { [void]$Sync.SoftRun.Items.Remove($g); if (-not $Sync.SoftGone) { $Sync.SoftGone = @{} }; $Sync.SoftGone[$g] = [DateTime]::Now }
             try { $o = @{} + $Sync.WgResult; $o.Stamp = ([DateTime]$Sync.WgResult.Stamp).ToString('o'); ConvertTo-Json -InputObject $o -Depth 4 | Set-Content -LiteralPath $SoftFile -Encoding UTF8 } catch { Write-Ignored 'Inventaire des logiciels' $_ }
             $SoftUI.CacheStamp = $null
             Write-UiLog ('Retiré(s) de la liste : {0} logiciel(s) désinstallé(s).' -f $gone.Count) 'APP'

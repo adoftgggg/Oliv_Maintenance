@@ -164,6 +164,33 @@ try {
         } catch { $e = $_.Exception; while ($e.InnerException) { $e = $e.InnerException }; $r.StoreError = $e.Message }
     }
     $r.Apps = @($apps | Where-Object { -not $_.Drop } | Sort-Object { $_.Name })
+    # entrées écartées (doublons d'un paquet déjà géré) : mémorisées pour que l'actualisation de la liste ne les fasse pas réapparaître
+    $r.Dropped = @($apps | Where-Object { $_.Drop } | ForEach-Object { "$($_.LocalId)" })
+    $r.SearchStamp = $(if ($Sync.WgListOnly) { $null } else { [DateTime]::Now.ToString('o') })
+    # simple lecture (Mes applications) avec un inventaire précédent : liste installée actualisée, informations de la dernière
+    # recherche complète conservées pour les logiciels toujours présents (rattachement au catalogue, mise à jour Store / winget
+    # disponible si toujours supérieure à la version installée) ; logiciels désinstallés entre-temps retirés
+    $prev = $Sync.WgPrev
+    if ($Sync.WgListOnly -and $prev -and -not $prev.Error -and @($prev.Apps).Count) {
+        $old = @{}; foreach ($o in @($prev.Apps)) { if ($o -and $o.LocalId) { $old["$($o.LocalId)"] = $o } }
+        $drop = @{}; foreach ($d in @($prev.Dropped)) { if ($d) { $drop["$d"] = 1 } }
+        $gone = $Sync.SoftGone
+        $keep = [Collections.ArrayList]::new()
+        foreach ($n in @($r.Apps)) {
+            $lid = "$($n.LocalId)"
+            if ($drop.ContainsKey($lid)) { continue }
+            $o = $old[$lid]
+            if ($o) {
+                if ($o.Match) { $n.Id = "$($o.Id)"; $n.Src = "$($o.Src)"; $n.SrcLabel = "$($o.SrcLabel)"; $n.Match = $true }
+                if (-not $n.To -and $o.To -and ("$($o.To)" -eq 'non publiée' -or (Compare-Ver "$($o.To)" "$($n.From)") -gt 0)) { $n.To = "$($o.To)"; if ($o.StoreId) { $n.StoreId = "$($o.StoreId)" } }
+            }
+            if ($gone -and ($gone.ContainsKey("$($n.Id)") -or $gone.ContainsKey($lid))) { continue }
+            [void]$keep.Add($n)
+        }
+        $r.Apps = @($keep); $r.Dropped = @($prev.Dropped); $r.SearchStamp = $(if ($prev.SearchStamp) { "$($prev.SearchStamp)" } elseif ($prev.Stamp) { ([DateTime]$prev.Stamp).ToString('o') } else { $null })
+        $r.ListMerge = $true
+        foreach ($k in 'StoreUpd', 'StoreNotes') { if ($null -ne $prev.$k) { $r[$k] = $prev.$k } }
+    }
 } catch { $r.Error = $_.Exception.Message }
 $r.Stamp = [DateTime]::Now
 if (-not $Sync.WgCancel) { $Sync.WgResult = $r }
@@ -196,13 +223,17 @@ function Get-SoftUpdate {
     $own = @{}; foreach ($x in @($r.Apps)) { if ($x -and -not $x.Match -and $x.Src) { $own["$($x.Id)"] = 1 } }
     @($r.Apps | Where-Object { $_ -and $_.To -and $_.Src -and -not $_.Unknown -and -not ($_.Match -and $own.ContainsKey("$($_.Id)")) })
 }
+# date de la dernière recherche complète des mises à jour (une actualisation de la liste ne la change pas)
+function Get-SoftSearchStamp($R) { $(if ($R.SearchStamp) { $R.SearchStamp } else { $R.Stamp }) }
 function Start-SoftSearch([switch]$ListOnly) {
     Close-BgJob
     if ($Sync.WgRunning -or $BgJobs.ContainsKey('Soft')) { return }
     $SoftUI.Done = $null
     $Sync.WgListOnly = [bool]$ListOnly; if (-not $ListOnly) { $SoftUI.Searched = $true }
+    $Sync.WgPrev = $Sync.WgResult; if (-not $Sync.SoftGone) { $Sync.SoftGone = @{} }
+    if ($ListOnly) { $SoftUI.ListRead = [DateTime]::Now }
     $Sync.WgCancel = $false; $Sync.WgRunning = $true; $Sync.WgStart = [DateTime]::Now; $Sync.WgStatus = 'préparation'
-    Write-UiLog $(if ($ListOnly) { 'Lecture des applications installées (winget).' } else { 'Recherche des logiciels et de leurs mises à jour (winget).' })
+    Write-UiLog $(if ($ListOnly -and $Sync.WgPrev) { 'Actualisation de la liste des applications installées (winget), liste enregistrée affichée en attendant.' } elseif ($ListOnly) { 'Lecture des applications installées (winget).' } else { 'Recherche des logiciels et de leurs mises à jour (winget).' })
     Start-BgJob 'Soft' $SoftScript
     Update-SoftCard; Update-SoftView
 }
@@ -229,19 +260,22 @@ function Update-SoftCard {
             } catch {
                 Write-Ignored 'Enregistrement de l''inventaire des logiciels' $_
             }
-            $up = @(Get-SoftUpdate)
-            $sum = $(if ($r.Error) { "Inventaire des logiciels impossible : $($r.Error)" } else { 'Inventaire des logiciels : {0} {1}, {2} {3}{4}{5}.' -f @($r.Apps).Count, (Get-Plural @($r.Apps).Count 'logiciel' 'logiciels'), $up.Count, (Get-Plural $up.Count 'mise à jour disponible' 'mises à jour disponibles'),  '', $(if (@($r.Installed).Count) { ' (installé au préalable : ' + (@($r.Installed) -join ', ') + ')' } else { '' }) })
-            Write-UiLog $sum $(if ($r.Error) { 'WARN' } else { 'INFO' })
-            if ($r.StoreError) { Write-UiLog "Microsoft Store : recherche des mises à jour impossible ($($r.StoreError))." 'WARN' }
-            foreach ($n in @($r.StoreNotes)) { if ($n) { Write-UiLog "Microsoft Store - $n" 'INFO' } }
-            Add-SessionEvent 'Logiciels' 'Recherche des mises à jour des logiciels' $(if ($r.Error) { "impossible : $($r.Error)" } else { '{0} {1}, {2} {3}' -f @($r.Apps).Count, (Get-Plural @($r.Apps).Count 'logiciel' 'logiciels'), $up.Count, (Get-Plural $up.Count 'mise à jour disponible' 'mises à jour disponibles') }) $(if ($r.Error) { 'error' } elseif ($up.Count) { 'warn' } else { 'ok' })
-            $lines = @($sum) + @($up | ForEach-Object { '   {0} [{1} {2}] : {3} > {4}{5}' -f $_.Name, $_.SrcLabel, $_.Id, $_.From, $_.To, $(if ($SoftExcl[(Get-SoftKey $_)]) { '  (exclu)' } else { '' }) })
-            $cf = Join-Path (Get-LogPath 'Logiciels') ('{0}_inventaires_{1:yyyy-MM}.log' -f $env:COMPUTERNAME, (Get-Date))
-            try {
-                [void][IO.Directory]::CreateDirectory((Split-Path $cf))
-                [IO.File]::AppendAllText($cf, (($lines | ForEach-Object { '{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $_ }) -join [Environment]::NewLine) + [Environment]::NewLine, [Text.Encoding]::UTF8)
-            } catch {
-                Write-Ignored 'Journal des inventaires de logiciels' $_
+            # actualisation de la liste (Mes applications) : enregistrée, sans nouveau bilan d'inventaire dans le journal
+            if (-not $r.ListMerge) {
+                $up = @(Get-SoftUpdate)
+                $sum = $(if ($r.Error) { "Inventaire des logiciels impossible : $($r.Error)" } else { 'Inventaire des logiciels : {0} {1}, {2} {3}{4}{5}.' -f @($r.Apps).Count, (Get-Plural @($r.Apps).Count 'logiciel' 'logiciels'), $up.Count, (Get-Plural $up.Count 'mise à jour disponible' 'mises à jour disponibles'),  '', $(if (@($r.Installed).Count) { ' (installé au préalable : ' + (@($r.Installed) -join ', ') + ')' } else { '' }) })
+                Write-UiLog $sum $(if ($r.Error) { 'WARN' } else { 'INFO' })
+                if ($r.StoreError) { Write-UiLog "Microsoft Store : recherche des mises à jour impossible ($($r.StoreError))." 'WARN' }
+                foreach ($n in @($r.StoreNotes)) { if ($n) { Write-UiLog "Microsoft Store - $n" 'INFO' } }
+                Add-SessionEvent 'Logiciels' 'Recherche des mises à jour des logiciels' $(if ($r.Error) { "impossible : $($r.Error)" } else { '{0} {1}, {2} {3}' -f @($r.Apps).Count, (Get-Plural @($r.Apps).Count 'logiciel' 'logiciels'), $up.Count, (Get-Plural $up.Count 'mise à jour disponible' 'mises à jour disponibles') }) $(if ($r.Error) { 'error' } elseif ($up.Count) { 'warn' } else { 'ok' })
+                $lines = @($sum) + @($up | ForEach-Object { '   {0} [{1} {2}] : {3} > {4}{5}' -f $_.Name, $_.SrcLabel, $_.Id, $_.From, $_.To, $(if ($SoftExcl[(Get-SoftKey $_)]) { '  (exclu)' } else { '' }) })
+                $cf = Join-Path (Get-LogPath 'Logiciels') ('{0}_inventaires_{1:yyyy-MM}.log' -f $env:COMPUTERNAME, (Get-Date))
+                try {
+                    [void][IO.Directory]::CreateDirectory((Split-Path $cf))
+                    [IO.File]::AppendAllText($cf, (($lines | ForEach-Object { '{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $_ }) -join [Environment]::NewLine) + [Environment]::NewLine, [Text.Encoding]::UTF8)
+                } catch {
+                    Write-Ignored 'Journal des inventaires de logiciels' $_
+                }
             }
         }
         $SoftUI.Fresh = $true
@@ -252,7 +286,7 @@ function Update-SoftCard {
     }
     $up = @(Get-SoftUpdate | Where-Object { -not $SoftExcl[(Get-SoftKey $_)] })
     $txt = $(if ($Sync.WgRunning) { 'Recherche en cours...' } elseif (-not $r) { 'Aucun inventaire : ouvrir pour lancer la recherche.' } elseif ($r.Error) { 'Dernière recherche impossible : ' + $r.Error } else {
-        $age = try { Format-Age ([DateTime]$r.Stamp) } catch { '' }
+        $age = try { Format-Age ([DateTime](Get-SoftSearchStamp $r)) } catch { '' }
         '{0} {1}, {2}  ·  dernière recherche : {3}' -f @($r.Apps).Count, (Get-Plural @($r.Apps).Count 'logiciel' 'logiciels'), $(if ($up.Count) { '{0} {1}' -f $up.Count, (Get-Plural $up.Count 'mise à jour disponible' 'mises à jour disponibles') } else { 'tous à jour' }), $age })
     if ($SoftUI.CardText.Text -ne $txt) { $SoftUI.CardText.Text = $txt }
     $mt = $(if ($up.Count) { "Mettre à jour ($($up.Count))" } else { 'Mettre à jour' }); if ($Ui.AppsModeUpdTxt.Text -ne $mt) { $Ui.AppsModeUpdTxt.Text = $mt }
@@ -504,7 +538,7 @@ function Set-SoftScope([string]$Mode) {
     # Mettre à jour : recherche complète à la 1re ouverture de la session
     if (-not $Sync.WgRunning -and -not (Test-SoftUpgrading)) {
         if ($Mode -eq 'Upd' -and -not $SoftUI.Searched) { Start-SoftSearch }
-        elseif ($Mode -eq 'Mine' -and -not $Sync.WgResult) { Start-SoftSearch -ListOnly }
+        elseif ($Mode -eq 'Mine' -and (-not $Sync.WgResult -or -not $SoftUI.ListRead -or ([DateTime]::Now - $SoftUI.ListRead).TotalMinutes -ge 2)) { Start-SoftSearch -ListOnly }
     }
     if ($SoftUI.SelSet -and $SoftUI.SelSet.Count) { $SoftUI.SelSet.Clear(); Update-SoftSelection }
     Update-SoftView
@@ -835,7 +869,7 @@ function Update-SoftStatus {
     $mine = $SoftUI.Filter -eq 'All'
     # Mes applications : actions sur chaque ligne (et clic droit pour la sélection multiple), pas de boutons en bas
     $SoftUI.Reinst.Visibility = 'Collapsed'
-    foreach ($e in @($SoftUI.RowCache.Values)) { if ($e -and $e.Acts) { foreach ($b in $e.Acts.Children) { $b.IsEnabled = -not ($Sync.Running -or $Sync.WgRunning) } } }
+    foreach ($e in @($SoftUI.RowCache.Values)) { if ($e -and $e.Acts) { foreach ($b in $e.Acts.Children) { $b.IsEnabled = -not ($Sync.Running -or ($Sync.WgRunning -and -not $Sync.WgListOnly)) } } }
     if ($mine) {
         # Mes applications : actions sur la sélection (clic, Ctrl + clic, Maj + clic) ; boutons grisés sans sélection
         $rm = @(Get-SoftRemoveTarget)
@@ -856,7 +890,7 @@ function Update-SoftStatus {
         elseif (-not $r) { 'Aucun inventaire.' }
         elseif ($r.Error) { 'Recherche impossible : ' + $r.Error }
         else {
-            $age = try { Format-Age ([DateTime]$r.Stamp) } catch { '' }
+            $age = try { Format-Age ([DateTime](Get-SoftSearchStamp $r)) } catch { '' }
             $(if ($Sync.SoftRun) { (Get-SoftRunSummary $false) + '  ·  ' } else { '' }) + ('Dernière recherche : {0}  ·  winget {1}' -f $age, $(if ($r.WingetVer) { $r.WingetVer } else { '?' }))
         })
     if ($SoftUI.Status.Text -ne $st) { $SoftUI.Status.Text = $st }
@@ -873,7 +907,8 @@ function Set-SoftRowMode($E) {
     $mine = $SoftUI.Filter -eq 'All'
     $E.Grid.ColumnDefinitions[3].Width = [Windows.GridLength]::new($(if ($mine) { 250 } else { 170 }))
     $E.Acts.Visibility = $(if ($mine -and -not $E.Row.DataContext.Orphan) { 'Visible' } else { 'Collapsed' })
-    $busy = $Sync.Running -or $Sync.WgRunning
+    # actions de ligne indisponibles seulement pendant une tâche (une actualisation de la liste en arrière-plan ne bloque rien)
+    $busy = $Sync.Running -or ($Sync.WgRunning -and -not $Sync.WgListOnly)
     foreach ($b in $E.Acts.Children) { $b.IsEnabled = -not $busy }
     $E.BRm.ToolTip = $(if (-not (Get-SoftLocalId $E.Row.DataContext)) { 'Inconnu de winget : ouvre le désinstalleur du logiciel (Paramètres > Applications)' } else { $null })
 }
@@ -942,7 +977,7 @@ function Invoke-SoftRowRemove($App) {
 }
 function Get-SoftRowEntry($App, [bool]$Avail) {
     $k = Get-SoftKey $App; $ex = [bool]$SoftExcl[$k]
-    $sig = '{0}|{1}|{2}|{3}|{4}|{5}' -f $SoftUI.CacheStamp, $ex, $App.From, $App.To, $App.SrcLabel, $App.Unknown
+    $sig = '{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}' -f $App.Name, $ex, $App.From, $App.To, $App.SrcLabel, $App.Unknown, $App.Orphan, $App.Id
     $e = $SoftUI.RowCache[$k]
     if ($e -and $e.Sig -eq $sig) {
         # réutilisation : colonne DISPONIBLE selon l'onglet, cellule SOURCE / ÉTAT remise à l'état de l'inventaire
@@ -952,6 +987,8 @@ function Get-SoftRowEntry($App, [bool]$Avail) {
         $c4.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($App.Orphan) { 'WarnFgBrush' } else { 'MutedBrush' }))
         $c4.FontWeight = [Windows.FontWeights]::Normal
         $c4.ToolTip = $(if ($App.Match) { "Rattaché par le nom au paquet winget $($App.Id)" } else { $null })
+        # données de la ligne remplacées par celles de l'inventaire actualisé (actions, double clic, menu)
+        $e.Row.DataContext = $App; foreach ($b in $e.Acts.Children) { $b.DataContext = $App }
         Set-SoftRowMode $e
         return $e
     }
@@ -1155,7 +1192,13 @@ function Update-SoftView {
     $SoftUI.List.Children.Clear(); $SoftUI.Rows = @{}; $SoftUI.Order = [Collections.ArrayList]::new(); $SoftUI.SrcCells = @{}
     if (-not $SoftUI.SelSet) { $SoftUI.SelSet = [Collections.Generic.HashSet[string]]::new() }
     # nouvel inventaire : lignes conservées de l'inventaire précédent libérées
-    $stamp = "$($r.Stamp)"; if (-not $SoftUI.RowCache -or $SoftUI.CacheStamp -ne $stamp) { $SoftUI.RowCache = @{}; $SoftUI.CacheStamp = $stamp }
+    # lignes gardées d'un inventaire à l'autre (signature : nom, versions, source...) ; lignes des logiciels disparus libérées
+    if (-not $SoftUI.RowCache) { $SoftUI.RowCache = @{} }
+    $stamp = "$($r.Stamp)"
+    if ($SoftUI.CacheStamp -ne $stamp) {
+        $SoftUI.CacheStamp = $stamp; $live = @{}; foreach ($a in $apps) { $live[(Get-SoftKey $a)] = 1 }
+        foreach ($k in @($SoftUI.RowCache.Keys)) { if (-not $live.ContainsKey($k)) { $SoftUI.RowCache.Remove($k) } }
+    }
     foreach ($a in $show) { [void]$SoftUI.Order.Add((Get-SoftKey $a)) }
     # affichage progressif : 40 premières lignes tout de suite, la suite par lots de 60 quand l'interface est libre
     # (une vue plus récente, filtre ou recherche, annule les lots restants)
