@@ -118,7 +118,9 @@ $BgJobDone['UpdDl'] = {
 }
 function Show-UpdNote {
     $r = $UpdUI.Info; if (-not $r) { return }
-    $n = $(if ($r.Notes.Trim()) { $r.Notes.Trim() -replace '(?m)^#+\s*', '' -replace '\*\*', '' } else { 'Pas de notes pour cette version.' })
+    # pied technique de la publication (nom de l'exe, taille, SHA-256, lien) : lu par la vérification du téléchargement, non affiché
+    $t = ("$($r.Notes)" -replace '(?m)^\s*(Exe|T.l.chargement)\s*:.*$', '').Trim()
+    $n = $(if ($t) { $t -replace '(?m)^#+\s*', '' -replace '\*\*', '' } else { 'Pas de notes pour cette version.' })
     $v = Show-Dialog ("Nouveautés de la version {0}`n`n{1}" -f (Get-UpdVersion $r.Tag), $n) 'Info' @(@{ T = 'Voir sur GitHub'; V = 'web' }, @{ T = 'Mettre à jour'; V = 'go'; S = 'PrimaryBtn' }, @{ T = 'Fermer'; V = 'no'; C = $true }) $null $null 640
     if ($v -eq 'web') { Start-Process $r.Page } elseif ($v -eq 'go') { Start-UpdInstall }
 }
