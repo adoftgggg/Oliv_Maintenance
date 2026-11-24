@@ -408,9 +408,8 @@ function New-NetPortSection($Body) {
     $t = New-Text 'Ports ouverts sur le réseau'; $t.FontWeight = [Windows.FontWeights]::SemiBold; $t.VerticalAlignment = 'Center'; [void]$hd.Children.Add($t)
     $lk = [Windows.Controls.StackPanel]::new(); $lk.Orientation = 'Horizontal'; [Windows.Controls.Grid]::SetColumn($lk, 1)
     foreach ($x in @(@('Connexions actives', { Show-NetConnection }), @('Actualiser', { Update-NetCard }))) {
-        $h = [Windows.Documents.Hyperlink]::new([Windows.Documents.Run]::new($x[0])); $h.Add_Click($x[1])
-        $h.SetResourceReference([Windows.Documents.TextElement]::ForegroundProperty, 'AccentBrush')
-        $tb = [Windows.Controls.TextBlock]::new(); $tb.Inlines.Add($h); $tb.Margin = New-Thickness 12 0 0 0; [void]$lk.Children.Add($tb)
+        # boutons standard (même style que le reste de l'application), plus de liens
+        $bt = New-Button $x[0]; $bt.Height = 26; $bt.MinWidth = 84; $bt.Margin = New-Thickness 8 0 0 0; $bt.Add_Click($x[1]); [void]$lk.Children.Add($bt)
     }
     [void]$hd.Children.Add($lk); [void]$Body.Children.Add($hd)
     $NetUI.Body = [Windows.Controls.StackPanel]::new(); [void]$Body.Children.Add($NetUI.Body)

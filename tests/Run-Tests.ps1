@@ -239,7 +239,7 @@ Test-Eq 'Constructeur : installation 35 %'      (Get-OemItemText @{ State = 'run
 Test-Eq 'Constructeur : outil Lenovo sans %'    (Get-OemItemText @{ State = 'run'; Phase = 'téléchargement et installation'; Pct = -1 }).Text 'téléchargement et installation...'
 Test-Eq 'Constructeur : installé + redémarrage' (Get-OemItemText @{ State = 'ok'; Phase = 'redémarrage requis' }).Text 'installé, redémarrage requis'
 Test-Eq 'Constructeur : échec HRESULT'          (Get-OemItemText @{ State = 'fail'; Code = 2149842967L }).Text 'échec (0x80240017)'
-Test-Eq 'Constructeur : plus proposé'           (Get-OemItemText @{ State = 'skip'; Phase = 'plus proposé' }).Text 'plus proposé'
+Test-Eq 'Constructeur : plus proposé'           (Get-OemItemText @{ State = 'skip'; Phase = 'plus proposé' }).Text 'déjà à jour (plus proposé)'
 
 # ---------- journal filtrable
 Import-SrcFunction Test-LogLine

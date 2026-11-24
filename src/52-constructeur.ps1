@@ -431,7 +431,7 @@ function Get-OemItemText($It) {
             $c = [int64]$It.Code
             @{ Text = $(if ($c) { 'échec (0x{0:X8})' -f $(if ($c -lt 0) { $c + 4294967296 } else { $c }) } else { 'échec' }); Brush = 'ErrFgBrush' }
         }
-        'skip' { @{ Text = $(if ($It.Phase) { "$($It.Phase)" } else { 'non installé' }); Brush = 'WarnFgBrush' } }
+        'skip' { @{ Text = $(if ($It.Phase) { 'déjà à jour (' + "$($It.Phase)" + ')' } else { 'non installé' }); Brush = $(if ($It.Phase) { 'OkFgBrush' } else { 'WarnFgBrush' }) } }
         default { $null }
     }
 }
@@ -568,8 +568,10 @@ function Show-OemResult {
         $parts = @()
         if ($nOk) { $parts += '{0} {1}' -f $nOk, (Get-Plural $nOk 'installée' 'installées') }
         if ($nKo) { $parts += '{0} en échec' -f $nKo }
-        if ($nSk) { $parts += '{0} non {1}' -f $nSk, (Get-Plural $nSk 'installée' 'installées') }
-        $v = Add-KV $p 'Dernière installation' ($parts -join ', ') $(if ($nKo) { 'ErrFgBrush' } elseif ($nSk) { 'WarnFgBrush' } else { 'OkFgBrush' })
+        # « skip » = paquet plus proposé à la nouvelle détection juste avant l'installation : déjà installé entre-temps (Windows
+        # Update, Lenovo Vantage...) ou devenu inutile ; ce n'est pas un échec
+        if ($nSk) { $parts += '{0} déjà à jour (plus proposée{1} par le constructeur)' -f $nSk, $(if ($nSk -gt 1) { 's' } else { '' }) }
+        $v = Add-KV $p 'Dernière installation' ($parts -join ', ') $(if ($nKo) { 'ErrFgBrush' } else { 'OkFgBrush' })
         $v.ToolTip = (@($its | Sort-Object { $_.Name } | ForEach-Object { '{0} : {1}' -f $_.Name, (Get-OemItemText $_).Text }) -join "`n")
     }
     # analyse du constructeur faite avec une référence partielle (HP : version de Windows non suivie pour ce modèle)

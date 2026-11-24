@@ -239,20 +239,15 @@ function Add-AvScanMenu($V, [string]$Main) {
         $mi = [Windows.Controls.MenuItem]::new(); $mi.Header = $(if ($Main -match '(?i)sophos') { "Analyse impossible : $SophosCli introuvable" } else { "Analyse à lancer depuis la console de $name" }); $mi.IsEnabled = $false; [void]$cm.Items.Add($mi)
         $g.ToolTip = "Antivirus principal : $name"
     }
-    # libellé « Antivirus » en lien (couleur d'accent, souligné, chevron) : ligne cliquable visible sans survol. Libellé
-    # d'origine (TextBox, lu par la copie de la carte) masqué ; textes de la ligne transparents aux clics (une TextBox
-    # garde le clic pour la sélection, le menu ne s'ouvrait pas)
+    # bouton « Analyser » sous le libellé « Antivirus » (colonne des libellés, aligné à gauche), ouvre le menu des analyses
     $k = $g.Children[0]; $k.Visibility = 'Collapsed'
-    $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; $sp.VerticalAlignment = 'Top'; $sp.Margin = New-Thickness 0 0 12 0
-    $t = New-Text "$($k.Text)"; $t.FontSize = 13; $t.FontWeight = [Windows.FontWeights]::SemiBold; $t.TextDecorations = [Windows.TextDecorations]::Underline
-    $t.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'AccentBrush')
-    $ch = New-Text ([string][char]0xE70D); $ch.FontFamily = [Windows.Media.FontFamily]::new('Segoe MDL2 Assets'); $ch.FontSize = 10; $ch.Margin = New-Thickness 6 4 0 0
-    $ch.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'AccentBrush')
-    [void]$sp.Children.Add($t); [void]$sp.Children.Add($ch)
+    $sp = [Windows.Controls.StackPanel]::new(); $sp.VerticalAlignment = 'Top'
+    $t = New-Text "$($k.Text)"; $t.FontSize = $k.FontSize; $t.Foreground = $k.Foreground; $t.Margin = $k.Margin; [void]$sp.Children.Add($t)
+    $b = New-Button ('Analyser  ' + [char]0x25BE); $b.Height = 26; $b.MinWidth = 84; $b.Margin = New-Thickness 0 6 0 0; $b.HorizontalAlignment = 'Left'
+    $b.ContextMenu = $cm; $b.ToolTip = $g.ToolTip
+    $b.Add_Click({ param($s, $e) $s.ContextMenu.PlacementTarget = $s; $s.ContextMenu.Placement = 'Bottom'; $s.ContextMenu.IsOpen = $true })
+    [void]$sp.Children.Add($b)
     [Windows.Controls.Grid]::SetColumn($sp, 0); [void]$g.Children.Add($sp)
-    $V.IsHitTestVisible = $false; $sp.IsHitTestVisible = $false
-    $g.Background = [Windows.Media.Brushes]::Transparent; $g.Cursor = [Windows.Input.Cursors]::Hand; $g.ContextMenu = $cm
-    $g.Add_MouseLeftButtonUp({ param($s, $e) $s.ContextMenu.PlacementTarget = $s; $s.ContextMenu.Placement = 'Bottom'; $s.ContextMenu.IsOpen = $true })
 }
 function Start-AvScan([string]$Engine, [string]$Type, [string]$Name) {
     if ($BgJobs.ContainsKey('AvScan')) { return }
