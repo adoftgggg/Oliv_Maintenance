@@ -47,7 +47,19 @@ try {
     try { $r.WingetVer = "$(& $wg --version 2>$null | Select-Object -First 1)".Trim() } catch {}
     $Sync.WgStatus = 'inventaire des logiciels (winget)'
     $apps = [Collections.ArrayList]::new()
-    foreach ($pk in @(Get-WinGetPackage -ErrorAction Stop)) {
+    # « Failed to create instance: -2147023174 » (0x800706BA, serveur RPC indisponible) : le module ne joint pas le service
+    # de winget (Programme d'installation d'application absent, abîmé ou trop ancien) ; réparation automatique
+    # (Repair-WinGetPackageManager -Latest, recommandé par Microsoft) puis un nouvel essai, sinon message explicite
+    $pkList = $null
+    try { $pkList = @(Get-WinGetPackage -ErrorAction Stop) }
+    catch {
+        if ("$($_.Exception.Message)" -notmatch '2147023174|800706BA|create instance') { throw }
+        $Sync.WgStatus = 'réparation de winget (service indisponible)'
+        try { Repair-WinGetPackageManager -Latest -Force -ErrorAction Stop | Out-Null; $r.Installed += 'réparation de winget' } catch { $null = $_ }
+        try { $pkList = @(Get-WinGetPackage -ErrorAction Stop) }
+        catch { throw 'le service winget ne répond pas (0x800706BA) malgré une réparation automatique : mettre à jour « Programme d''installation d''application » (App Installer) dans le Microsoft Store, puis relancer la recherche.' }
+    }
+    foreach ($pk in $pkList) {
         $from = "$($pk.InstalledVersion)"; $to = $null; $unk = $false; $last = "$(@($pk.AvailableVersions)[0])"
         $src = "$($pk.Source)"
         if ($from -match '^(Unknown|Inconnu)') {
