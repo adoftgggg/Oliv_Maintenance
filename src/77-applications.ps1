@@ -340,10 +340,10 @@ function Set-AppsIcon {
         $fresh = "$b.bank.png"; $hasFresh = [IO.File]::Exists($fresh) -and ([IO.FileInfo]::new($fresh)).Length -gt 200
         if (-not $real -and -not $o.IconSet -and ($hasFresh -or $AppIconBank.ContainsKey($o.Id))) {
             try {
-                $bi = [Windows.Media.Imaging.BitmapImage]::new(); $bi.BeginInit(); $bi.CacheOption = 'OnLoad'; $bi.DecodePixelWidth = 64
+                $bi = [Windows.Media.Imaging.BitmapImage]::new(); $bi.BeginInit(); $bi.CacheOption = 'OnLoad'; $bi.DecodePixelWidth = 128
                 if ($hasFresh) { $bi.UriSource = [Uri]::new($fresh) } else { $bi.StreamSource = [IO.MemoryStream]::new([Convert]::FromBase64String($AppIconBank[$o.Id])) }
                 $bi.EndInit(); $bi.Freeze()
-                $im = [Windows.Controls.Image]::new(); $im.Source = $bi; $im.Width = 30; $im.Height = 30; [Windows.Media.RenderOptions]::SetBitmapScalingMode($im, 'HighQuality')
+                $im = [Windows.Controls.Image]::new(); $im.Source = $bi; $im.Width = 34; $im.Height = 34; [Windows.Media.RenderOptions]::SetBitmapScalingMode($im, 'HighQuality')
                 $o.Icon.Background = [Windows.Media.Brushes]::White; $o.Icon.Child = $im; $o.IconSet = $true
             } catch { Write-Ignored 'Icône embarquée' $_ }
             continue
@@ -352,9 +352,9 @@ function Set-AppsIcon {
         $f = $(if ($real) { "$b.app.png" } else { "$b.png" })
         if (-not [IO.File]::Exists($f) -or (Get-Item -LiteralPath $f).Length -lt 200) { continue }
         try {
-            $bi = [Windows.Media.Imaging.BitmapImage]::new(); $bi.BeginInit(); $bi.CacheOption = 'OnLoad'; $bi.UriSource = [Uri]::new($f); $bi.DecodePixelWidth = 64; $bi.EndInit(); $bi.Freeze()
+            $bi = [Windows.Media.Imaging.BitmapImage]::new(); $bi.BeginInit(); $bi.CacheOption = 'OnLoad'; $bi.UriSource = [Uri]::new($f); $bi.DecodePixelWidth = 128; $bi.EndInit(); $bi.Freeze()
             if ($bi.PixelWidth -lt 32 -and -not $real) { continue }   # icône générique 16 px du service = site sans icône : initiales gardées
-            $im = [Windows.Controls.Image]::new(); $im.Source = $bi; $im.Width = 30; $im.Height = 30
+            $im = [Windows.Controls.Image]::new(); $im.Source = $bi; $im.Width = 34; $im.Height = 34; [Windows.Media.RenderOptions]::SetBitmapScalingMode($im, 'HighQuality')
             [Windows.Media.RenderOptions]::SetBitmapScalingMode($im, 'HighQuality')
             $o.Icon.Background = [Windows.Media.Brushes]::White; $o.Icon.Child = $im; $o.IconSet = $true; $o.IconReal = $real
         } catch { Write-Ignored 'Icône d''application' $_ }
@@ -373,9 +373,9 @@ function Start-AppsIconDownload {
             if ($AppsUI.Installed -and $AppsUI.Installed.Contains($o.Id) -and -not [IO.File]::Exists("$b.app.png")) { @{ F = "$b.app.png"; N = "$($o.A[0])" } } })
     # banque : icônes réactualisées depuis le dépôt source (30 jours au plus)
     $bank = @(foreach ($o in $AppsUI.Tiles.Values) {
-            if (-not $AppIconSlug.ContainsKey($o.Id)) { continue }
+            if (-not $AppIconSrc.ContainsKey($o.Id)) { continue }
             $f = Join-Path $AppsUI.IconDir (($o.Id -replace '[^\w.+-]', '_') + '.bank.png')
-            if (-not [IO.File]::Exists($f) -or [IO.File]::GetLastWriteTime($f) -lt [DateTime]::Now.AddDays(-30)) { @{ F = $f; S = $AppIconSlug[$o.Id] } } })
+            if (-not [IO.File]::Exists($f) -or [IO.File]::GetLastWriteTime($f) -lt [DateTime]::Now.AddDays(-30)) { @{ F = $f; S = $AppIconSrc[$o.Id] } } })
     if (-not $todo.Count -and -not $real.Count -and -not $bank.Count) { return }
     $Sync.AppsIconTodo = $todo; $Sync.AppsIconReal = $real; $Sync.AppsIconBank = $bank; $Sync.AppsIconDir = $AppsUI.IconDir
     Start-BgJob 'AppsIcons' @'
@@ -386,7 +386,7 @@ foreach ($x in @($Sync.AppsIconTodo)) {
     try { $wc.DownloadFile(('https://www.google.com/s2/favicons?domain={0}&sz=64' -f [uri]::EscapeDataString(($x.D -split '/')[0])), $x.F) } catch {}
 }
 foreach ($x in @($Sync.AppsIconBank)) {
-    try { $tmp = $x.F + '.tmp'; $wc.DownloadFile(('https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/png/{0}.png' -f $x.S), $tmp); if ((Get-Item -LiteralPath $tmp).Length -gt 200) { Move-Item -LiteralPath $tmp -Destination $x.F -Force } else { Remove-Item -LiteralPath $tmp -Force } } catch { $null = $_ }
+    try { $tmp = $x.F + '.tmp'; $wc.DownloadFile($x.S, $tmp); if ((Get-Item -LiteralPath $tmp).Length -gt 200) { Move-Item -LiteralPath $tmp -Destination $x.F -Force } else { Remove-Item -LiteralPath $tmp -Force } } catch { $null = $_ }
 }
 $wc.Dispose()
 if (@($Sync.AppsIconReal).Count) {
