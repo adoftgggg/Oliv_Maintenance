@@ -471,18 +471,21 @@ function Get-NetFast {
 function Update-InfoFast([switch]$Force) {
     $f = $InfoUI.F
     if ($Force) { $InfoUI.RebootSig = $null; $InfoUI.VolFastSig = $null }
-    $pending = (Test-RegKey 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') -or
-               (Test-RegKey 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')
-    $plan = $Sync.RebootAt -and $Sync.RebootAt -gt [DateTime]::Now
-    $rsig = '{0}|{1}|{2:yyyyMMddHHmm}|{3:yyyyMMdd}' -f $pending, $plan, $Sync.RebootAt, [DateTime]::Today
+    $rs = Get-RebootState -Force:$Force
+    $pending = [bool]@($rs.Why).Count
+    # programmé : par l'outil (shutdown /r /t) ou par Windows Update (Paramètres > Planifier le redémarrage)
+    $at = $(if ($Sync.RebootAt -and $Sync.RebootAt -gt [DateTime]::Now) { $Sync.RebootAt } elseif ($rs.WuAt) { $rs.WuAt } else { $null })
+    $plan = [bool]$at
+    $rsig = '{0}|{1:yyyyMMddHHmm}|{2:yyyyMMdd}' -f (@($rs.Why) -join ';'), $at, [DateTime]::Today
     if ($rsig -ne $InfoUI.RebootSig) {
         $InfoUI.RebootSig = $rsig
-        $when = $(if ($plan -and $Sync.RebootAt.Date -eq [DateTime]::Today) { 'à {0:HH:mm}' -f $Sync.RebootAt } elseif ($plan) { 'le {0:dd/MM} à {0:HH:mm}' -f $Sync.RebootAt } else { '' })
+        $when = $(if ($plan -and $at.Date -eq [DateTime]::Today) { 'à {0:HH:mm}' -f $at } elseif ($plan) { 'le {0:dd/MM} à {0:HH:mm}' -f $at } else { '' })
+        $who = $(if ($plan -and -not ($Sync.RebootAt -and $Sync.RebootAt -gt [DateTime]::Now)) { ' par Windows Update' } else { '' })
         $row = $f['Redémarrage en attente']
         $row.Text = $(
-            if ($pending -and $plan) { 'Oui, programmé {0}' -f $when }
-            elseif ($pending) { 'Oui (CBS / Windows Update) - redémarrer avant DISM' }
-            elseif ($plan) { 'Non, mais redémarrage programmé à {0:HH:mm}' -f $Sync.RebootAt }
+            if ($pending -and $plan) { "Oui, programmé {0}{1}`n- {2}" -f $when, $who, (@($rs.Why) -join "`n- ") }
+            elseif ($pending) { "Oui :`n- " + (@($rs.Why) -join "`n- ") }
+            elseif ($plan) { 'Non, mais redémarrage programmé {0}{1}' -f $when, $who }
             else { 'Non' }
         )
         $row.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, $(if ($pending) { 'WarnFgBrush' } else { 'OkFgBrush' }))

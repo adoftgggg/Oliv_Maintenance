@@ -632,8 +632,8 @@
                       <TextBlock TextWrapping="Wrap" x:Name="SmartStatus" Style="{StaticResource Muted}" Text="Santé, température, usure, heures de fonctionnement, erreurs"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="SmartLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="SmartBtn" Content="Analyser" Style="{StaticResource ActionBtn}" Margin="0,0,6,0" MinWidth="96"/>
+                      <TextBlock x:Name="SmartLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                      <Button x:Name="SmartBtn" Content="Analyser" Style="{StaticResource ActionBtn}" Margin="0,0,6,0" Width="124"/>
                       <Button x:Name="SmartOpenBtn" Content="Ouvrir" Style="{StaticResource ActionBtn}" MinWidth="96" IsEnabled="False" ToolTip="Dernier rapport SMART"/>
                     </StackPanel>
                   </Grid>
@@ -645,8 +645,8 @@
                       <TextBlock TextWrapping="Wrap" x:Name="OptimizeStatus" Style="{StaticResource Muted}" Tag="TRIM sur SSD, défragmentation sur disque dur" Text="TRIM sur SSD, défragmentation sur disque dur"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="OptimizeLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="OptimizeBtn" Content="Optimiser" Style="{StaticResource ActionBtn}" MinWidth="96"/>
+                      <TextBlock x:Name="OptimizeLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                      <Button x:Name="OptimizeBtn" Content="Optimiser" Style="{StaticResource ActionBtn}" Width="124"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -657,8 +657,8 @@
                       <TextBlock TextWrapping="Wrap" x:Name="BatteryStatus" Style="{StaticResource Muted}" Text="Capacité d&apos;origine et actuelle, usure, historique d&apos;utilisation"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="BatteryLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="BatteryBtn" Content="Générer" Style="{StaticResource ActionBtn}" Margin="0,0,6,0" MinWidth="96"/>
+                      <TextBlock x:Name="BatteryLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                      <Button x:Name="BatteryBtn" Content="Générer" Style="{StaticResource ActionBtn}" Margin="0,0,6,0" Width="124"/>
                       <Button x:Name="BatteryOpenBtn" Content="Ouvrir" Style="{StaticResource ActionBtn}" MinWidth="96" IsEnabled="False" ToolTip="Dernier rapport batterie"/>
                     </StackPanel>
                   </Grid>
@@ -676,8 +676,8 @@
                       <TextBlock TextWrapping="Wrap" x:Name="WuResetStatus" Style="{StaticResource Muted}" Tag="Mises à jour bloquées ou en échec : services, files BITS, DataStore, Download et catroot2 réinitialisés" Text="Mises à jour bloquées ou en échec : services, files BITS, DataStore, Download et catroot2 réinitialisés"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="WuResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="WuResetBtn" Content="Réinitialiser" Style="{StaticResource WarnBtn}" MinWidth="96"/>
+                      <TextBlock x:Name="WuResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                      <Button x:Name="WuResetBtn" Content="Réinitialiser" Style="{StaticResource WarnBtn}" Width="124"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -688,8 +688,8 @@
                       <TextBlock TextWrapping="Wrap" x:Name="NetCheckStatus" Style="{StaticResource Muted}" Tag="Pas d&apos;accès réseau ou Internet : carte, passerelle, DNS, domaine et Internet testés pas à pas" Text="Pas d&apos;accès réseau ou Internet : carte, passerelle, DNS, domaine et Internet testés pas à pas"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="NetCheckLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="NetCheckBtn" Content="Tester" Style="{StaticResource ActionBtn}" MinWidth="96"/>
+                      <TextBlock x:Name="NetCheckLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                      <Button x:Name="NetCheckBtn" Content="Tester" Style="{StaticResource ActionBtn}" Width="124"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -700,8 +700,8 @@
                       <TextBlock TextWrapping="Wrap" x:Name="StoreResetStatus" Style="{StaticResource Muted}" Tag="Store bloqué ou téléchargements en échec : cache local de l&apos;utilisateur vidé" Text="Store bloqué ou téléchargements en échec : cache local de l&apos;utilisateur vidé"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="StoreResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="StoreResetBtn" Content="Vider le cache" Style="{StaticResource WarnBtn}" MinWidth="96"/>
+                      <TextBlock x:Name="StoreResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                      <Button x:Name="StoreResetBtn" Content="Vider le cache" Style="{StaticResource WarnBtn}" Width="124"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -712,8 +712,8 @@
                       <TextBlock TextWrapping="Wrap" x:Name="GpuResetStatus" Style="{StaticResource Muted}" Tag="Écran figé, artefacts ou scintillement : pilote de la carte graphique redémarré" Text="Écran figé, artefacts ou scintillement : pilote de la carte graphique redémarré"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="GpuResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="GpuResetBtn" Content="Redémarrer" Style="{StaticResource WarnBtn}" MinWidth="96"/>
+                      <TextBlock x:Name="GpuResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                      <Button x:Name="GpuResetBtn" Content="Redémarrer" Style="{StaticResource WarnBtn}" Width="124"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -724,8 +724,8 @@
                       <TextBlock TextWrapping="Wrap" x:Name="NetResetStatus" Style="{StaticResource Muted}" Tag="Connexion ou résolution DNS en échec : cache DNS vidé et Winsock réinitialisé (redémarrage requis)" Text="Connexion ou résolution DNS en échec : cache DNS vidé et Winsock réinitialisé (redémarrage requis)"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="NetResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="NetResetBtn" Content="Réinitialiser" Style="{StaticResource WarnBtn}" MinWidth="96"/>
+                      <TextBlock x:Name="NetResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                      <Button x:Name="NetResetBtn" Content="Réinitialiser" Style="{StaticResource WarnBtn}" Width="124"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -736,8 +736,8 @@
                       <TextBlock TextWrapping="Wrap" x:Name="SpoolResetStatus" Style="{StaticResource Muted}" Tag="Impressions bloquées : file d&apos;attente vidée et service redémarré" Text="Impressions bloquées : file d&apos;attente vidée et service redémarré"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="SpoolResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="SpoolResetBtn" Content="Purger" Style="{StaticResource WarnBtn}" MinWidth="96"/>
+                      <TextBlock x:Name="SpoolResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                      <Button x:Name="SpoolResetBtn" Content="Purger" Style="{StaticResource WarnBtn}" Width="124"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -748,8 +748,8 @@
                       <TextBlock TextWrapping="Wrap" x:Name="TimeSyncStatus" Style="{StaticResource Muted}" Tag="Heure décalée, erreurs de certificat ou d&apos;ouverture de session : heure resynchronisée sur le serveur de temps" Text="Heure décalée, erreurs de certificat ou d&apos;ouverture de session : heure resynchronisée sur le serveur de temps"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="TimeSyncLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="TimeSyncBtn" Content="Synchroniser" Style="{StaticResource ActionBtn}" MinWidth="96"/>
+                      <TextBlock x:Name="TimeSyncLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                      <Button x:Name="TimeSyncBtn" Content="Synchroniser" Style="{StaticResource ActionBtn}" Width="124"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -760,8 +760,8 @@
                       <TextBlock TextWrapping="Wrap" x:Name="GpForceStatus" Style="{StaticResource Muted}" Tag="GPO non appliquées ou récemment modifiées : toutes les stratégies ordinateur et utilisateur réappliquées" Text="GPO non appliquées ou récemment modifiées : toutes les stratégies ordinateur et utilisateur réappliquées"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="GpForceLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="GpForceBtn" Content="Appliquer" Style="{StaticResource WarnBtn}" MinWidth="96"/>
+                      <TextBlock x:Name="GpForceLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                      <Button x:Name="GpForceBtn" Content="Appliquer" Style="{StaticResource WarnBtn}" Width="124"/>
                     </StackPanel>
                   </Grid>
                 </Border>

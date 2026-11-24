@@ -6,6 +6,10 @@
 $UpdRepo = 'adoftgggg/Oliv_Maintenance'
 $UpdUI = @{ Info = $null; Dismissed = $false; Checked = $null }
 function Get-UpdAuto { $v = Get-RegValue $CardRegKey 'MajAuLancement'; $null -eq $v -or [int]$v -eq 1 }
+# recherche des mises à jour des logiciels installés (winget, Microsoft Store) en arrière-plan 30 s après le lancement ;
+# choix dans HKCU\Software\Oliv_Maintenance\Affichage\MajLogicielsAuLancement (activé par défaut)
+function Get-SoftAuto { $v = Get-RegValue $CardRegKey 'MajLogicielsAuLancement'; $null -eq $v -or [int]$v -eq 1 }
+function Set-SoftAuto([bool]$On) { try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue('MajLogicielsAuLancement', [int]$On, [Microsoft.Win32.RegistryValueKind]::DWord) } finally { $k.Close() } } catch { Write-Ignored 'Recherche des mises à jour des logiciels au lancement' $_ } }
 function Set-UpdAuto([bool]$On) { try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue('MajAuLancement', [int]$On, [Microsoft.Win32.RegistryValueKind]::DWord) } finally { $k.Close() } } catch { Write-Ignored 'Mises à jour au lancement' $_ } }
 function Get-UpdVersion([string]$Tag) { $t = $Tag -replace '^[vV]', ''; try { [version]$t } catch { $null } }
 
@@ -128,4 +132,16 @@ $Ui.UpdGo.Add_Click({ Start-UpdInstall })
 $Ui.UpdNotes.Add_Click({ Show-UpdNote })
 $Ui.UpdLater.Add_Click({ $UpdUI.Dismissed = $true; $Ui.UpdBar.Visibility = 'Collapsed' })
 # recherche au lancement, une fois l'interface prête (réseau en tâche de fond, sans effet sur l'ouverture)
+if (Get-SoftAuto) {
+    $SoftAutoTimer = [Windows.Threading.DispatcherTimer]::new(); $SoftAutoTimer.Interval = [TimeSpan]::FromSeconds(30)
+    $SoftAutoTimer.Add_Tick({
+        $SoftAutoTimer.Stop()
+        try {
+            if ($Sync.WgRunning -or $Sync.Running -or (Test-SoftUpgrading)) { Write-UiLog 'Recherche des mises à jour des logiciels au lancement : reportée (tâche déjà en cours).' 'APP'; return }
+            Write-UiLog 'Recherche des mises à jour des logiciels installés en arrière-plan (lancement de l''application).' 'APP'
+            Start-SoftSearch
+        } catch { Write-Ignored 'Recherche des mises à jour des logiciels au lancement' $_ }
+    })
+    $SoftAutoTimer.Start()
+}
 if (Get-UpdAuto) { [void]$Window.Dispatcher.BeginInvoke([Action]{ try { Start-UpdCheck $false } catch { Write-Ignored 'Recherche de mise à jour' $_ } }, [Windows.Threading.DispatcherPriority]::ApplicationIdle) }

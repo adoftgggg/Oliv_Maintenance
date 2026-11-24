@@ -869,6 +869,18 @@ function Invoke-SoftRemoveItem($X, $Wg) {
         }
     }
     $rc = & $run (@('uninstall', '-e', '--id', "$($X.LocalId)") + $common) 'désinstallation'
+    # désinstalleur de l'éditeur qui refuse le mode silencieux (Battle.net : code de sortie 4...) : relancé en mode
+    # interactif, sa fenêtre s'affiche pour que l'utilisateur confirme
+    if ($rc -ne 0 -and -not $Sync.Cancel) {
+        Write-TaskLog ('Désinstallation silencieuse refusée (code {0}, 0x{0:X8}) : désinstalleur de l''éditeur relancé en mode interactif, confirmer dans sa fenêtre.' -f $rc) 'WARN'
+        $rc = & $run @('uninstall', '-e', '--id', "$($X.LocalId)", '--interactive', '--accept-source-agreements') 'désinstallation (fenêtre de l''éditeur)'
+    }
+    # réinstallation impossible par désinstallation : dernière version installée par-dessus l'existante (install --force)
+    if ($rc -ne 0 -and $re -and "$($X.Src)" -eq 'winget' -and -not $Sync.Cancel) {
+        Write-TaskLog 'Désinstallation en échec : dernière version installée par-dessus l''existante (winget install --force).' 'WARN'
+        $rc = & $run @('install', '-e', '--id', $id, '--force', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') 'installation par-dessus'
+        if ($rc -eq 0) { $note = 'réinstallé (par-dessus)'; $Sync.SoftRun.Ok++; Set-SoftItem $id @{ State = 'ok'; Note = $note; NoteBrush = 'OkFgBrush'; Phase = ''; Pct = 100; End = [DateTime]::Now }; Write-TaskLog 'Réinstallé par-dessus l''installation existante.' 'OK'; return }
+    }
     $note = ''; $state = 'ok'
     if ($rc -ne 0) {
         $state = 'fail'
@@ -916,24 +928,35 @@ function Invoke-SoftRemoveItem($X, $Wg) {
 # processus qui a un fichier du dossier d'installation ouvert ou chargé (exe, DLL) d'après le gestionnaire de redémarrage
 # de Windows (3 000 fichiers au plus)
 function Find-SoftLocker($Lock) {
-    $Sync.SoftRun.Items["$($Sync.SoftRun.Cur)"].Phase = 'programmes ouverts'
+    $it = $Sync.SoftRun.Items["$($Sync.SoftRun.Cur)"]; $it.Phase = 'recherche des programmes ouverts'
     $found = @{}; $base = "$($Lock.Base)"
-    if ($base.Length -ge 3) {
-        foreach ($p in [Diagnostics.Process]::GetProcesses()) {
-            try { if ($p.Id -ne $PID -and $p.ProcessName -eq $base) { $found[$p.Id] = @{ Pid = $p.Id; Name = "$($p.ProcessName).exe" } } } finally { $p.Dispose() }
-        }
+    $dirs = @($Lock.Dirs | Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\') + '\' })
+    # 1) processus du même nom que le logiciel, ou dont l'exécutable est dans son dossier d'installation (Git : git-bash,
+    #    mintty, bash, git... aucun ne s'appelle « Git ») : chemin de l'image, rapide (pas d'ouverture des fichiers du dossier)
+    foreach ($p in [Diagnostics.Process]::GetProcesses()) {
+        try {
+            if ($p.Id -eq $PID -or $p.Id -le 4) { continue }
+            $hit = $base.Length -ge 3 -and $p.ProcessName -eq $base
+            if (-not $hit -and $dirs.Count) { $img = $null; try { $img = $p.MainModule.FileName } catch { $null = $_ }; if ($img) { foreach ($d in $dirs) { if ($img.StartsWith($d, [StringComparison]::OrdinalIgnoreCase)) { $hit = $true; break } } } }
+            if ($hit) { $found[$p.Id] = @{ Pid = $p.Id; Name = "$($p.ProcessName).exe" } }
+        } finally { $p.Dispose() }
     }
-    $dirs = @($Lock.Dirs | Where-Object { $_ })
+    # 2) DLL du logiciel chargées par un autre programme (extension de l'Explorateur, superposition injectée) : gestionnaire de
+    #    redémarrage de Windows limité aux exe / dll des 2 premiers niveaux (400 fichiers au plus : au-delà il pouvait
+    #    tourner plusieurs minutes sans rien fermer)
     if ($dirs.Count) {
         try {
-            $files = @(foreach ($d in $dirs) { Get-ChildItem -LiteralPath $d -Recurse -File -Force -ErrorAction SilentlyContinue | Select-Object -First 3000 | ForEach-Object { $_.FullName } })
-            foreach ($lp in @([_OlivM.FileLock]::Lockers([string[]]$files))) {
-                if ($lp -eq $PID -or $found.ContainsKey($lp)) { continue }
-                $pr = Get-Process -Id $lp -ErrorAction SilentlyContinue
-                if ($pr) { $found[$lp] = @{ Pid = $lp; Name = "$($pr.ProcessName).exe" } }
+            $files = @(foreach ($d in $dirs) { Get-ChildItem -LiteralPath $d -Depth 1 -File -Force -Include '*.exe', '*.dll' -ErrorAction SilentlyContinue | Select-Object -First 400 | ForEach-Object { $_.FullName } })
+            if ($files.Count) {
+                foreach ($lp in @([_OlivM.FileLock]::Lockers([string[]]$files))) {
+                    if ($lp -eq $PID -or $found.ContainsKey($lp)) { continue }
+                    $pr = Get-Process -Id $lp -ErrorAction SilentlyContinue
+                    if ($pr) { $found[$lp] = @{ Pid = $lp; Name = "$($pr.ProcessName).exe" } }
+                }
             }
         } catch { Write-Ignored 'Programmes qui bloquent le dossier du logiciel' $_ }
     }
+    $it.Phase = $(if ($found.Count) { 'fermeture de ' + ((@($found.Values | ForEach-Object { $_.Name }) | Select-Object -Unique) -join ', ') } else { '' })
     @($found.Values)
 }
 # processus du logiciel fermés avant son installeur : fermeture normale demandée (fenêtre), puis forcée au bout de 8 s
@@ -1064,12 +1087,13 @@ function Invoke-Task_SoftUpgrade {
         if ($x.Lock) { $cl = @(Find-SoftLocker $x.Lock); if ($cl.Count) { Close-SoftProc $cl } }
         if (-not $wg) { Write-TaskLog 'winget introuvable.' 'ERROR'; continue }
         if ($x.Mode) { Invoke-SoftRemoveItem $x $wg; continue }
-        # rattaché par correspondance de nom : winget ne le connaît pas comme installé, « install » pose la nouvelle version par-dessus
-        $verb = $(if ($x.Match) { 'install' } else { 'upgrade' })
+        # rattaché par correspondance de nom : winget ne le connaît pas comme installé, « install » pose la nouvelle version par-dessus ;
+        # version installée illisible (Battle.net...) : « upgrade » ne peut pas comparer, dernière version posée par-dessus (--force)
+        $verb = $(if ($x.Match -or $x.Unknown) { 'install' } else { 'upgrade' })
         # taille de l'installeur (progression du téléchargement calculée par l'interface)
         $Sync.SoftRun.Items["$($x.Id)"].Total = Get-WingetInstallerSize "$($x.Id)"
         $args2 = @($verb, '-e', '--id', $x.Id, '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
-        if ($x.Unknown) { $args2 += '--include-unknown' }
+        if ($x.Unknown) { $args2 += '--force'; Write-TaskLog 'Version installée illisible : dernière version installée par-dessus l''existante (winget install --force).' }
         # catalogue d'applications : source imposée (msstore pour les applications du Microsoft Store)
         if ($x.Source) { $args2 += @('--source', "$($x.Source)") }
         # avancement réel lu dans la sortie de winget : étape + pourcentage du logiciel, report sur l'avancement global

@@ -60,8 +60,7 @@ $AppCatalog = [ordered]@{
         @('PeaZip', 'Giorgiotani.Peazip', 'peazip.github.io', 'Plus de 200 formats'),
         @('WinRAR', 'RARLab.WinRAR', 'win-rar.com', 'Archives RAR')) }
     'Accès à distance' = @{ G = 0xE703; A = @(
-        @('AnyDesk', 'AnyDeskSoftwareGmbH.AnyDesk', 'anydesk.com', 'Prise en main à distance'),
-        @('RustDesk', 'RustDesk.RustDesk', 'rustdesk.com', 'Alternative libre à AnyDesk'),
+        @('AnyDesk', 'AnyDesk.AnyDesk', 'anydesk.com', 'Prise en main à distance'),
         @('TeamViewer', 'TeamViewer.TeamViewer', 'teamviewer.com', 'Prise en main à distance'),
         @('Tailscale', 'Tailscale.Tailscale', 'tailscale.com', 'VPN entre tes appareils'),
         @('WireGuard', 'WireGuard.WireGuard', 'wireguard.com', 'VPN moderne'),
@@ -106,7 +105,6 @@ $AppCatalog = [ordered]@{
         @('PowerShell 7', 'Microsoft.PowerShell', 'learn.microsoft.com', 'La dernière version de PowerShell'),
         @('WinSCP', 'WinSCP.WinSCP', 'winscp.net', 'Transferts SFTP / SCP'),
         @('PuTTY', 'PuTTY.PuTTY', 'putty.org', 'Client SSH'),
-        @('FileZilla', 'TimKosse.FileZilla.Client', 'filezilla-project.org', 'Client FTP'),
         @('Sublime Text', 'SublimeHQ.SublimeText.4', 'sublimetext.com', 'Éditeur de texte rapide')) }
     'Composants' = @{ G = 0xE74C; A = @(
         @('Visual C++ x64', 'Microsoft.VCRedist.2015+.x64', 'visualstudio.microsoft.com', 'Redistribuable 2015-2022'),
@@ -121,6 +119,11 @@ $AppCatalog = [ordered]@{
         @('Google Earth Pro', 'Google.EarthPro', 'earth.google.com', 'La planète en 3D'),
         @('Evernote', 'Evernote.Evernote', 'evernote.com', 'Prise de notes')) }
 }
+# Paquets installés pour le compte de l'utilisateur (manifestes winget-pkgs relus le 24/11/2026 : « Scope: user » seul,
+# ou « ElevationRequirement: elevationProhibited », ou MSIX par utilisateur) : lancés sous le compte de l'utilisateur, sans
+# élévation (Spotify refuse de s'installer en administrateur ; sinon installation dans le profil du compte administrateur)
+$AppUserScope = [Collections.Generic.HashSet[string]]::new([string[]]@('Discord.Discord', 'Telegram.TelegramDesktop', 'OpenWhisperSystems.Signal', 'SlackTechnologies.Slack',
+    'Spotify.Spotify', 'Notion.Notion', 'Microsoft.WindowsTerminal', 'Anthropic.Claude', 'Microsoft.Teams'), [StringComparer]::OrdinalIgnoreCase)
 # Versions portables (vérifiées dans les manifestes winget-pkgs le 19/11/2026 : programme d'installation de type « portable »,
 # ou archive zip contenant un exécutable portable) : identifiant winget -> exécutable à lancer (motif, recherche récursive)
 $AppPortable = @{
@@ -325,25 +328,38 @@ function Update-AppsFilter {
     $Ui.AppsScroll.ScrollToTop()
 }
 # icônes : fichiers déjà téléchargés appliqués aux vignettes (pastille d'initiales remplacée)
+# icône d'une vignette : icône réelle du programme installé (extraite de son exécutable, fichier <id>.app.png) en priorité,
+# sinon favicon du site de l'éditeur (<id>.png), sinon initiales
 function Set-AppsIcon {
     foreach ($o in $AppsUI.Tiles.Values) {
-        if ($o.IconSet) { continue }
-        $f = Join-Path $AppsUI.IconDir (($o.Id -replace '[^\w.+-]', '_') + '.png')
+        if ($o.IconReal) { continue }
+        $b = Join-Path $AppsUI.IconDir ($o.Id -replace '[^\w.+-]', '_')
+        $real = [IO.File]::Exists("$b.app.png")
+        if ($o.IconSet -and -not $real) { continue }
+        $f = $(if ($real) { "$b.app.png" } else { "$b.png" })
         if (-not [IO.File]::Exists($f) -or (Get-Item -LiteralPath $f).Length -lt 200) { continue }
         try {
             $bi = [Windows.Media.Imaging.BitmapImage]::new(); $bi.BeginInit(); $bi.CacheOption = 'OnLoad'; $bi.UriSource = [Uri]::new($f); $bi.DecodePixelWidth = 64; $bi.EndInit(); $bi.Freeze()
-            if ($bi.PixelWidth -lt 32) { continue }   # icône générique 16 px du service = site sans icône : initiales gardées
+            if ($bi.PixelWidth -lt 32 -and -not $real) { continue }   # icône générique 16 px du service = site sans icône : initiales gardées
             $im = [Windows.Controls.Image]::new(); $im.Source = $bi; $im.Width = 30; $im.Height = 30
             [Windows.Media.RenderOptions]::SetBitmapScalingMode($im, 'HighQuality')
-            $o.Icon.Background = [Windows.Media.Brushes]::White; $o.Icon.Child = $im; $o.IconSet = $true
+            $o.Icon.Background = [Windows.Media.Brushes]::White; $o.Icon.Child = $im; $o.IconSet = $true; $o.IconReal = $real
         } catch { Write-Ignored 'Icône d''application' $_ }
     }
 }
 function Start-AppsIconDownload {
     if ($BgJobs.ContainsKey('AppsIcons')) { return }
-    $todo = @(foreach ($o in $AppsUI.Tiles.Values) { $f = Join-Path $AppsUI.IconDir (($o.Id -replace '[^\w.+-]', '_') + '.png'); if (-not [IO.File]::Exists($f)) { @{ F = $f; D = "$($o.A[2])" } } })
-    if (-not $todo.Count) { return }
-    $Sync.AppsIconTodo = $todo; $Sync.AppsIconDir = $AppsUI.IconDir
+    $todo = @(foreach ($o in $AppsUI.Tiles.Values) {
+            $f = Join-Path $AppsUI.IconDir (($o.Id -replace '[^\w.+-]', '_') + '.png')
+            # favicon absent, ou générique (16 px) téléchargé il y a plus de 7 jours : nouvel essai
+            $old = $(if ([IO.File]::Exists($f)) { $fi = [IO.FileInfo]::new($f); $fi.Length -lt 200 -and $fi.LastWriteTime -lt [DateTime]::Now.AddDays(-7) } else { $true })
+            if ($old) { @{ F = $f; D = "$($o.A[2])" } } })
+    # programmes installés sans icône réelle extraite : nom de la vignette cherché dans les entrées de désinstallation
+    $real = @(foreach ($o in $AppsUI.Tiles.Values) {
+            $b = Join-Path $AppsUI.IconDir ($o.Id -replace '[^\w.+-]', '_')
+            if ($AppsUI.Installed -and $AppsUI.Installed.Contains($o.Id) -and -not [IO.File]::Exists("$b.app.png")) { @{ F = "$b.app.png"; N = "$($o.A[0])" } } })
+    if (-not $todo.Count -and -not $real.Count) { return }
+    $Sync.AppsIconTodo = $todo; $Sync.AppsIconReal = $real; $Sync.AppsIconDir = $AppsUI.IconDir
     Start-BgJob 'AppsIcons' @'
 [void][IO.Directory]::CreateDirectory($Sync.AppsIconDir)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -352,6 +368,24 @@ foreach ($x in @($Sync.AppsIconTodo)) {
     try { $wc.DownloadFile(('https://www.google.com/s2/favicons?domain={0}&sz=64' -f [uri]::EscapeDataString(($x.D -split '/')[0])), $x.F) } catch {}
 }
 $wc.Dispose()
+if (@($Sync.AppsIconReal).Count) {
+    [void][Reflection.Assembly]::LoadWithPartialName('System.Drawing')
+    $norm = { param($n) ("$n".ToLower() -replace '[^a-z0-9]', '') }
+    $arp = [Collections.Generic.List[object]]::new()
+    foreach ($root in 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*') {
+        foreach ($k in @(Get-ItemProperty -Path $root -ErrorAction SilentlyContinue)) {
+            if (-not $k.DisplayName) { continue }
+            $ic = "$($k.DisplayIcon)".Trim() -replace ',\s*-?\d+$', '' -replace '"', ''
+            $arp.Add(@{ N = (& $norm $k.DisplayName); Icon = [Environment]::ExpandEnvironmentVariables($ic) })
+        }
+    }
+    foreach ($x in @($Sync.AppsIconReal)) {
+        $n = & $norm $x.N; if ($n.Length -lt 3) { continue }
+        $hit = @($arp | Where-Object { $_.Icon -and $_.N.StartsWith($n) -and [IO.File]::Exists($_.Icon) -and $_.Icon -match '(?i)\.(exe|ico|dll)$' } | Select-Object -First 1)
+        if (-not $hit.Count) { continue }
+        try { $ico = [Drawing.Icon]::ExtractAssociatedIcon($hit[0].Icon); $bm = $ico.ToBitmap(); try { $bm.Save($x.F, [Drawing.Imaging.ImageFormat]::Png) } finally { $bm.Dispose(); $ico.Dispose() } } catch {}
+    }
+}
 '@
 }
 $BgJobDone['AppsIcons'] = { if ($AppsUI.Built) { Set-AppsIcon } }
@@ -368,13 +402,23 @@ function Add-AppsInstalledName([string[]]$Names) {
     $set = [Collections.Generic.HashSet[string]]::new(); foreach ($n in $Names) { if ($n) { [void]$set.Add((Get-AppsNormName $n)) } }
     foreach ($o in $AppsUI.Tiles.Values) { $k = Get-AppsNormName "$($o.A[0])"; if ($k.Length -ge 3 -and $set.Contains($k)) { [void]$AppsUI.Installed.Add($o.Id) } }
 }
+# badges « Installé » du catalogue d'après l'inventaire des logiciels (enregistré ou relu)
+function Update-AppsInstalledFromInv {
+    if (-not $AppsUI.Built -or -not $Sync.WgResult -or -not @($Sync.WgResult.Apps).Count) { return }
+    $AppsUI.Installed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($x in @($Sync.WgResult.Apps)) { [void]$AppsUI.Installed.Add("$($x.Id)"); if ($x.LocalId) { [void]$AppsUI.Installed.Add("$($x.LocalId)") } }
+    Add-AppsInstalledName @($Sync.WgResult.Apps | ForEach-Object { "$($_.Name)" })
+    foreach ($o in $AppsUI.Tiles.Values) { Set-AppTileLook $o }
+    if (-not ($Sync.Running -and $Sync.Selected -contains 'AppInstall')) { Update-AppsSelection }
+    Start-AppsIconDownload
+}
 function Start-AppsInventory {
     if ($Sync.WgResult -and @($Sync.WgResult.Apps).Count) {
-        $AppsUI.Installed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-        foreach ($x in @($Sync.WgResult.Apps)) { [void]$AppsUI.Installed.Add("$($x.Id)"); if ($x.LocalId) { [void]$AppsUI.Installed.Add("$($x.LocalId)") } }
-        Add-AppsInstalledName @($Sync.WgResult.Apps | ForEach-Object { "$($_.Name)" })
-        foreach ($o in $AppsUI.Tiles.Values) { Set-AppTileLook $o }
-        Update-AppsSelection; return
+        Update-AppsInstalledFromInv
+        # liste enregistrée affichée : relecture des applications installées en arrière-plan (au plus toutes les 2 min),
+        # badges « Installé » actualisés à l'arrivée (Update-SoftCard > Update-AppsInstalledFromInv)
+        if (-not $Sync.WgRunning -and -not $Sync.Running -and (-not $SoftUI.ListRead -or ([DateTime]::Now - $SoftUI.ListRead).TotalMinutes -ge 2)) { Start-SoftSearch -ListOnly }
+        return
     }
     if ($BgJobs.ContainsKey('AppsInv')) { return }
     $Sync.AppsInv = $null
@@ -392,6 +436,7 @@ $BgJobDone['AppsInv'] = {
     foreach ($id in @($AppsUI.Sel)) { if ($AppsUI.Installed.Contains($id)) { [void]$AppsUI.Sel.Remove($id) } }
     foreach ($o in $AppsUI.Tiles.Values) { Set-AppTileLook $o }
     Update-AppsSelection
+    Start-AppsIconDownload
 }
 function Update-AppsSelection {
     $n = $AppsUI.Sel.Count
@@ -420,7 +465,7 @@ function Invoke-AppsInstall([switch]$NoConfirm) {
     $head = $(if ($one) { "Installer $($sel[0][0]) ?" } else { "Installer ces $($sel.Count) applications ?" })
     $lines = @($sel | ForEach-Object { '{0}  ·  {1}' -f $_[0], $_[3] })
     if (-not $NoConfirm -and -not (Confirm-List $head $lines ('Dernière version, installation silencieuse' + $(if ($one) { '.' } else { ', une application après l''autre.' }) + ' Conditions de licence des éditeurs acceptées automatiquement.') 'Installer' 'ActionBtn')) { return }
-    $Sync.Params = @{ Soft = @($sel | ForEach-Object { @{ Name = "$($_[0])"; Id = "$($_[1])"; Src = 'winget'; Source = $(if ($_.Count -gt 4) { "$($_[4])" } else { '' }); Pfn = ''; From = ''; To = 'dernière version'; Match = $true; Install = $true; Unknown = $false; User = $false } }) }
+    $Sync.Params = @{ Soft = @($sel | ForEach-Object { @{ Name = "$($_[0])"; Id = "$($_[1])"; Src = 'winget'; Source = $(if ($_.Count -gt 4) { "$($_[4])" } else { '' }); Pfn = ''; From = ''; To = 'dernière version'; Match = $true; Install = $true; Unknown = $false; User = ($AppUserScope.Contains("$($_[1])") -or ($_.Count -gt 4 -and "$($_[4])" -eq 'msstore')) } }) }
     [void](Start-Worker @('AppInstall'))
     Update-AppsRunState
 }

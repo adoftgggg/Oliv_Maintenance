@@ -280,6 +280,7 @@ function Update-SoftCard {
         }
         $SoftUI.Fresh = $true
         Update-SoftView
+        try { Update-AppsInstalledFromInv } catch { Write-Ignored 'Catalogue Applications (badges Installé)' $_ }
     }
     if ($SoftUI.Win -and ($Sync.WgRunning -or $SoftUI.WasRunning -or $Sync.Running -or [bool]$Sync.Running -ne [bool]$SoftUI.WasBusy)) {
         $SoftUI.WasRunning = [bool]$Sync.WgRunning; $SoftUI.WasBusy = [bool]$Sync.Running; Update-SoftStatus
@@ -807,11 +808,12 @@ function Update-SoftRunRow {
         $c = $SoftUI.SrcCells[$id]; if (-not $c) { continue }
         $x = Get-SoftItemText $Sync.SoftRun.Items[$id]; if (-not $x) { continue }
         if ($c.Text -ne $x.Text) {
-            $c.Text = $x.Text
+            # résultat lisible en entier : texte renvoyé à la ligne (« mis à jour (2.45.1 > 2.47.0) ») et infobulle
+            $c.Text = $x.Text; $c.TextWrapping = 'Wrap'; $c.TextTrimming = 'None'
             $c.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $x.Brush)
             $c.FontWeight = [Windows.FontWeights]::SemiBold
             $m = $(if ($Sync.SoftRun.Items[$id].State -eq 'fail') { $WingetErr[(Format-WingetCode $Sync.SoftRun.Items[$id].Code)] } else { $null })
-            $c.ToolTip = $(if ($m) { "$($m[1])`nClic droit > Copier l'erreur pour le détail" } elseif ($Sync.SoftRun.Items[$id].State -eq 'fail') { "Clic droit > Copier l'erreur pour le détail" } else { $null })
+            $c.ToolTip = $(if ($m) { "$($m[1])`nClic droit > Copier l'erreur pour le détail" } elseif ($Sync.SoftRun.Items[$id].State -eq 'fail') { "Clic droit > Copier l'erreur pour le détail" } else { $x.Text })
         }
     }
 }
@@ -1395,3 +1397,13 @@ $Ui.FooterStatus.Add_MouseLeftButtonUp({
     if (Test-SoftUpgrading) { try { Show-SoftWindow } catch { Write-UiLog "Fenêtre Logiciels : $($_.Exception.Message)" 'ERROR' } }
     else { Show-Page 'Log' }
 })
+# dernier inventaire enregistré (logiciels.json) chargé dès le démarrage : Mes applications, Mettre à jour et le catalogue
+# Installer l'affichent tout de suite, la relecture se fait ensuite en arrière-plan. Le chargement était fait par la carte
+# Logiciels de Maintenance (New-SoftCard), retirée : la liste était relue entièrement à chaque ouverture de l'application.
+try {
+    if (-not $Sync.WgResult -and (Test-Path -LiteralPath $SoftFile)) {
+        $Sync.WgResult = Get-Content -LiteralPath $SoftFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $SoftUI.Shown = $Sync.WgResult.Stamp
+    }
+} catch { Write-Ignored 'Lecture du dernier inventaire des logiciels' $_ }
+$SoftUI.Fresh = $true

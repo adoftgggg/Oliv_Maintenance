@@ -93,6 +93,28 @@ function Get-PendingUpdate([bool]$Online) {
         $detail += "$($t.Name) : $c"
     }
     if ($err.Count -and $err.Count -eq $targets.Count) { throw ($err -join ' / ') }
+    # installées depuis le dernier démarrage par Paramètres > Windows Update ou un tiers (orchestrateur USO) : Windows les
+    # renvoie encore comme non installées jusqu'au redémarrage ; historique (installation réussie après le démarrage) = en
+    # attente de redémarrage, ni proposées ni réinstallées
+    try {
+        $boot0 = (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToUniversalTime()
+        $hs = $s.CreateUpdateSearcher(); $nh = $hs.GetTotalHistoryCount()
+        if ($nh -gt 0) {
+            $done = @{}
+            foreach ($e in @($hs.QueryHistory(0, [math]::Min($nh, 200)))) {
+                # Operation 1 = installation ; ResultCode 2 = réussie, 3 = réussie avec erreurs ; Date en UTC
+                # identifiant + révision : les définitions Defender gardent le même UpdateID d'une version à l'autre (la
+                # version installée ce matin correspondait à la nouvelle proposée = faux « redémarrage en attente »)
+                try { if ([int]$e.Operation -eq 1 -and [int]$e.ResultCode -in 2, 3 -and ([DateTime]$e.Date) -gt $boot0) { $done['{0}|{1}' -f $e.UpdateIdentity.UpdateID, $e.UpdateIdentity.RevisionNumber] = 1 } } catch { Write-Ignored 'Historique Windows Update (entrée)' $_ }
+            }
+            if ($done.Count) {
+                # définitions (antivirus, pilotes de définition) exclues : jamais de redémarrage
+                $isDone = { param($u) $done.ContainsKey(('{0}|{1}' -f $u.Identity.UpdateID, $u.Identity.RevisionNumber)) -and "$($u.Title)" -notmatch '(?i)d.finition|security intelligence|renseignements de s.curit|s.lection disjointe' }
+                $boot += @($list | Where-Object { & $isDone $_ })
+                $list = @($list | Where-Object { -not (& $isDone $_) })
+            }
+        }
+    } catch { Write-Ignored 'Historique Windows Update (installées depuis le démarrage)' $_ }
     [pscustomobject]@{ Session = $s; Updates = $list; Reboot = $boot; Detail = (($detail + $err) -join '  ·  ') }
 }
 '@
@@ -200,6 +222,62 @@ try {
         }
     }
 } catch { Write-Ignored 'Lecture du redémarrage programmé' $_ }
+# Redémarrage en attente, toutes origines : mises à jour Windows installées (par l'outil, par Paramètres > Windows Update
+# ou par un tiers : CBS, Auto Update\RebootRequired, Services\Pending, UpdateExeVolatile), fichiers à remplacer au démarrage
+# (PendingFileRenameOperations), changement de nom du poste, vérification de disque programmée (chkdsk : bit dirty du
+# volume ou BootExecute autre que « autocheck autochk * »). Redémarrage programmé par Windows Update (tâches
+# \Microsoft\Windows\UpdateOrchestrator\Reboot*, prochaine exécution) en plus de celui programmé par l'outil.
+# Lu au plus toutes les 20 s (registre, tâches planifiées, volumes) ; Force = relecture immédiate.
+function Get-RebootState([switch]$Force) {
+    if (-not $Force -and $Sync.RebootState -and ([DateTime]::Now - $Sync.RebootState.At).TotalSeconds -lt 20) { return $Sync.RebootState }
+    $why = [Collections.Generic.List[string]]::new()
+    $cbs = 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing'
+    $wu = 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate'
+    # une ligne par source, avec son origine exacte (affichée telle quelle dans l'Accueil)
+    if (Test-RegKey "$cbs\RebootPending") { $why.Add('Windows Update / composants Windows (CBS\RebootPending)') }
+    if (Test-RegKey "$wu\Auto Update\RebootRequired") { $why.Add('Windows Update (Auto Update\RebootRequired)') }
+    # Services\Pending : clé souvent présente vide en permanence ; comptée seulement si un service y est inscrit
+    $sp = Open-RegKey "$wu\Services\Pending"; if ($sp) { try { if ($sp.SubKeyCount -gt 0) { $why.Add('Windows Update (service d''installation en attente : Services\Pending)') } } finally { $sp.Close() } }
+    if ([int]('0' + (Get-RegValue 'HKLM\SOFTWARE\Microsoft\Updates\UpdateExeVolatile' 'Flags')) -ne 0) { $why.Add('programme d''installation Microsoft (UpdateExeVolatile)') }
+    $wr = @($Sync.WuPending.Reboot | Where-Object { $_ })
+    if ($wr.Count) { $why.Add('Windows Update : ' + ((@($wr | ForEach-Object { if ($_.KB) { $_.KB } else { "$($_.Title)" } }) | Select-Object -Unique) -join ', ') + ' installée(s), finalisée(s) au redémarrage') }
+    if ($Sync.OemReboot) { $why.Add('mises à jour constructeur installées') }
+    $pfr = @(Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager' 'PendingFileRenameOperations' | Where-Object { $_ })
+    # fichiers à remplacer : programme d'origine déduit du 1er chemin (dossier Program Files / Windows)
+    if ($pfr.Count) {
+        $f1 = @($pfr | Where-Object { "$_" -match '\\' } | ForEach-Object { "$_" -replace '^\\\?\?\\', '' -replace '^!', '' })
+        $who = @($f1 | ForEach-Object { if ($_ -match '(?i)\\Program Files( \(x86\))?\\([^\\]+)') { $Matches[2] } elseif ($_ -match '(?i)\\Windows\\') { 'Windows' } else { Split-Path $_ -Leaf } } | Select-Object -Unique -First 3)
+        $why.Add('fichiers à remplacer au démarrage (PendingFileRenameOperations : ' + ($who -join ', ') + ')')
+    }
+    $cn1 = Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' 'ComputerName'; $cn2 = Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName' 'ComputerName'
+    if ($cn1 -and $cn2 -and $cn1 -ne $cn2) { $why.Add("nouveau nom du poste ($cn2)") }
+    # vérification de disque : bit dirty (chkdsk /f programmé sur un volume en cours d'utilisation) ou BootExecute modifié (chkntfs)
+    $chk = [Collections.Generic.List[string]]::new()
+    foreach ($d in [IO.DriveInfo]::GetDrives()) {
+        if ($d.DriveType -ne 'Fixed' -or -not $d.IsReady) { continue }
+        $l = $d.Name.TrimEnd('\')
+        try {
+            $h = [_OlivM.VolDirty]::CreateFile("\\.\$l", 0, 3, [IntPtr]::Zero, 3, 0, [IntPtr]::Zero)
+            try { $o = [uint32]0; $r = [uint32]0; if (-not $h.IsInvalid -and [_OlivM.VolDirty]::DeviceIoControl($h, 0x90078, [IntPtr]::Zero, 0, [ref]$o, 4, [ref]$r, [IntPtr]::Zero) -and ($o -band 1)) { $chk.Add($l) } } finally { $h.Dispose() }
+        } catch { Write-Ignored "Bit dirty de $l" $_ }
+    }
+    foreach ($b in @(Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager' 'BootExecute')) {
+        if ("$b" -match '(?i)autochk' -and "$b".Trim() -notmatch '(?i)^autocheck\s+autochk\s+\*$' -and "$b" -match '([A-Za-z]:)') { if (-not $chk.Contains($Matches[1].ToUpper())) { $chk.Add($Matches[1].ToUpper()) } }
+    }
+    if ($chk.Count) { $why.Add('vérification du disque (chkdsk) sur ' + ($chk -join ', ')) }
+    # redémarrage programmé par Windows Update (Paramètres > Planifier le redémarrage, ou échéance automatique)
+    $wuAt = $null
+    try {
+        $svc = New-Object -ComObject Schedule.Service; $svc.Connect()
+        foreach ($t in @($svc.GetFolder('\Microsoft\Windows\UpdateOrchestrator').GetTasks(1))) {
+            if ("$($t.Name)" -notmatch '^Reboot' -or -not $t.Enabled) { continue }
+            $n = [DateTime]$t.NextRunTime
+            if ($n.Year -gt 2000 -and $n -gt [DateTime]::Now -and (-not $wuAt -or $n -lt $wuAt)) { $wuAt = $n }
+        }
+    } catch { Write-Ignored 'Tâches UpdateOrchestrator (redémarrage programmé)' $_ }
+    $Sync.RebootState = @{ At = [DateTime]::Now; Why = @($why); WuAt = $wuAt; Chk = @($chk) }
+    $Sync.RebootState
+}
 function Invoke-ScheduledReboot([int]$Seconds, [string]$Reason = 'pour finaliser les mises à jour') {
     $sd = "$env:windir\System32\shutdown.exe"
     try { Start-Process -FilePath $sd -ArgumentList '/a' -WindowStyle Hidden -Wait } catch {}
@@ -473,6 +551,8 @@ function Show-WuPending {
         Add-StateLine $InfoUI.WuPanel ('{0} {1}, redémarrage du poste requis' -f $rb.Count, (Get-Plural $rb.Count 'mise à jour installée' 'mises à jour installées')) 'WarnFgBrush'
         if ($Sync.RebootAt -and $Sync.RebootAt -gt [DateTime]::Now) {
             [void](Add-KV $InfoUI.WuPanel 'Redémarrage' ('programmé {0}' -f $(if ($Sync.RebootAt.Date -eq [DateTime]::Today) { 'à {0:HH:mm}' -f $Sync.RebootAt } else { 'le {0:dd/MM} à {0:HH:mm}' -f $Sync.RebootAt })) 'AccentBrush')
+        } elseif (($wa = (Get-RebootState).WuAt)) {
+            [void](Add-KV $InfoUI.WuPanel 'Redémarrage' ('programmé par Windows Update {0}' -f $(if ($wa.Date -eq [DateTime]::Today) { 'à {0:HH:mm}' -f $wa } else { 'le {0:dd/MM} à {0:HH:mm}' -f $wa })) 'AccentBrush')
         }
         foreach ($x in $rb) {
             $v = Add-KV $InfoUI.WuPanel $(if ($x.KB) { $x.KB } else { 'Mise à jour' }) (Get-WuShortTitle $x)

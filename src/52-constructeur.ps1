@@ -36,6 +36,18 @@ function Invoke-Native([string]$FilePath, [string[]]$ArgumentList) {
     $res = @{ Time = [DateTime]::Now.ToString('o'); Vendor = $man; Model = (@("$($bios.SystemFamily)".Trim(), "$($bios.SystemProductName)".Trim()) | Where-Object { $_ -and $_ -notmatch '^(?i)(to be filled.*|default string|system (product name|version|family|manufacturer|serial number)|not (specified|applicable|available)|none|n/?a|oem|o\.e\.m\.?|unknown|invalid|empty|x+|0+|[\s.\-_0]*)$' } | Select-Object -Unique) -join ' · '; Tool = ''; Items = @(); Error = $null }
     # pilotes proposés par Windows Update (« Mises à jour facultatives > Mises à jour de pilotes » dans Paramètres) :
     # recherche en ligne sur les serveurs Microsoft (hors WSUS), identifiants « wu:<UpdateID> » installables à l'unité
+    # outil du constructeur absent (Dell Command | Update, HP Image Assistant) : installé automatiquement par winget avant
+    # l'analyse (paquets winget-pkgs Dell.CommandUpdate.Universal et HP.ImageAssistant, vérifiés le 24/11/2026)
+    function Install-OemTool([string]$Id, [string]$Name) {
+        try {
+            Set-JobStep 'Oem' 1 4 "installation de $Name (winget)"
+            $wg = Find-Winget; if (-not $wg) { throw 'winget introuvable.' }
+            Write-TaskLog "$Name absent : installation automatique par winget ($Id)."
+            $p = Start-Process -FilePath $wg -ArgumentList @('install', '-e', '--id', $Id, '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') -WindowStyle Hidden -Wait -PassThru
+            Write-TaskLog ('{0} : code retour winget {1}' -f $Name, $p.ExitCode) $(if ($p.ExitCode -eq 0) { 'OK' } else { 'ERROR' })
+            $p.ExitCode -eq 0
+        } catch { Write-TaskLog "Installation de $Name : $($_.Exception.Message)" 'ERROR'; $false }
+    }
     function Get-WuDriverItem([int]$Step, [int]$Steps) {
         Write-TaskLog 'Pilotes proposés par Windows Update (mises à jour facultatives, serveurs Microsoft)...'
         Set-JobStep 'Oem' $Step $Steps 'recherche des pilotes Windows Update'
@@ -63,10 +75,6 @@ function Invoke-Native([string]$FilePath, [string[]]$ArgumentList) {
                 Set-JobStep 'Oem' 1 4 'module Lenovo.Client.Update'
                 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
                 if (-not (Get-Module -ListAvailable -Name Lenovo.Client.Update)) {
-                    if ($Sync.OemAuto) {
-                        Write-TaskLog 'Recherche automatique ignorée : module Lenovo.Client.Update non installé (lancer Rechercher une fois).'
-                        return
-                    }
                     Write-TaskLog 'Module Lenovo.Client.Update absent : installation depuis PowerShell Gallery (AllUsers).'
                     if (-not (Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' })) {
                         [void](Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers -ErrorAction Stop)
@@ -83,8 +91,10 @@ function Invoke-Native([string]$FilePath, [string[]]$ArgumentList) {
             }
             '^Dell' {
                 Set-JobStep 'Oem' 1 4 'outil Dell Command | Update'
-                $dcu = @("$env:ProgramFiles\Dell\CommandUpdate\dcu-cli.exe", "${env:ProgramFiles(x86)}\Dell\CommandUpdate\dcu-cli.exe") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-                if (-not $dcu -and $Sync.OemAuto) { return }
+                $findDcu = { @("$env:ProgramFiles\Dell\CommandUpdate\dcu-cli.exe", "${env:ProgramFiles(x86)}\Dell\CommandUpdate\dcu-cli.exe") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1 }
+                $dcu = & $findDcu
+                # outil absent : installé tout seul (winget), puis recherche poursuivie
+                if (-not $dcu -and (Install-OemTool 'Dell.CommandUpdate.Universal' 'Dell Command | Update')) { $dcu = & $findDcu }
                 if (-not $dcu) {
                     $res.ToolMissing = 'Dell.CommandUpdate.Universal'
                     $res.ToolName = 'Dell Command | Update'
@@ -106,6 +116,7 @@ function Invoke-Native([string]$FilePath, [string[]]$ArgumentList) {
             }
             '^(HP|Hewlett)' {
                 Set-JobStep 'Oem' 1 4 'outil HP Image Assistant'
+                $findHp = {
                 $hpia = @("$env:ProgramFiles\HP\HPIA\HPImageAssistant.exe", "${env:ProgramFiles(x86)}\HP\HPIA\HPImageAssistant.exe", "$env:SystemDrive\HPIA\HPImageAssistant.exe") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
                 if (-not $hpia) {
                     foreach ($wd in "$env:ProgramFiles\WinGet\Packages", "$env:LOCALAPPDATA\Microsoft\WinGet\Packages") {
@@ -113,7 +124,10 @@ function Invoke-Native([string]$FilePath, [string[]]$ArgumentList) {
                     }
                 }
                 if (-not $hpia -and (Test-Path -LiteralPath "$env:SystemDrive\SWSetup")) { $hpia = Get-ChildItem -LiteralPath "$env:SystemDrive\SWSetup" -Filter 'HPImageAssistant.exe' -File -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName }
-                if (-not $hpia -and $Sync.OemAuto) { return }
+                $hpia
+                }
+                $hpia = & $findHp
+                if (-not $hpia -and (Install-OemTool 'HP.ImageAssistant' 'HP Image Assistant')) { $hpia = & $findHp }
                 if (-not $hpia) {
                     $res.ToolMissing = 'HP.ImageAssistant'
                     $res.ToolName = 'HP Image Assistant'

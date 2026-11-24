@@ -182,6 +182,9 @@ function New-SettingsPage {
     $SetUI.UpdAuto = Add-SettingsChoice $c.Body 'Recherche au lancement' 'Bandeau en haut de la fenêtre quand une nouvelle version est publiée ; rien n''est installé sans ton accord.' ([ordered]@{ On = 'Activée'; Off = 'Désactivée' }) $(if (Get-UpdAuto) { 'On' } else { 'Off' }) {
         param($s, $e) Set-UpdAuto ("$($s.DataContext)" -eq 'On'); foreach ($x in $SetUI.UpdAuto) { $x.Tag = $(if ($x.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
         Write-UiLog ('Recherche de mise à jour au lancement : {0}.' -f $(if ("$($s.DataContext)" -eq 'On') { 'activée' } else { 'désactivée' })) 'APP' }
+    $SetUI.SoftAuto = Add-SettingsChoice $c.Body 'Mises à jour des logiciels installés au lancement' 'Recherche en arrière-plan 30 secondes après l''ouverture de l''application (winget et Microsoft Store) ; résultat dans Applications > Mettre à jour, rien n''est installé sans ton accord.' ([ordered]@{ On = 'Activée'; Off = 'Désactivée' }) $(if (Get-SoftAuto) { 'On' } else { 'Off' }) {
+        param($s, $e) Set-SoftAuto ("$($s.DataContext)" -eq 'On'); foreach ($x in $SetUI.SoftAuto) { $x.Tag = $(if ($x.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
+        Write-UiLog ('Recherche des mises à jour des logiciels au lancement : {0}.' -f $(if ("$($s.DataContext)" -eq 'On') { 'activée' } else { 'désactivée' })) 'APP' }
     $ub = [Windows.Controls.WrapPanel]::new(); $ub.Margin = New-Thickness 38 0 10 14
     $bt = New-Button 'Rechercher maintenant'; $bt.Height = 30; $bt.Margin = New-Thickness 0 0 12 0; $bt.Add_Click({ Start-UpdCheck $true })
     $SetUI.UpdStatus = New-Text '' 'Muted'; $SetUI.UpdStatus.VerticalAlignment = 'Center'; $SetUI.UpdStatus.TextWrapping = 'Wrap'

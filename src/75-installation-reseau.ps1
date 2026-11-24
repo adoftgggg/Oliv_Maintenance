@@ -197,13 +197,25 @@ try {
     $d = Get-Disk -Number $p.Disk -ErrorAction Stop
     if ("$($d.BusType)" -ne 'USB') { throw 'le disque choisi n''est plus une clé USB : arrêt.' }
     if ($d.IsReadOnly) { Set-Disk -Number $p.Disk -IsReadOnly $false }
-    Clear-Disk -Number $p.Disk -RemoveData -RemoveOEM -Confirm:$false -ErrorAction SilentlyContinue
-    Initialize-Disk -Number $p.Disk -PartitionStyle MBR -ErrorAction SilentlyContinue
-    $size = [math]::Min([double](Get-Disk -Number $p.Disk).LargestFreeExtent, [double]32GB - 4MB)
-    $part = New-Partition -DiskNumber $p.Disk -Size ([uint64]$size) -IsActive -AssignDriveLetter -ErrorAction Stop
-    Start-Sleep -Seconds 2
-    $vol = Format-Volume -Partition $part -FileSystem FAT32 -NewFileSystemLabel ("WIN$($p.Win)") -Confirm:$false -ErrorAction Stop
-    $dst = "$((Get-Partition -DiskNumber $p.Disk -PartitionNumber $part.PartitionNumber).DriveLetter):\"
+    # clé déjà en GPT (préparée par un autre outil) : Clear-Disk / Initialize-Disk échouaient sans bruit, la clé restait en
+    # GPT et New-Partition -IsActive était refusé (« MbrType and IsActive cannot be used on a GPT disk »). Tout par diskpart :
+    # effacement, conversion MBR, partition principale active (32 Go au plus : limite FAT32 de Windows), formatage FAT32 rapide,
+    # lettre ; style de partition et lettre contrôlés ensuite (variable $pst : $st est l'état partagé avec l'interface)
+    $mb = [math]::Floor(([math]::Min([double]$d.Size, [double]32GB) - 8MB) / 1MB)
+    $dp = Join-Path $env:TEMP ('olivm-usb-{0}.txt' -f [guid]::NewGuid().ToString('N'))
+    [IO.File]::WriteAllText($dp, ("select disk {0}`r`nattributes disk clear readonly noerr`r`nclean`r`nconvert mbr`r`ncreate partition primary size={1}`r`nactive`r`nformat fs=fat32 quick label=WIN{2}`r`nassign`r`nrescan`r`n" -f $p.Disk, $mb, $p.Win), [Text.Encoding]::ASCII)
+    Set-UsbState 'Préparation de la clé USB' -1 'diskpart : effacement, MBR, partition FAT32 active'
+    try { $dpo = & "$env:windir\System32\diskpart.exe" /s $dp 2>&1; $dpc = $LASTEXITCODE } finally { Remove-Item -LiteralPath $dp -Force -ErrorAction SilentlyContinue }
+    $dpTxt = ((@($dpo) | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Select-Object -Last 4) -join ' ')
+    Start-Sleep -Seconds 3
+    $pst = "$((Get-Disk -Number $p.Disk -ErrorAction Stop).PartitionStyle)"
+    if ($pst -ne 'MBR') { throw ('conversion de la clé en MBR impossible (style actuel : {0}, diskpart code {1}) : {2}' -f $pst, $dpc, $dpTxt) }
+    $part = @(Get-Partition -DiskNumber $p.Disk -ErrorAction Stop | Where-Object { $_.Size -gt 1GB } | Sort-Object Size -Descending)[0]
+    if (-not $part) { throw "partition non créée sur la clé (diskpart code $dpc) : $dpTxt" }
+    if (-not $part.DriveLetter -or "$($part.DriveLetter)" -eq [char]0) { Add-PartitionAccessPath -DiskNumber $p.Disk -PartitionNumber $part.PartitionNumber -AssignDriveLetter -ErrorAction Stop; Start-Sleep -Seconds 2; $part = Get-Partition -DiskNumber $p.Disk -PartitionNumber $part.PartitionNumber }
+    $fs = "$((Get-Volume -Partition $part -ErrorAction SilentlyContinue).FileSystem)"
+    if ($fs -ne 'FAT32') { throw "formatage FAT32 non effectué (système de fichiers : $(if ($fs) { $fs } else { 'aucun' }), diskpart code $dpc) : $dpTxt" }
+    $dst = "$($part.DriveLetter):\"
     Test-UsbCancel
     # 4. copie des fichiers de l'ISO (install.wim > 4 Go découpé par DISM)
     Set-UsbState 'Copie des fichiers de Windows' 0 'Montage de l''image ISO'
@@ -219,7 +231,8 @@ try {
         Test-UsbCancel
         $rel = $f.FullName.Substring($src.Length); $to = Join-Path $dst $rel
         [void][IO.Directory]::CreateDirectory((Split-Path $to))
-        Set-UsbState 'Copie des fichiers de Windows' (100 * $done / [math]::Max([double]1, $tot)) $rel
+        $pc = 100 * $done / [math]::Max([double]1, $tot)
+        Set-UsbState 'Copie des fichiers de Windows' $pc ('{0:N0} %  ·  {1:N2} Go sur {2:N2} Go  ·  {3}' -f $pc, ($done / 1GB), ($tot / 1GB), $rel)
         [IO.File]::Copy($f.FullName, $to, $true); $done += $f.Length
     }
     if ($split) {
@@ -227,12 +240,17 @@ try {
         $psi = [Diagnostics.ProcessStartInfo]::new("$env:windir\System32\dism.exe", ('/Split-Image /ImageFile:"{0}" /SWMFile:"{1}" /FileSize:3800' -f $wim.FullName, (Join-Path $dst 'sources\install.swm')))
         $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.CreateNoWindow = $true
         $pr = [Diagnostics.Process]::Start($psi)
-        while (-not $pr.StandardOutput.EndOfStream) {
-            $l = $pr.StandardOutput.ReadLine()
-            if ($l -match '(\d+(?:[.,]\d+)?)%') { Set-UsbState 'Découpage de l''image Windows (plus de 4 Go)' ([double]($Matches[1] -replace ',', '.')) 'DISM /Split-Image' }
+        # DISM n'écrit son pourcentage qu'avec des retours chariot (aucune ligne lue tant qu'il travaille) : avancement réel =
+        # taille des morceaux install*.swm déjà écrits sur la clé rapportée à la taille de install.wim
+        $outTask = $pr.StandardOutput.ReadToEndAsync(); $t0 = [DateTime]::Now; $swmDir = Join-Path $dst 'sources'
+        while (-not $pr.WaitForExit(500)) {
+            $w = [double]0; foreach ($sf in @(Get-ChildItem -LiteralPath $swmDir -Filter 'install*.swm' -File -ErrorAction SilentlyContinue)) { $w += $sf.Length }
+            $pc = [math]::Min([double]99, 100 * $w / [math]::Max([double]1, $wim.Length))
+            $sp = $w / [math]::Max([double]1, ([DateTime]::Now - $t0).TotalSeconds)
+            Set-UsbState 'Découpage de l''image Windows (plus de 4 Go)' $pc ('{0:N0} %  ·  {1:N2} Go sur {2:N2} Go écrits sur la clé  ·  {3:N1} Mo/s  ·  {4:N0} s' -f $pc, ($w / 1GB), ($wim.Length / 1GB), ($sp / 1MB), ([DateTime]::Now - $t0).TotalSeconds)
             if ($Sync.UsbCancel) { try { $pr.Kill() } catch {} ; Test-UsbCancel }
         }
-        $pr.WaitForExit(); if ($pr.ExitCode -ne 0) { throw "DISM /Split-Image : code $($pr.ExitCode)." }
+        $pr.WaitForExit(); [void]$outTask.Wait(5000); if ($pr.ExitCode -ne 0) { throw "DISM /Split-Image : code $($pr.ExitCode)." }
     }
     # 5. démarrage BIOS (secteur de démarrage de l'ISO) et fichier de réponses
     Set-UsbState 'Finalisation' 99 'Secteur de démarrage et fichier de réponses'
@@ -241,7 +259,11 @@ try {
     [IO.File]::WriteAllText((Join-Path $dst 'autounattend.xml'), $p.Xml, [Text.UTF8Encoding]::new($false))
     $st.Msg = 'Windows {0} sur {1} ({2}).' -f $p.Win, $dst.TrimEnd('\'), [IO.Path]::GetFileName($iso)
     $st.Ok = $true
-} catch { $st.Msg = $_.Exception.Message }
+} catch {
+    $m = "$($_.Exception.Message)".Trim(); if (-not $m -and $_.ErrorDetails) { $m = "$($_.ErrorDetails.Message)".Trim() }
+    if (-not $m) { $m = '{0} ({1})' -f $_.Exception.GetType().Name, $_.FullyQualifiedErrorId }
+    $st.Msg = '{0} - étape : {1}{2}' -f $m, $st.Phase, $(if ($_.InvocationInfo) { ' (ligne {0} : {1})' -f $_.InvocationInfo.ScriptLineNumber, "$($_.InvocationInfo.Line)".Trim() } else { '' })
+}
 finally {
     if ($img) { try { Dismount-DiskImage -ImagePath $img.ImagePath -ErrorAction Stop | Out-Null } catch {} }
     $st.Done = $true

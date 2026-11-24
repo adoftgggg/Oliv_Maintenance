@@ -56,6 +56,28 @@ function Read-ToolInput([string]$Message, [object[]]$Fields, [string]$OkText = '
 
 # ================= Licence Windows
 $LicScript = @'
+# clé installée complète : décodage de DigitalProductId (HKLM\...\Windows NT\CurrentVersion, octets 52 à 66, base 24,
+# format Windows 8 et plus avec la lettre N insérée) ; retenue seulement si ses 5 derniers caractères sont ceux de la
+# clé partielle déclarée par le service de licences (sinon licence numérique / clé générique : rien d'inventé)
+function Get-InstalledKey([string]$Partial) {
+    try {
+        $id = [byte[]](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name DigitalProductId -ErrorAction Stop).DigitalProductId
+        if ($id.Length -lt 67) { return $null }
+        # bit 3 de l'octet 66 : format Windows 8 et plus (retiré avant le décodage)
+        $k = [byte[]]$id[52..66]; $w8 = ($k[14] -shr 3) -band 1; $k[14] = [byte]($k[14] -band 0xF7)
+        $ch = 'BCDFGHJKMPQRTVWXY2346789'; $out = ''; $last = 0
+        for ($i = 24; $i -ge 0; $i--) {
+            $cur = 0
+            for ($x = 14; $x -ge 0; $x--) { $cur = $cur * 256 + $k[$x]; $k[$x] = [byte][math]::Floor($cur / 24); $cur = $cur % 24 }
+            $out = $ch[$cur] + $out; $last = $cur
+        }
+        # 1er caractère = position de la lettre N dans la clé
+        if ($w8) { $out = $out.Substring(1).Insert($last, 'N') }
+        $key = ($out -replace '(.{5})(?!$)', '$1-')
+        if ($Partial -and $key.EndsWith($Partial, [StringComparison]::OrdinalIgnoreCase)) { return $key }
+    } catch { $null = $_ }
+    $null
+}
 $r = @{}
 try {
     $p = @(Get-CimInstance SoftwareLicensingProduct -Filter "ApplicationID='55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL" -ErrorAction Stop | Sort-Object LicenseStatus)[0]
@@ -75,6 +97,7 @@ if ($Sync.LicAct) {
     $p = @(Get-CimInstance SoftwareLicensingProduct -Filter "ApplicationID='55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL" -ErrorAction SilentlyContinue | Sort-Object LicenseStatus)[0]
     if ($p) { $r.Name = "$($p.Name)"; $r.Desc = "$($p.Description)"; $r.Status = [int]$p.LicenseStatus; $r.Partial = "$($p.PartialProductKey)"; $r.Family = "$($p.LicenseFamily)" }
 }
+if ($r.Partial) { $r.Full = Get-InstalledKey $r.Partial }
 $Sync.Lic = $r
 '@
 function Start-LicRead($Act) {
@@ -104,7 +127,17 @@ function Update-LicCard($R) {
     [void](Add-KV $b 'État' ($st + $grace) $(if ($R.Status -eq 1) { 'OkFgBrush' } else { 'ErrFgBrush' }))
     [void](Add-KV $b 'Édition' $(if ($R.Family) { $R.Family } else { $R.Name }))
     [void](Add-KV $b 'Type de licence' (Get-LicChannel $R.Desc))
-    [void](Add-KV $b 'Clé installée' $(if ($R.Partial) { 'XXXXX-XXXXX-XXXXX-XXXXX-' + $R.Partial } else { 'aucune' }))
+    # clé installée : complète (masquée, œil pour l'afficher, copie) si elle est lisible, sinon partielle (licence numérique,
+    # clé générique d'édition : Windows ne garde que les 5 derniers caractères)
+    if ($R.Full) {
+        $sk = @{ Shown = $false; Clear = $R.Full; Masked = (Get-MaskedText $R.Full) }
+        $ToolsUI.LicFull = $R.Full
+        $eyeK = New-ToolIconButton 0xE7B3 'Afficher / masquer la clé' $sk { param($s, $e) Switch-ToolSecret $s.Tag 'Lic' 'Afficher la clé installée' }
+        $cpK = New-ToolIconButton 0xE8C8 'Copier la clé' $null { Set-ClipText $ToolsUI.LicFull; Write-UiLog 'Clé Windows installée copiée dans le presse-papiers.' 'APP' }
+        $kr = New-ToolRow 'Clé installée' $sk.Masked @($eyeK, $cpK) $null
+        $kr.Row.Margin = New-Thickness 30 6 10 0; $sk.Box = $kr.Sub
+        [void]$b.Children.Add($kr.Row)
+    } else { [void](Add-KV $b 'Clé installée' $(if ($R.Partial) { 'XXXXX-XXXXX-XXXXX-XXXXX-' + $R.Partial + '  (seule la fin est conservée par Windows : licence numérique ou clé générique)' } else { 'aucune' })) }
     # clé d'origine du BIOS / UEFI (PC de marque) : masquée, affichable et copiable
     if ($R.Oa3) {
         $ToolsUI.LicKey = $R.Oa3
@@ -253,7 +286,7 @@ function Save-HostsOwn([string]$Own, $Block, [string]$What) {
 function Update-HostsCard {
     $b = $ToolsUI.HostsBody; $b.Children.Clear()
     $p = Split-HostsContent (Read-HostsFile)
-    $nb = @($p.Block | Where-Object { $_ -match '^0\.0\.0\.0\s' }).Count
+    $nb = 0; foreach ($x in $p.Block) { if ($x.StartsWith('0.0.0.0 ') -or $x.StartsWith("0.0.0.0`t")) { $nb++ } }
     $date = $(if ($p.Block.Count -and $p.Block[0] -match '\((\d{2}/\d{2}/\d{4})\)') { $Matches[1] } else { '' })
     [void](Add-KV $b 'Blocage pubs et traqueurs' $(if ($nb) { '{0:N0} domaines bloqués (liste du {1})' -f $nb, $date } else { 'désactivé' }) $(if ($nb) { 'OkFgBrush' } else { '' }))
     if ($nb) {
@@ -307,23 +340,55 @@ function Remove-HostsEntry($E) {
     if (Confirm-HostsChange $p.Own $new 'Retirer cette entrée ?') { Save-HostsOwn $new $p.Block ('retrait de ' + ($E.Names -join ', ')) }
 }
 $HostsScript = @'
+# tout le travail en arrière-plan, avancement réel en 3 étapes : téléchargement 0-70 % (octets reçus / taille annoncée),
+# analyse 70-90 % (lignes traitées, dédoublonnage par HashSet : l'ancien Select-Object -Unique, quadratique, prenait plusieurs
+# minutes sur 80 000 lignes), écriture 90-100 % (fusion avec les entrées personnelles, écriture, vidage du cache DNS)
 $r = @{}
+$P = $Sync.HostsProg = @{ Done = 0; Total = 0; Step = 'dl'; Pct = 0.0; N = 0; Of = 0 }
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    # téléchargement par blocs : octets reçus / taille annoncée (Content-Length) publiés pour la barre d'avancement
-    $Sync.HostsProg = @{ Done = 0; Total = 0; Step = 'dl' }
     $rq = [Net.HttpWebRequest]::Create($Sync.HostsUrl); $rq.UserAgent = 'Oliv_Maintenance'; $rq.Timeout = 30000; $rq.ReadWriteTimeout = 30000
+    $rq.AutomaticDecompression = [Net.DecompressionMethods]::None
     $rs = $rq.GetResponse()
     try {
-        $Sync.HostsProg.Total = [long]$rs.ContentLength
-        $st = $rs.GetResponseStream(); $ms = New-Object IO.MemoryStream; $buf = New-Object byte[] 65536
-        while (($n = $st.Read($buf, 0, $buf.Length)) -gt 0) { $ms.Write($buf, 0, $n); $Sync.HostsProg.Done = $ms.Length }
+        $P.Total = [long]$rs.ContentLength
+        $st = $rs.GetResponseStream(); $ms = New-Object IO.MemoryStream; $buf = New-Object byte[] 262144
+        while (($n = $st.Read($buf, 0, $buf.Length)) -gt 0) { $ms.Write($buf, 0, $n); $P.Done = $ms.Length; if ($P.Total -gt 0) { $P.Pct = 70.0 * $ms.Length / $P.Total } }
         $t = [Text.Encoding]::UTF8.GetString($ms.ToArray())
     } finally { $rs.Close() }
-    $Sync.HostsProg.Step = 'parse'
-    $l = @($t -split "`r?`n" | Where-Object { $_ -match '^0\.0\.0\.0\s+[^\s#]+' -and $_ -notmatch '^0\.0\.0\.0\s+0\.0\.0\.0' } | ForEach-Object { ($_ -replace '\s*#.*$', '').Trim() } | Select-Object -Unique)
+    $P.Step = 'parse'; $P.Pct = 70.0
+    $lines = $t.Split([char]10); $P.Of = $lines.Length
+    $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $l = [Collections.Generic.List[string]]::new()
+    $re = [regex]'^0\.0\.0\.0\s+([^\s#]+)'
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        $m = $re.Match($lines[$i])
+        if ($m.Success) { $d = $m.Groups[1].Value; if ($d -ne '0.0.0.0' -and $set.Add($d)) { $l.Add('0.0.0.0 ' + $d) } }
+        if (($i -band 4095) -eq 0) { $P.N = $i; $P.Pct = 70.0 + 20.0 * $i / $lines.Length }
+    }
     if ($l.Count -lt 1000) { throw "liste inattendue ($($l.Count) entrées)" }
-    $r.Lines = $l
+    $P.Step = 'write'; $P.Pct = 90.0
+    # fichier actuel : entrées personnelles gardées, ancien bloc comparé (ajouts / retraits)
+    $txt = try { [IO.File]::ReadAllText($Sync.HostsPath) } catch { '' }
+    $own = [Collections.Generic.List[string]]::new(); $old = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $in = $false
+    foreach ($x in $txt.Split([char]10)) {
+        $x = $x.TrimEnd([char]13)
+        if ($x.StartsWith($Sync.HostsA)) { $in = $true; continue }
+        if ($in) { if ($x.StartsWith($Sync.HostsB)) { $in = $false } elseif ($x.StartsWith('0.0.0.0')) { [void]$old.Add(($x -split '\s+')[1]) }; continue }
+        $own.Add($x)
+    }
+    $plus = 0; foreach ($d in $set) { if (-not $old.Contains($d)) { $plus++ } }
+    $moins = 0; foreach ($d in $old) { if (-not $set.Contains($d)) { $moins++ } }
+    if (-not [IO.File]::Exists($Sync.HostsBak)) { try { [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Sync.HostsBak)); [IO.File]::Copy($Sync.HostsPath, $Sync.HostsBak, $true) } catch { $null = $_ } }
+    $fi = [IO.FileInfo]::new($Sync.HostsPath); if ($fi.Exists -and $fi.IsReadOnly) { $fi.IsReadOnly = $false }
+    $sb = [Text.StringBuilder]::new(($own -join "`r`n").TrimEnd()); [void]$sb.Append("`r`n`r`n")
+    [void]$sb.Append($Sync.HostsA + ' (' + (Get-Date).ToString('dd/MM/yyyy') + ') - source : ' + $Sync.HostsUrl + " - ne pas modifier`r`n")
+    foreach ($x in $l) { [void]$sb.Append($x).Append("`r`n") }
+    [void]$sb.Append($Sync.HostsB + "`r`n")
+    $P.Pct = 95.0
+    [IO.File]::WriteAllText($Sync.HostsPath, $sb.ToString(), [Text.Encoding]::ASCII)
+    try { Clear-DnsClientCache -ErrorAction Stop } catch { $null = $_ }
+    $P.Pct = 100.0
+    $r.Count = $l.Count; $r.Plus = $plus; $r.Moins = $moins; $r.OldCount = $old.Count
 } catch { $r.Error = $_.Exception.Message }
 $Sync.HostsDl = $r
 '@
@@ -342,7 +407,8 @@ try {
     if (-not $txt.Contains($A)) { Write-Line 'blocage non actif : rien à faire'; exit 0 }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $t = (New-Object Net.WebClient).DownloadString($url)
-    $l = @($t -split "`r?`n" | Where-Object { $_ -match '^0\.0\.0\.0\s+[^\s#]+' -and $_ -notmatch '^0\.0\.0\.0\s+0\.0\.0\.0' } | ForEach-Object { ($_ -replace '\s*#.*$', '').Trim() } | Select-Object -Unique)
+    $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $l = [Collections.Generic.List[string]]::new(); $re = [regex]'^0\.0\.0\.0\s+([^\s#]+)'
+    foreach ($x in $t.Split([char]10)) { $m = $re.Match($x); if ($m.Success) { $d = $m.Groups[1].Value; if ($d -ne '0.0.0.0' -and $set.Add($d)) { $l.Add('0.0.0.0 ' + $d) } } }
     if ($l.Count -lt 1000) { throw "liste inattendue ($($l.Count) entrées)" }
     $own = [Collections.Generic.List[string]]::new(); $in = $false
     foreach ($x in ($txt -split "`r?`n")) { if ($x.StartsWith($A)) { $in = $true; continue }; if ($in) { if ($x.StartsWith($B)) { $in = $false }; continue }; [void]$own.Add($x) }
@@ -380,6 +446,7 @@ function Start-HostsBlock([bool]$On) {
     if ($BgJobs.ContainsKey('Hosts')) { return }
     if (-not (Test-Path -LiteralPath $HostsBackup) -and -not (Confirm-Action "Bloquer les pubs, traqueurs et sites malveillants connus dans le fichier hosts ?`n`nListe StevenBlack/hosts (environ 80 000 domaines, mise à jour régulièrement), ajoutée à la fin du fichier sans toucher à vos entrées ; sauvegarde du fichier d'origine dans le dossier d'état. Un site qui ne s'affiche plus se débloque en retirant le blocage.")) { return }
     $Sync.HostsUrl = $HostsListUrl; $Sync.HostsDl = $null; $Sync.HostsProg = $null
+    $Sync.HostsPath = $HostsFile; $Sync.HostsBak = $HostsBackup; $Sync.HostsA = $HostsMarkA; $Sync.HostsB = $HostsMarkB
     # avancement réel : octets reçus sur la taille annoncée par le serveur, temps écoulé ; barre indéterminée sans taille annoncée
     $ToolsUI.HostsBody.Children.Clear()
     $sp = [Windows.Controls.StackPanel]::new(); $sp.Margin = New-Thickness 38 0 10 12
@@ -392,11 +459,13 @@ function Start-HostsBlock([bool]$On) {
     $tm.Add_Tick({
         $g = $Sync.HostsProg; $el = [int]([DateTime]::Now - $t0).TotalSeconds
         if (-not $g) { return }
-        if ($g.Step -eq 'parse') { $t.Text = 'Liste téléchargée ({0}), vérification et écriture dans le fichier hosts... · {1} s' -f (Format-SizeUi $g.Done), $el; $pb.IsIndeterminate = $true; return }
-        if ($g.Total -gt 0) {
-            $pc = [math]::Min([double]100, 100.0 * $g.Done / $g.Total); $pb.IsIndeterminate = $false; $pb.Value = $pc
-            $t.Text = 'Téléchargement de la liste de blocage : {0} / {1} ({2:N0} %) · {3} s' -f (Format-SizeUi $g.Done '0 Ko'), (Format-SizeUi $g.Total), $pc, $el
-        } else { $t.Text = 'Téléchargement de la liste de blocage : {0} reçus (taille non annoncée par le serveur) · {1} s' -f (Format-SizeUi $g.Done '0 Ko'), $el }
+        $pc = [math]::Min([double]100, [double]$g.Pct)
+        $what = $(switch ($g.Step) {
+                'dl' { $(if ($g.Total -gt 0) { 'téléchargement {0} / {1}' -f (Format-SizeUi $g.Done '0 Ko'), (Format-SizeUi $g.Total) } else { 'téléchargement {0} reçus (taille non annoncée)' -f (Format-SizeUi $g.Done '0 Ko') }) }
+                'parse' { 'analyse de la liste ({0:N0} / {1:N0} lignes)' -f $g.N, $g.Of }
+                default { 'écriture du fichier hosts' } })
+        $pb.IsIndeterminate = ($g.Step -eq 'dl' -and $g.Total -le 0); $pb.Value = $pc
+        $t.Text = 'Blocage pubs et traqueurs : {0:N0} %  ·  {1}  ·  {2} s' -f $pc, $what, $el
     }.GetNewClosure())
     $ToolsUI.HostsTimer = $tm; $tm.Start()
     Start-BgJob 'Hosts' $HostsScript
@@ -411,22 +480,15 @@ function Get-HostsAutoNext {
 $BgJobDone['Hosts'] = {
     if ($ToolsUI.HostsTimer) { $ToolsUI.HostsTimer.Stop(); $ToolsUI.HostsTimer = $null }
     $r = $Sync.HostsDl
-    if (-not $r -or $r.Error) { $m = $(if ($r) { $r.Error } else { 'tâche interrompue' }); Write-UiLog "Fichier hosts : liste de blocage non téléchargée - $m" 'ERROR'; Show-Info "Téléchargement de la liste impossible.`n`n$m" 'Error'; Update-HostsCard; return }
-    try {
-        $p = Split-HostsContent (Read-HostsFile)
-        $old = [Collections.Generic.HashSet[string]]::new([string[]]@($p.Block | Where-Object { $_ -match '^0\.0\.0\.0\s' }))
-        $newSet = [Collections.Generic.HashSet[string]]::new([string[]]@($r.Lines))
-        $plus = @($r.Lines | Where-Object { -not $old.Contains($_) }).Count; $moins = @($old | Where-Object { -not $newSet.Contains($_) }).Count
-        $blk = @("$HostsMarkA ($((Get-Date).ToString('dd/MM/yyyy'))) - source : $HostsListUrl - ne pas modifier") + @($r.Lines) + @($HostsMarkB)
-        Write-HostsFile $p.Own $blk
-        $chg = $(if ($old.Count) { '{0:N0} domaines ajoutés, {1:N0} retirés depuis la liste précédente' -f $plus, $moins } else { 'blocage activé' })
-        Write-UiLog ('Fichier hosts : {0:N0} domaines de pubs et traqueurs bloqués ({1}).' -f $r.Lines.Count, $chg) 'OK'
-        # 1re activation : mise à jour automatique hebdomadaire mise en place d'office (désactivable dans la carte)
-        if (-not $old.Count -and -not (Get-HostsAutoTask)) { try { Set-HostsAuto $true; Write-UiLog 'Fichier hosts : mise à jour automatique hebdomadaire de la liste activée.' 'APP' } catch { Write-Ignored 'Tâche de mise à jour du fichier hosts' $_ } }
-        $nx = Get-HostsAutoNext
-        $sz = try { Format-SizeUi ([IO.FileInfo]::new($HostsFile).Length) } catch { '?' }
-        Show-Info ("Liste de blocage à jour : {0:N0} domaines bloqués (fichier hosts : {3}).`n`n{1}. Vos entrées personnelles ne sont pas modifiées.`n`n{2}" -f $r.Lines.Count, ($chg.Substring(0, 1).ToUpper() + $chg.Substring(1)), $(if ($nx) { "Prochaine mise à jour programmée $nx." } else { 'Mise à jour automatique désactivée : prochaine mise à jour manuelle (bouton Mettre à jour la liste).' }), $sz) 'Ok'; Add-SessionEvent 'Réglages' 'Blocage pubs et traqueurs (hosts)' ('{0:N0} domaines' -f $r.Lines.Count) 'ok'
-    } catch { Write-UiLog "Fichier hosts : $($_.Exception.Message)" 'ERROR'; Show-Info "Écriture du fichier hosts impossible (antivirus ?).`n`n$($_.Exception.Message)" 'Error' }
+    if (-not $r -or $r.Error) { $m = $(if ($r) { $r.Error } else { 'tâche interrompue' }); Write-UiLog "Fichier hosts : liste de blocage non appliquée - $m" 'ERROR'; Show-Info "Mise à jour de la liste de blocage impossible.`n`n$m" 'Error'; Update-HostsCard; return }
+    $chg = $(if ($r.OldCount) { '{0:N0} domaines ajoutés, {1:N0} retirés depuis la liste précédente' -f $r.Plus, $r.Moins } else { 'blocage activé' })
+    Write-UiLog ('Fichier hosts : {0:N0} domaines de pubs et traqueurs bloqués ({1}).' -f $r.Count, $chg) 'OK'
+    # 1re activation : mise à jour automatique hebdomadaire mise en place d'office (désactivable dans la carte)
+    if (-not $r.OldCount -and -not (Get-HostsAutoTask)) { try { Set-HostsAuto $true; Write-UiLog 'Fichier hosts : mise à jour automatique hebdomadaire de la liste activée.' 'APP' } catch { Write-Ignored 'Tâche de mise à jour du fichier hosts' $_ } }
+    $nx = Get-HostsAutoNext
+    $sz = try { Format-SizeUi ([IO.FileInfo]::new($HostsFile).Length) } catch { '?' }
+    Show-Info ("Liste de blocage à jour : {0:N0} domaines bloqués (fichier hosts : {3}).`n`n{1}. Vos entrées personnelles ne sont pas modifiées.`n`n{2}" -f $r.Count, ($chg.Substring(0, 1).ToUpper() + $chg.Substring(1)), $(if ($nx) { "Prochaine mise à jour programmée $nx." } else { 'Mise à jour automatique désactivée : prochaine mise à jour manuelle (bouton Mettre à jour la liste).' }), $sz) 'Ok'
+    Add-SessionEvent 'Réglages' 'Blocage pubs et traqueurs (hosts)' ('{0:N0} domaines' -f $r.Count) 'ok'
     Update-HostsCard
 }
 function Edit-HostsFile {

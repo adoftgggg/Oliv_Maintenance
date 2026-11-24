@@ -46,7 +46,25 @@ trap {
         Add-Content -Path (Join-Path $crashDir 'crash-historique.log') -Value ("Oliv_Maintenance $AppVersion`r`n" + $msg) -Encoding UTF8
     } catch {}
     if ($env:_OLIVM_HIDDEN) {
-        try { [void](New-Object -ComObject WScript.Shell).Popup(($msg.Substring(0, [math]::Min(1500, $msg.Length)) + "`r`n`r`nDétail : $env:ProgramData\Oliv_Maintenance\Maintenance\Erreurs\crash.log"), 0, 'Oliv_Maintenance - erreur fatale', 16) } catch {}
+        # fenêtre d'erreur avec un bouton « Ouvrir le journal » (dossier des erreurs) ; repli sur une simple boîte si WinForms
+        # ne se charge pas (crash très précoce)
+        $shown = $false
+        try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing -ErrorAction Stop
+            $f = New-Object Windows.Forms.Form; $f.Text = 'Oliv_Maintenance - erreur fatale'; $f.StartPosition = 'CenterScreen'
+            $f.Size = New-Object Drawing.Size(640, 440); $f.TopMost = $true; $f.ShowIcon = $false; $f.MinimizeBox = $false; $f.MaximizeBox = $false
+            $lbl = New-Object Windows.Forms.Label; $lbl.Text = 'Oliv_Maintenance a rencontré une erreur et doit se fermer.'; $lbl.AutoSize = $true; $lbl.Location = New-Object Drawing.Point(14, 14); $lbl.Font = New-Object Drawing.Font($f.Font, [Drawing.FontStyle]::Bold); $f.Controls.Add($lbl)
+            $tb = New-Object Windows.Forms.TextBox; $tb.Multiline = $true; $tb.ReadOnly = $true; $tb.ScrollBars = 'Vertical'; $tb.WordWrap = $true
+            $tb.Text = $msg; $tb.Location = New-Object Drawing.Point(14, 42); $tb.Size = New-Object Drawing.Size(600, 300); $tb.Anchor = 'Top,Bottom,Left,Right'; $f.Controls.Add($tb)
+            $dir = Join-Path $env:ProgramData 'Oliv_Maintenance\Maintenance\Erreurs'
+            $bOpen = New-Object Windows.Forms.Button; $bOpen.Text = 'Ouvrir le journal'; $bOpen.Size = New-Object Drawing.Size(150, 30); $bOpen.Location = New-Object Drawing.Point(14, 356); $bOpen.Anchor = 'Bottom,Left'
+            $bOpen.Add_Click({ try { Start-Process explorer.exe "/select,`"$(Join-Path $dir 'crash.log')`"" } catch { try { Start-Process $dir } catch {} } }.GetNewClosure())
+            $f.Controls.Add($bOpen)
+            $bClose = New-Object Windows.Forms.Button; $bClose.Text = 'Fermer'; $bClose.Size = New-Object Drawing.Size(110, 30); $bClose.Location = New-Object Drawing.Point(504, 356); $bClose.Anchor = 'Bottom,Right'; $bClose.DialogResult = 'OK'
+            $f.Controls.Add($bClose); $f.AcceptButton = $bClose
+            [void]$f.ShowDialog(); $f.Dispose(); $shown = $true
+        } catch { $shown = $false }
+        if (-not $shown) { try { [void](New-Object -ComObject WScript.Shell).Popup(($msg.Substring(0, [math]::Min(1500, $msg.Length)) + "`r`n`r`nDétail : $env:ProgramData\Oliv_Maintenance\Maintenance\Erreurs\crash.log"), 0, 'Oliv_Maintenance - erreur fatale', 16) } catch {} }
     } else {
         Write-Host $msg -ForegroundColor Red
         Write-Host "Détail enregistré dans $env:ProgramData\Oliv_Maintenance\Maintenance\Erreurs\crash.log" -ForegroundColor Yellow

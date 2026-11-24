@@ -150,6 +150,12 @@ function Complete-TweakChange($R, $Want, $Now) {
 }
 function Invoke-TweakChange($R, $Want) {
     $tw = $R.Tweak
+    # serveurs DNS : appliqués en arrière-plan, état « en cours » sur la ligne et bandeau d'activité, fin dans $BgJobDone['Dns']
+    if ($tw.Id -eq 'DnsProvider') {
+        try { $R.Staged = $null; $DnsUI.Row = $R; Set-Badge $R 'wait'; Set-DnsProvider "$Want" }
+        catch { $DnsUI.Row = $null; Write-UiLog ('{0} : {1}' -f $tw.Label, $_.Exception.Message) 'ERROR'; Set-Badge $R 'error'; Remove-BgActivity 'Dns' }
+        Update-PendingBar; return
+    }
     try {
         $GpState.Started = $false
         Set-TweakValue $tw $Want
@@ -638,24 +644,74 @@ function Get-DnsProvider {
     foreach ($k in $DnsProviders.Keys) { if ($DnsProviders[$k].V4 -contains $ips[0]) { return $k } }
     'Other'
 }
-function Set-DnsProvider([string]$Key) {
-    if ($Key -ne 'Auto' -and -not $DnsProviders.Contains($Key)) { return }
-    $ad = @(Get-DnsAdapter); if (-not $ad.Count) { throw 'aucune carte réseau active.' }
-    $p = $DnsProviders[$Key]
-    # chiffrement (Windows 11) : modèle DoH enregistré pour chaque adresse du fournisseur, montée en DoH automatique,
-    # repli en clair autorisé (pas de coupure si le chiffrement échoue)
-    if ($p -and $Build -ge 22000) {
-        foreach ($ip in @($p.V4) + @($p.V6)) {
+# Application en arrière-plan (cartes réseau, DoH, cache DNS : plusieurs secondes, parfois bien plus quand une carte
+# se reconfigure ; fait dans l'interface, le retour en automatique figeait la fenêtre sans message). IPv4 et IPv6 appliqués
+# séparément : IPv6 seulement sur les cartes où il est activé, erreur IPv6 sans effet sur IPv4.
+$DnsScript = @'
+$q = $Sync.DnsReq; $r = @{ Done = @(); Warn = @() }
+try {
+    $ad = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { "$($_.Status)" -eq 'Up' })
+    if (-not $ad.Count) { throw 'aucune carte réseau active.' }
+    if ($q.Key -ne 'Auto' -and $q.Build -ge 22000) {
+        $Sync.DnsStep = 'chiffrement (DNS over HTTPS)'
+        foreach ($ip in @($q.V4) + @($q.V6)) {
             try {
-                if (Get-DnsClientDohServerAddress -ServerAddress $ip -ErrorAction SilentlyContinue) { Set-DnsClientDohServerAddress -ServerAddress $ip -DohTemplate $p.Doh -AllowFallbackToUdp $true -AutoUpgrade $true -ErrorAction Stop }
-                else { Add-DnsClientDohServerAddress -ServerAddress $ip -DohTemplate $p.Doh -AllowFallbackToUdp $true -AutoUpgrade $true -ErrorAction Stop }
-            } catch { Write-Ignored "DNS chiffré ($ip)" $_ }
+                if (Get-DnsClientDohServerAddress -ServerAddress $ip -ErrorAction SilentlyContinue) { Set-DnsClientDohServerAddress -ServerAddress $ip -DohTemplate $q.Doh -AllowFallbackToUdp $true -AutoUpgrade $true -ErrorAction Stop }
+                else { Add-DnsClientDohServerAddress -ServerAddress $ip -DohTemplate $q.Doh -AllowFallbackToUdp $true -AutoUpgrade $true -ErrorAction Stop }
+            } catch { $r.Warn += "chiffrement $ip : $($_.Exception.Message)" }
         }
     }
     foreach ($a in $ad) {
-        if ($Key -eq 'Auto') { Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ResetServerAddresses -ErrorAction Stop }
-        else { Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses (@($p.V4) + @($p.V6)) -ErrorAction Stop }
+        $Sync.DnsStep = "carte $($a.Name)"
+        $v6 = $false; try { $v6 = [bool](Get-NetAdapterBinding -Name $a.Name -ComponentID ms_tcpip6 -ErrorAction Stop).Enabled } catch { $v6 = $false }
+        if ($q.Key -eq 'Auto') {
+            Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ResetServerAddresses -ErrorAction Stop
+        } else {
+            Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses @($q.V4) -ErrorAction Stop
+            if ($v6) { try { Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses @($q.V6) -ErrorAction Stop } catch { $r.Warn += "IPv6 sur $($a.Name) : $($_.Exception.Message)" } }
+            else { $r.Warn += "IPv6 désactivé sur $($a.Name) : DNS IPv4 seulement" }
+        }
+        $r.Done += $a.Name
     }
+    $Sync.DnsStep = 'vidage du cache DNS'
     Clear-DnsClientCache -ErrorAction SilentlyContinue
-    Write-UiLog ('DNS : {0} sur {1}.' -f $(if ($Key -eq 'Auto') { 'automatique (box / routeur)' } else { "$Key ($($p.V4 -join ', '))" + $(if ($Build -ge 22000) { ', chiffré si possible' } else { '' }) }), ((@($ad | ForEach-Object { $_.Name })) -join ', ')) 'APP'
+} catch { $r.Error = $_.Exception.Message }
+$Sync.DnsRes = $r
+'@
+function Set-DnsProvider([string]$Key) {
+    if ($Key -ne 'Auto' -and -not $DnsProviders.Contains($Key)) { return }
+    if ($BgJobs.ContainsKey('Dns')) { throw 'changement de DNS déjà en cours.' }
+    $p = $DnsProviders[$Key]
+    $Sync.DnsReq = @{ Key = $Key; V4 = @($p.V4); V6 = @($p.V6); Doh = $(if ($p) { $p.Doh } else { '' }); Build = $Build }; $Sync.DnsRes = $null; $Sync.DnsStep = 'cartes réseau'
+    $DnsUI.Key = $Key; $DnsUI.T0 = [DateTime]::Now
+    $lbl = $(if ($Key -eq 'Auto') { 'automatique (box / routeur)' } else { $Key })
+    Set-BgActivity 'Dns' "DNS : passage en $lbl..." -1 'Application sur les cartes réseau actives'
+    if (-not $DnsUI.Timer) {
+        $DnsUI.Timer = [Windows.Threading.DispatcherTimer]::new(); $DnsUI.Timer.Interval = [TimeSpan]::FromMilliseconds(500)
+        $DnsUI.Timer.Add_Tick({
+            if (-not $BgJobs.ContainsKey('Dns')) { $DnsUI.Timer.Stop(); return }
+            $el = [int]([DateTime]::Now - $DnsUI.T0).TotalSeconds
+            $slow = $(if ($el -ge 15) { '  ·  plus long que prévu : la carte réseau se reconfigure, connexion coupée quelques secondes possible' } else { '' })
+            Set-BgActivity 'Dns' ('DNS : passage en {0}  ·  {1}  ·  {2} s{3}' -f $(if ($DnsUI.Key -eq 'Auto') { 'automatique' } else { $DnsUI.Key }), $Sync.DnsStep, $el, $slow) -1 'Application sur les cartes réseau actives'
+        })
+    }
+    $DnsUI.Timer.Start()
+    $BgJobDone['Dns'] = $DnsJobDone
+    Start-BgJob 'Dns' $DnsScript
+}
+$DnsUI = @{ Key = $null; T0 = $null; Timer = $null; Row = $null }
+# fin (enregistrée dans $BgJobDone au lancement : ce fichier est chargé avant 49-arriere-plan)
+$DnsJobDone = {
+    if ($DnsUI.Timer) { $DnsUI.Timer.Stop() }
+    Remove-BgActivity 'Dns'
+    $r = $Sync.DnsRes; $key = $DnsUI.Key; $p = $DnsProviders[$key]
+    if (-not $r -or $r.Error) {
+        $m = $(if ($r) { $r.Error } else { 'opération interrompue' })
+        Write-UiLog "DNS : changement impossible - $m" 'ERROR'; Show-Info "Changement des serveurs DNS impossible.`n`n$m" 'Error'
+    } else {
+        Write-UiLog ('DNS : {0} sur {1}.' -f $(if ($key -eq 'Auto') { 'automatique (box / routeur)' } else { "$key ($($p.V4 -join ', '))" + $(if ($Build -ge 22000) { ', chiffré si possible' } else { '' }) }), (@($r.Done) -join ', ')) 'APP'
+        foreach ($w in @($r.Warn)) { if ($w) { Write-UiLog "DNS : $w" 'WARN' } }
+    }
+    # ligne du réglage : valeur relue et état final
+    if ($DnsUI.Row) { $R = $DnsUI.Row; $DnsUI.Row = $null; $now = try { Get-DnsProvider } catch { $null }; if ($r -and -not $r.Error) { Complete-TweakChange $R $key $now } else { $R.Current = $now; Set-RowDisplay $R $now; Set-Badge $R 'error' }; Update-PendingBar }
 }

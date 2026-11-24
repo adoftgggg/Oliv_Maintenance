@@ -107,6 +107,20 @@ function Complete-Run {
             $SoftUI.CacheStamp = $null
             Write-UiLog ('Retiré(s) de la liste : {0} logiciel(s) désinstallé(s).' -f $gone.Count) 'APP'
         }
+        # logiciels mis à jour : version installée reportée dans l'inventaire et mise à jour retirée (bouton « Installer
+        # tout » grisé s'il ne reste rien, sans attendre une nouvelle recherche)
+        if ($Sync.WgResult -and $Sync.WgResult.Apps) {
+            $chg = 0
+            foreach ($k in @($Sync.SoftRun.Items.Keys)) {
+                $it = $Sync.SoftRun.Items[$k]; if ($it.State -notin 'ok', 'pend' -or $it.Removed) { continue }
+                foreach ($a in @($Sync.WgResult.Apps | Where-Object { "$($_.Id)" -eq $k })) {
+                    if (-not $a.To) { continue }
+                    if ($it.State -eq 'ok' -and "$($it.To)" -and "$($it.To)" -ne 'non publiée') { $a.From = "$($it.To)" }
+                    $a.To = $null; $a.Unknown = $false; $chg++
+                }
+            }
+            if ($chg) { try { $o = @{} + $Sync.WgResult; $o.Stamp = ([DateTime]$Sync.WgResult.Stamp).ToString('o'); ConvertTo-Json -InputObject $o -Depth 4 | Set-Content -LiteralPath $SoftFile -Encoding UTF8 } catch { Write-Ignored 'Inventaire des logiciels' $_ }; $SoftUI.CacheStamp = $null }
+        }
         $SoftUI.Stale = $true; Update-SoftCard
         if ($SoftUI.Win) { Update-SoftView }
     }
