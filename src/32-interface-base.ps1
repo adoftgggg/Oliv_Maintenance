@@ -7,6 +7,8 @@ function Add-SessionEvent([string]$Cat, [string]$Title, [string]$Result, [string
 }
 function Write-UiLog([string]$Message, [string]$Level = 'INFO') {
     $line = '{0} [{1,-5}] {2}' -f (Get-Date -Format 'HH:mm:ss'), $Level, $Message
+    # autotest (_OLIVM_SELFTEST) : chaque erreur comptée et reportée dans le bilan
+    if ($SelfTest -and $Level -eq 'ERROR') { [void]$SelfTest.Errors.Add($Message) }
     $Sync.Queue.Enqueue($line)
     try { [IO.File]::AppendAllText($TweakLog, ('{0:yyyy-MM-dd} {1}{2}' -f (Get-Date), $line, [Environment]::NewLine), [Text.Encoding]::UTF8) }
     catch {

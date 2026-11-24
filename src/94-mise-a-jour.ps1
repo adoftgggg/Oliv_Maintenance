@@ -132,7 +132,7 @@ $Ui.UpdGo.Add_Click({ Start-UpdInstall })
 $Ui.UpdNotes.Add_Click({ Show-UpdNote })
 $Ui.UpdLater.Add_Click({ $UpdUI.Dismissed = $true; $Ui.UpdBar.Visibility = 'Collapsed' })
 # recherche au lancement, une fois l'interface prête (réseau en tâche de fond, sans effet sur l'ouverture)
-if (Get-SoftAuto) {
+if ((Get-SoftAuto) -and -not $SelfTest) {
     $SoftAutoTimer = [Windows.Threading.DispatcherTimer]::new(); $SoftAutoTimer.Interval = [TimeSpan]::FromSeconds(30)
     $SoftAutoTimer.Add_Tick({
         $SoftAutoTimer.Stop()
@@ -144,4 +144,4 @@ if (Get-SoftAuto) {
     })
     $SoftAutoTimer.Start()
 }
-if (Get-UpdAuto) { [void]$Window.Dispatcher.BeginInvoke([Action]{ try { Start-UpdCheck $false } catch { Write-Ignored 'Recherche de mise à jour' $_ } }, [Windows.Threading.DispatcherPriority]::ApplicationIdle) }
+if ((Get-UpdAuto) -and -not $SelfTest) { [void]$Window.Dispatcher.BeginInvoke([Action]{ try { Start-UpdCheck $false } catch { Write-Ignored 'Recherche de mise à jour' $_ } }, [Windows.Threading.DispatcherPriority]::ApplicationIdle) }

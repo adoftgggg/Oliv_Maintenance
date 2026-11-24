@@ -1,0 +1,29 @@
+# Test automatique sous Windows à chaque envoi sur main : assemblage (Windows PowerShell 5.1, tests unitaires, lanceur
+# compilé par le .NET Framework) puis autotest de l'application (tous les onglets ouverts, erreurs comptées).
+# Une version n'est publiée que si ce test est vert.
+name: Autotest Windows
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  autotest:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemblage et tests unitaires
+        shell: powershell
+        run: .\build.ps1 -SkipLint
+      - name: Autotest de l'application
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'autotest.txt'
+          $cmd = (Resolve-Path 'dist\Oliv_Maintenance.cmd').Path
+          $env:_OLIVM_SELFTEST = '1'; $env:_OLIVM_SELFTEST_OUT = $out; $env:_OLIVM_HIDDEN = ''
+          $arg = "-NoProfile -STA -ExecutionPolicy Bypass -Command `"`$global:_OlivMScriptPath='$cmd'; Invoke-Expression ([IO.File]::ReadAllText('$cmd', [Text.Encoding]::UTF8))`""
+          $p = Start-Process -FilePath "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList $arg -PassThru -WindowStyle Hidden
+          if (-not $p.WaitForExit(600000)) { $p.Kill(); Write-Host '::error::autotest bloqué plus de 10 minutes (fenêtre modale ?)'; exit 1 }
+          if (Test-Path $out) { Get-Content $out | ForEach-Object { Write-Host $_ } } else { Write-Host '::error::aucun bilan d autotest' }
+          Write-Host "Code de sortie : $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { Write-Host "::error::autotest en échec ($($p.ExitCode) erreur(s))"; exit 1 }

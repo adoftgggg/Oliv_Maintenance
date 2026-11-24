@@ -45,6 +45,11 @@ trap {
         Set-Content -Path (Join-Path $crashDir 'crash.log') -Value ("Oliv_Maintenance $AppVersion`r`n" + $msg) -Encoding UTF8
         Add-Content -Path (Join-Path $crashDir 'crash-historique.log') -Value ("Oliv_Maintenance $AppVersion`r`n" + $msg) -Encoding UTF8
     } catch {}
+    # autotest : erreur fatale écrite dans le bilan, sortie sans fenêtre ni attente
+    if ($env:_OLIVM_SELFTEST -eq '1') {
+        try { if ($env:_OLIVM_SELFTEST_OUT) { [IO.File]::WriteAllText($env:_OLIVM_SELFTEST_OUT, $msg, [Text.UTF8Encoding]::new($false)) } } catch {}
+        [Environment]::Exit(255)
+    }
     if ($env:_OLIVM_HIDDEN) {
         # fenêtre d'erreur avec un bouton « Ouvrir le journal » (dossier des erreurs) ; repli sur une simple boîte si WinForms
         # ne se charge pas (crash très précoce)
