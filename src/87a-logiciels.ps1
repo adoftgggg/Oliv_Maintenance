@@ -292,6 +292,8 @@ function Update-SoftCard {
         }
         $SoftUI.Fresh = $true
         Update-SoftView
+        # bandeau dans la fenêtre + notification Windows dès la fin de la recherche (sans attendre la ronde des alertes)
+        try { Update-SoftUpdBanner; if (-not $r.ListMerge) { Watch-PcAlert } } catch { Write-Ignored 'Bandeau des mises à jour des logiciels' $_ }
         try { Update-AppsInstalledFromInv } catch { Write-Ignored 'Catalogue Applications (badges Installé)' $_ }
     }
     if ($SoftUI.Win -and ($Sync.WgRunning -or $SoftUI.WasRunning -or $Sync.Running -or [bool]$Sync.Running -ne [bool]$SoftUI.WasBusy)) {
@@ -305,6 +307,7 @@ function Update-SoftCard {
     $mt = $(if ($up.Count) { "Mettre à jour ($($up.Count))" } else { 'Mettre à jour' }); if ($Ui.AppsModeUpdTxt.Text -ne $mt) { $Ui.AppsModeUpdTxt.Text = $mt }
     # couleurs d'état communes aux 3 cartes de mises à jour : à faire = orange, à jour = vert, en cours / inconnu = gris
     $SoftUI.CardText.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($Sync.WgRunning -or -not $r -or $r.Error) { 'MutedBrush' } elseif ($up.Count) { 'WarnFgBrush' } else { 'OkFgBrush' }))
+    if (-not $Sync.WgRunning -and $up.Count -ne [int]$UpdBanner.N) { try { Update-SoftUpdBanner } catch { Write-Ignored 'Bandeau des mises à jour des logiciels' $_ } }
 }
 function New-SoftCard {
     $b = [Windows.Controls.Border]::new(); $b.Style = $Window.FindResource('Panel'); $b.Padding = New-Thickness 16 14 16 14; $b.Margin = New-Thickness 0 12 0 0

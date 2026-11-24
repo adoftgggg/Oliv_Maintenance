@@ -30,6 +30,33 @@ function Set-BgActivity([string]$Key, [string]$Text, [double]$Pct, [string]$Tip,
 }
 # Bandeau d'erreur : dernière erreur (texte complet en infobulle), boutons « Voir le journal » et « Fermer » ; erreurs
 # suivantes comptées (« et 2 autres »). Visible depuis tous les onglets, ne bloque rien.
+# bandeau « logiciels à mettre à jour » : affiché tant qu'il en reste (hors exclusions), masquable jusqu'au prochain changement du nombre
+$UpdBanner = @{ Row = $null; Text = $null; Hidden = -1; N = 0 }
+function Update-SoftUpdBanner {
+    if (-not $Ui.BgList) { return }
+    $n = @(Get-SoftUpdate | Where-Object { -not $SoftExcl[(Get-SoftKey $_)] }).Count; $UpdBanner.N = $n
+    if (-not $n -or $n -eq $UpdBanner.Hidden) {
+        if ($UpdBanner.Row) { [void]$Ui.BgList.Children.Remove($UpdBanner.Row); $UpdBanner.Row = $null; if (-not $Ui.BgList.Children.Count) { $Ui.BgBar.Visibility = 'Collapsed' } }
+        if (-not $n) { $UpdBanner.Hidden = -1 }
+        return
+    }
+    if (-not $UpdBanner.Row) {
+        $g = [Windows.Controls.Grid]::new(); $g.Margin = New-Thickness 0 2 0 2
+        [void]$g.ColumnDefinitions.Add([Windows.Controls.ColumnDefinition]::new()); $c = [Windows.Controls.ColumnDefinition]::new(); $c.Width = [Windows.GridLength]::Auto; [void]$g.ColumnDefinitions.Add($c)
+        $t = New-Text ''; $t.FontWeight = [Windows.FontWeights]::SemiBold; $t.TextTrimming = 'CharacterEllipsis'; $t.VerticalAlignment = 'Center'
+        $t.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'AccentBrush'); [void]$g.Children.Add($t)
+        $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; [Windows.Controls.Grid]::SetColumn($sp, 1)
+        $b1 = New-Button 'Voir les mises à jour'; $b1.Height = 30; $b1.Margin = New-Thickness 12 0 0 0; $b1.Add_Click({ Show-Page 'Apps'; Set-AppsMode 'Upd' })
+        $b2 = New-Button 'Plus tard'; $b2.Height = 30; $b2.Margin = New-Thickness 6 0 0 0
+        $b2.Add_Click({ $UpdBanner.Hidden = $UpdBanner.N; Update-SoftUpdBanner })
+        [void]$sp.Children.Add($b1); [void]$sp.Children.Add($b2); [void]$g.Children.Add($sp)
+        $Ui.BgList.Children.Insert(0, $g); $UpdBanner.Row = $g; $UpdBanner.Text = $t
+    }
+    $names = @(Get-SoftUpdate | Where-Object { -not $SoftExcl[(Get-SoftKey $_)] } | ForEach-Object { $_.Name })
+    $UpdBanner.Text.Text = '{0} {1} : {2}' -f $n, (Get-Plural $n 'logiciel à mettre à jour' 'logiciels à mettre à jour'), ($names -join ', ')
+    $UpdBanner.Row.ToolTip = ($names -join "`n")
+    $Ui.BgBar.Visibility = 'Visible'
+}
 $ErrBanner = @{ Row = $null; N = 0 }
 function Show-ErrorBanner([string]$Msg) {
     if (-not $Ui.BgList) { return }
@@ -72,7 +99,7 @@ function Watch-UiFreeze {
 function Remove-BgActivity([string]$Key) {
     $a = $Activities[$Key]; if (-not $a) { return }
     [void]$Ui.BgList.Children.Remove($a.Row); $Activities.Remove($Key)
-    if (-not $Activities.Count -and -not $ErrBanner.Row) { $Ui.BgBar.Visibility = 'Collapsed' }
+    if (-not $Activities.Count -and -not $ErrBanner.Row -and -not $UpdBanner.Row) { $Ui.BgBar.Visibility = 'Collapsed' }
 }
 
 # ---- BitLocker
