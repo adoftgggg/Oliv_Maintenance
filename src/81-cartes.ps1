@@ -51,7 +51,7 @@ function Update-CardVisibility([string]$Page) {
 }
 function Hide-Card($C) {
     [void]$HiddenCards.Add($C.Key); Save-HiddenCard; Set-CardShown $C $false
-    Write-UiLog ('Carte « {0} » masquée (réaffichage : Paramètres > Cartes affichées).' -f $C.Title) 'APP'
+    Write-UiLog ('Carte « {0} » masquée (réaffichage : Paramètres > Onglets et cartes affichés).' -f $C.Title) 'APP'
     Show-CardToast $C
 }
 # bandeau d'annulation (10 s) en bas de la fenêtre après un masquage
@@ -71,7 +71,7 @@ function Show-CardToast($C) {
         $ToolsUI.UndoTimer = [Windows.Threading.DispatcherTimer]::new(); $ToolsUI.UndoTimer.Interval = [TimeSpan]::FromSeconds(10)
         $ToolsUI.UndoTimer.Add_Tick({ $ToolsUI.UndoTimer.Stop(); $ToolsUI.UndoPop.IsOpen = $false })
     }
-    $ToolsUI.UndoText.Text = "Carte « {0} » masquée.`nRéaffichable à tout moment : Paramètres > Cartes affichées, ou clic droit sur une carte > Cartes masquées." -f $C.Title
+    $ToolsUI.UndoText.Text = "Carte « {0} » masquée.`nRéaffichable à tout moment : Paramètres > Onglets et cartes affichés, ou clic droit sur une carte > Cartes masquées." -f $C.Title
     $ToolsUI.UndoPop.VerticalOffset = [math]::Max([double]0, $Window.ActualHeight / 2 - 70)
     $ToolsUI.UndoPop.IsOpen = $false; $ToolsUI.UndoPop.IsOpen = $true
     $ToolsUI.UndoTimer.Stop(); $ToolsUI.UndoTimer.Start()
@@ -83,14 +83,14 @@ function Undo-CardHide {
     Write-UiLog ('Carte « {0} » réaffichée.' -f $c.Title) 'APP'
 }
 
-# Paramètres > Cartes affichées : une case par carte, groupées par onglet (pages construites si besoin)
-# Paramètres > Cartes affichées : nombre de cartes masquées, bouton d'ouverture de la fenêtre de choix
+# Paramètres > Onglets et cartes affichés : une case par carte, groupées par onglet (pages construites si besoin)
+# Paramètres > Onglets et cartes affichés : nombre de cartes masquées, bouton d'ouverture de la fenêtre de choix
 function Update-CardSetting {
     $b = $SetUI.CardsBody; if (-not $b) { return }
     $b.Children.Clear()
     $bar = [Windows.Controls.WrapPanel]::new(); $bar.Margin = New-Thickness 38 0 10 14
-    $pk = New-Button 'Choisir les cartes affichées...' 'PrimaryBtn'; $pk.Height = 30; $pk.Margin = New-Thickness 0 0 8 0; $pk.Add_Click({ Show-CardPicker })
-    $all = New-Button 'Tout réafficher'; $all.Height = 30; $all.Margin = New-Thickness 0 0 8 0; $all.Add_Click({ Show-AllCard })
+    $pk = New-Button 'Choisir les cartes affichées...' 'PrimaryBtn'; $pk.Height = 28; $pk.Margin = New-Thickness 0 0 8 0; $pk.Add_Click({ Show-CardPicker })
+    $all = New-Button 'Tout réafficher'; $all.Height = 28; $all.Margin = New-Thickness 0 0 8 0; $all.Add_Click({ Show-AllCard })
     $SetUI.CardsCount = New-Text '' 'Muted'; $SetUI.CardsCount.VerticalAlignment = 'Center'; $SetUI.CardsCount.Margin = New-Thickness 6 0 0 0
     [void]$bar.Children.Add($pk); [void]$bar.Children.Add($all); [void]$bar.Children.Add($SetUI.CardsCount)
     [void]$b.Children.Add($bar)
@@ -126,3 +126,18 @@ function Show-CardPicker {
     if ($v -eq 'all') { Show-AllCard; Show-CardPicker }
 }
 function Update-CardCount { if ($SetUI.CardsCount) { $SetUI.CardsCount.Text = $(if ($HiddenCards.Count) { '{0} carte(s) masquée(s)' -f $HiddenCards.Count } else { 'Aucune carte masquée.' }) } }
+
+# Onglets masqués (Paramètres > Onglets et cartes affichés) : HKCU\Software\Oliv_Maintenance\Affichage\OngletsMasques,
+# conservés d'une version à l'autre. Accueil et Paramètres toujours accessibles ; onglet affiché masqué = retour à l'Accueil.
+$TabLabels = [ordered]@{ Maint = 'Maintenance'; Perf = 'Performances'; Secu = 'Sécurité'; Perso = 'Personnalisation'; Apps = 'Applications'; Svc = 'Services et tâches'; Tools = 'Outils'; Log = 'Journal' }
+$HiddenTabs = [Collections.Generic.HashSet[string]]::new()
+try { foreach ($x in @(Get-RegValue $CardRegKey 'OngletsMasques')) { if ($x) { [void]$HiddenTabs.Add("$x") } } } catch { Write-Ignored 'Onglets masqués' $_ }
+function Save-HiddenTab {
+    try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue('OngletsMasques', [string[]]@($HiddenTabs), [Microsoft.Win32.RegistryValueKind]::MultiString) } finally { $k.Close() } }
+    catch { Write-Ignored 'Enregistrement des onglets masqués' $_ }
+}
+function Update-TabVisibility {
+    foreach ($pg in $TabLabels.Keys) { $n = $Ui["Nav$pg"]; if ($n) { $n.Visibility = $(if ($HiddenTabs.Contains($pg)) { 'Collapsed' } else { 'Visible' }) } }
+    if ($HiddenTabs.Contains("$($Sync.LastPage)") -and (Get-Command Show-Page -ErrorAction SilentlyContinue)) { Show-Page 'Info' }
+}
+Update-TabVisibility

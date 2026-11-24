@@ -84,7 +84,7 @@ function Add-RecoveryKeyRow([string]$Key) {
     $g = $v.Parent
     $v.VerticalAlignment = 'Center'; $g.Children[0].VerticalAlignment = 'Center'; $v.FontFamily = [Windows.Media.FontFamily]::new('Consolas')
     $col = Add-AutoColumn $g
-    $b = New-Button 'Afficher'; $b.Height = 26; $b.MinWidth = 84; $b.Margin = New-Thickness 8 0 0 0; $b.VerticalAlignment = 'Center'
+    $b = New-Button 'Afficher'; $b.Height = 28; $b.MinWidth = 96; $b.Margin = New-Thickness 8 0 0 0; $b.VerticalAlignment = 'Center'
     $b.Tag = @{ Box = $v; Key = $Key; Shown = $false }
     $b.Add_Click($KeyRevealClick)
     [Windows.Controls.Grid]::SetColumn($b, $col); [void]$g.Children.Add($b)
@@ -246,7 +246,7 @@ function Add-AvScanMenu($V, [string]$Main) {
     $k = $g.Children[0]; $k.Visibility = 'Collapsed'
     $sp = [Windows.Controls.StackPanel]::new(); $sp.VerticalAlignment = 'Top'
     $t = New-Text "$($k.Text)"; $t.FontSize = $k.FontSize; $t.Foreground = $k.Foreground; $t.Margin = $k.Margin; [void]$sp.Children.Add($t)
-    $b = New-Button ('Analyser  ' + [char]0x25BE); $b.Height = 26; $b.MinWidth = 84; $b.Margin = New-Thickness 0 6 0 0; $b.HorizontalAlignment = 'Left'
+    $b = New-Button ('Analyser  ' + [char]0x25BE); $b.Height = 28; $b.MinWidth = 96; $b.Margin = New-Thickness 0 6 0 0; $b.HorizontalAlignment = 'Left'
     $b.ContextMenu = $cm; $b.ToolTip = $g.ToolTip
     $b.Add_Click({ param($s, $e) $s.ContextMenu.PlacementTarget = $s; $s.ContextMenu.Placement = 'Bottom'; $s.ContextMenu.IsOpen = $true })
     [void]$sp.Children.Add($b)

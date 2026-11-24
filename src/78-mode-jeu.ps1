@@ -136,7 +136,7 @@ function New-GameCard {
     $bp = [Windows.Controls.StackPanel]::new(); $bp.VerticalAlignment = 'Center'; [Windows.Controls.Grid]::SetColumn($bp, 1)
     $GameUI.Btn = New-Button 'Activer le mode jeu' 'PrimaryBtn'; $GameUI.Btn.MinWidth = 190; $GameUI.Btn.Height = 36
     $GameUI.Btn.Add_Click({ Switch-GameMode })
-    $lnk = New-Button 'Raccourcis sur le Bureau'; $lnk.MinWidth = 190; $lnk.Height = 30; $lnk.Margin = New-Thickness 0 8 0 0
+    $lnk = New-Button 'Raccourcis sur le Bureau'; $lnk.MinWidth = 190; $lnk.Height = 28; $lnk.Margin = New-Thickness 0 8 0 0
     $lnk.ToolTip = 'Crée « Mode jeu ON » et « Mode jeu OFF » sur le Bureau : bascule sans ouvrir l''application (élévation demandée)'
     $lnk.Add_Click({ New-GameShortcut })
     [void]$bp.Children.Add($GameUI.Btn); [void]$bp.Children.Add($lnk); [void]$g.Children.Add($bp)

@@ -66,12 +66,12 @@ function Update-LangCard {
         [void]$g.Children.Add($n)
         if ($i -eq 0) {
             # ajout d'un clavier : sur la ligne de la langue principale, à côté de ses claviers
-            $ab = New-Button 'Ajouter un clavier'; $ab.Height = 26; $ab.Padding = New-Thickness 10 0 10 0
+            $ab = New-Button 'Ajouter un clavier'; $ab.Height = 28; $ab.Padding = New-Thickness 10 0 10 0
             $ab.Add_Click({ param($s, $e) Show-AddKeyboardMenu $s })
             [Windows.Controls.Grid]::SetColumn($ab, 1); [void]$g.Children.Add($ab)
         }
         if ($i -gt 0) {
-            $rb = New-Button 'Retirer la langue'; $rb.Height = 26; $rb.Padding = New-Thickness 10 0 10 0; $rb.Tag = "$($l.LanguageTag)"
+            $rb = New-Button 'Retirer la langue'; $rb.Height = 28; $rb.Padding = New-Thickness 10 0 10 0; $rb.Tag = "$($l.LanguageTag)"
             $rb.Add_Click({ param($s, $e) Remove-UserLanguage "$($s.Tag)" $null })
             [Windows.Controls.Grid]::SetColumn($rb, 1); [void]$g.Children.Add($rb)
         }
@@ -164,10 +164,10 @@ function Add-OfficeLangSection($B) {
         if (-not $isUi) {
             # autre langue : passage en langue d'affichage, ou retrait (jamais la langue d'affichage en cours)
             $bp = [Windows.Controls.StackPanel]::new(); $bp.Orientation = 'Horizontal'
-            $db = New-Button 'Afficher Office dans cette langue'; $db.Height = 26; $db.Padding = New-Thickness 10 0 10 0; $db.Tag = $l; $db.IsEnabled = -not $LangUI.OffBusy
+            $db = New-Button 'Afficher Office dans cette langue'; $db.Height = 28; $db.Padding = New-Thickness 10 0 10 0; $db.Tag = $l; $db.IsEnabled = -not $LangUI.OffBusy
             $db.Add_Click({ param($s, $e) Set-OfficeUiLang "$($s.Tag)" })
             [void]$bp.Children.Add($db)
-            $rb = New-Button $(if ($LangUI.OffBusy -eq $l) { 'Retrait en cours...' } else { 'Retirer' }); $rb.Height = 26; $rb.Padding = New-Thickness 10 0 10 0; $rb.Margin = New-Thickness 0 0 0 0
+            $rb = New-Button $(if ($LangUI.OffBusy -eq $l) { 'Retrait en cours...' } else { 'Retirer' }); $rb.Height = 28; $rb.Padding = New-Thickness 10 0 10 0; $rb.Margin = New-Thickness 0 0 0 0
             $rb.Tag = @{ L = $l; P = @($langs[$l]) }; $rb.IsEnabled = -not $LangUI.OffBusy
             $rb.Add_Click({ param($s, $e) Remove-OfficeLang $s.Tag.L $s.Tag.P })
             [void]$bp.Children.Add($rb)

@@ -136,8 +136,8 @@ function New-SettingsPage {
         Write-UiLog $(if ($on) { "Lancement à l'ouverture de session activé (tâche \Oliv_Maintenance\$AutoTaskName, exe $StableExe)." } else { 'Lancement à l''ouverture de session désactivé.' }) 'APP'
     }
     $lb = [Windows.Controls.WrapPanel]::new(); $lb.Margin = New-Thickness 46 0 10 14
-    $b1 = New-Button 'Épingler à la barre des tâches...'; $b1.Height = 30; $b1.Margin = New-Thickness 0 0 8 4; $b1.Add_Click({ Request-TaskbarPin })
-    $b2 = New-Button 'Raccourci dans le menu Démarrer'; $b2.Height = 30; $b2.Margin = New-Thickness 0 0 8 4
+    $b1 = New-Button 'Épingler à la barre des tâches...'; $b1.Height = 28; $b1.Margin = New-Thickness 0 0 8 4; $b1.Add_Click({ Request-TaskbarPin })
+    $b2 = New-Button 'Raccourci dans le menu Démarrer'; $b2.Height = 28; $b2.Margin = New-Thickness 0 0 8 4
     $b2.Add_Click({ try { New-StartMenuShortcut; Write-UiLog "Raccourci du menu Démarrer créé : $StartLnk." 'OK'; Show-Info 'Raccourci Oliv_Maintenance ajouté au menu Démarrer (Toutes les applications).' 'Ok' } catch { Show-Info "Raccourci impossible.`n`n$($_.Exception.Message)" 'Error' } })
     [void]$lb.Children.Add($b1); [void]$lb.Children.Add($b2); [void]$c.Body.Children.Add($lb)
     & $setCell $c 0 2
@@ -186,14 +186,25 @@ function New-SettingsPage {
         param($s, $e) Set-SoftAuto ("$($s.DataContext)" -eq 'On'); foreach ($x in $SetUI.SoftAuto) { $x.Tag = $(if ($x.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
         Write-UiLog ('Recherche des mises à jour des logiciels au lancement : {0}.' -f $(if ("$($s.DataContext)" -eq 'On') { 'activée' } else { 'désactivée' })) 'APP' }
     $ub = [Windows.Controls.WrapPanel]::new(); $ub.Margin = New-Thickness 38 0 10 14
-    $bt = New-Button 'Rechercher maintenant'; $bt.Height = 30; $bt.Margin = New-Thickness 0 0 12 0; $bt.Add_Click({ Start-UpdCheck $true })
+    $bt = New-Button 'Rechercher maintenant'; $bt.Height = 28; $bt.Margin = New-Thickness 0 0 12 0; $bt.Add_Click({ Start-UpdCheck $true })
     $SetUI.UpdStatus = New-Text '' 'Muted'; $SetUI.UpdStatus.VerticalAlignment = 'Center'; $SetUI.UpdStatus.TextWrapping = 'Wrap'
     [void]$ub.Children.Add($bt); [void]$ub.Children.Add($SetUI.UpdStatus); [void]$c.Body.Children.Add($ub)
     $c.Card.Margin = New-Thickness 0 12 0 0
     [void]$p.Children.Add($c.Card)
     Update-UpdStatus $(if ($UpdUI.Info) { 'Version {0} disponible.' -f (Get-UpdVersion $UpdUI.Info.Tag) } elseif ($UpdUI.Checked) { "Oliv_Maintenance $AppVersion est à jour." } else { 'Pas encore vérifié pendant cette session.' })
 
-    $c = New-Card 'Cartes affichées' 'Cartes inutiles masquées dans les onglets ; raccourci : clic droit sur une carte > Masquer cette carte' ([string][char]0xE8A9)
+    $c = New-Card 'Onglets et cartes affichés' 'Onglets inutiles retirés de la barre ; cartes masquées dans les onglets (raccourci : clic droit sur une carte > Masquer cette carte)' ([string][char]0xE8A9)
+    # onglets : un bouton par onglet (Accueil toujours affiché), coché = visible
+    $tb = [Windows.Controls.WrapPanel]::new(); $tb.Margin = New-Thickness 46 4 16 12
+    foreach ($pg in $TabLabels.Keys) {
+        $bt = New-Button $TabLabels[$pg]; $bt.Height = 28; $bt.MinWidth = 96; $bt.Margin = New-Thickness 0 2 6 2; $bt.DataContext = $pg
+        $bt.Tag = $(if ($HiddenTabs.Contains($pg)) { '' } else { 'on' })
+        $bt.ToolTip = 'Cliquer pour afficher ou masquer cet onglet'
+        $bt.Add_Click({ param($s, $e) $k = "$($s.DataContext)"; if ($HiddenTabs.Contains($k)) { [void]$HiddenTabs.Remove($k); $s.Tag = 'on' } else { [void]$HiddenTabs.Add($k); $s.Tag = '' }; Save-HiddenTab; Update-TabVisibility })
+        [void]$tb.Children.Add($bt)
+    }
+    $tt = New-Text 'Onglets affichés'; $tt.FontWeight = [Windows.FontWeights]::SemiBold; $tt.FontSize = 14; $tt.Margin = New-Thickness 46 4 16 0
+    [void]$c.Body.Children.Add($tt); [void]$c.Body.Children.Add($tb)
     $SetUI.CardsBody = [Windows.Controls.StackPanel]::new(); [void]$c.Body.Children.Add($SetUI.CardsBody); $SetUI.CardsCard = $c.Card; $c.Card.Margin = New-Thickness 0 12 0 12
     [void]$p.Children.Add($c.Card)
 
@@ -232,7 +243,7 @@ function New-SettingsPage {
 # rubrique Mises à jour en premier : visible dès l'ouverture des paramètres
 $SettingsSections = [ordered]@{
     Update = @{ T = 'Mises à jour'; G = 0xE895; C = @('Mises à jour de l''application') }
-    Look   = @{ T = 'Apparence'; G = 0xE790; C = @('Apparence', 'Cartes affichées') }
+    Look   = @{ T = 'Apparence'; G = 0xE790; C = @('Apparence', 'Onglets et cartes affichés') }
     Start  = @{ T = 'Démarrage et fermeture'; G = 0xE7E8; C = @('Démarrage') }
     Save   = @{ T = 'Sauvegarde et réinitialisation'; G = 0xE777; C = @('Restauration des réglages', 'Réinitialisation') }
     About  = @{ T = 'À propos'; G = 0xE946; C = @('À propos') }

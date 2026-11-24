@@ -26,7 +26,7 @@ function New-ToolIconButton([int]$Glyph, [string]$Tip, $Tag, [scriptblock]$Click
     $x.ToolTip = $Tip; $x.Tag = $Tag; $x.Add_Click($Click); $x
 }
 function New-ToolButton([string]$Text, $Tag, [scriptblock]$Click, [string]$StyleKey = 'ActionBtn') {
-    $x = New-Button $Text $StyleKey; $x.Height = 30; $x.MinWidth = 0; $x.Padding = New-Thickness 12 0 12 0; $x.Margin = New-Thickness 0 0 8 0; $x.Tag = $Tag; $x.Add_Click($Click); $x
+    $x = New-Button $Text $StyleKey; $x.Height = 28; $x.MinWidth = 0; $x.Padding = New-Thickness 12 0 12 0; $x.Margin = New-Thickness 0 0 8 0; $x.Tag = $Tag; $x.Add_Click($Click); $x
 }
 function New-ToolBar([object[]]$Buttons) {
     $w = [Windows.Controls.WrapPanel]::new(); $w.Margin = New-Thickness 38 8 10 12
@@ -119,45 +119,49 @@ $BgJobDone['Lic'] = {
 function Get-LicChannel([string]$Desc) {
     $(switch -Regex ($Desc) { 'RETAIL' { 'Retail (clé achetée séparément)' } 'OEM' { 'OEM (livrée avec le PC)' } 'VOLUME_KMSCLIENT' { 'Volume KMS (serveur d''entreprise)' } 'VOLUME_MAK' { 'Volume MAK (entreprise)' } default { $Desc } })
 }
+# Licence Windows : une ligne d'état (activation, édition, type de licence), puis les clés sur des lignes alignées
+# (valeur masquée, boutons Afficher et Copier, même présentation que la clé de récupération BitLocker), puis les actions.
+# Clé installée identique à celle du BIOS : une seule ligne.
+function Add-LicKeyRow($Body, [string]$Label, [string]$Key, [string]$Tip) {
+    $v = Add-KV $Body $Label (Get-MaskedText $Key); $g = $v.Parent
+    $v.VerticalAlignment = 'Center'; $g.Children[0].VerticalAlignment = 'Center'; $v.FontFamily = [Windows.Media.FontFamily]::new('Consolas')
+    if ($Tip) { $v.ToolTip = $Tip }
+    $col = Add-AutoColumn $g
+    $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; $sp.VerticalAlignment = 'Center'
+    $b1 = New-Button 'Afficher'; $b1.Height = 28; $b1.MinWidth = 96; $b1.Margin = New-Thickness 8 0 0 0
+    $b1.Tag = @{ Box = $v; Key = $Key; Shown = $false }
+    $b1.Add_Click({ param($s, $e) $t = $s.Tag; $t.Shown = -not $t.Shown; $t.Box.Text = $(if ($t.Shown) { $t.Key } else { Get-MaskedText $t.Key }); $s.Content = $(if ($t.Shown) { 'Masquer' } else { 'Afficher' }) })
+    $b2 = New-Button 'Copier'; $b2.Height = 28; $b2.MinWidth = 96; $b2.Margin = New-Thickness 6 0 0 0; $b2.Tag = $Key
+    $b2.Add_Click({ param($s, $e) Set-ClipText "$($s.Tag)"; Write-UiLog 'Clé Windows copiée dans le presse-papiers.' 'APP' })
+    [void]$sp.Children.Add($b1); [void]$sp.Children.Add($b2)
+    [Windows.Controls.Grid]::SetColumn($sp, $col); [void]$g.Children.Add($sp)
+}
 function Update-LicCard($R) {
     $b = $ToolsUI.LicBody; $b.Children.Clear()
     if (-not $R -or $R.Error) { $t = New-Text ('Licence illisible : ' + $(if ($R) { $R.Error } else { 'lecture interrompue' })) 'Muted'; $t.Margin = New-Thickness 38 0 10 12; [void]$b.Children.Add($t); return }
-    $st = $(switch ($R.Status) { 1 { 'Activé' } 0 { 'Non activé' } 2 { 'Période de grâce initiale' } 3 { 'Période de grâce (changement matériel)' } 4 { 'Période de grâce (licence non authentique)' } 5 { 'Notifications : Windows non activé' } 6 { 'Période de grâce prolongée' } default { 'inconnu' } })
-    $grace = $(if ($R.Status -ne 1 -and $R.Grace -gt 0) { ' ({0} jours restants)' -f [math]::Floor($R.Grace / 1440) } else { '' })
-    [void](Add-KV $b 'État' ($st + $grace) $(if ($R.Status -eq 1) { 'OkFgBrush' } else { 'ErrFgBrush' }))
-    [void](Add-KV $b 'Édition' $(if ($R.Family) { $R.Family } else { $R.Name }))
-    [void](Add-KV $b 'Type de licence' (Get-LicChannel $R.Desc))
-    # clé installée : complète (masquée, œil pour l'afficher, copie) si elle est lisible, sinon partielle (licence numérique,
-    # clé générique d'édition : Windows ne garde que les 5 derniers caractères)
-    if ($R.Full) {
-        $sk = @{ Shown = $false; Clear = $R.Full; Masked = (Get-MaskedText $R.Full) }
-        $ToolsUI.LicFull = $R.Full
-        $eyeK = New-ToolIconButton 0xE7B3 'Afficher / masquer la clé' $sk { param($s, $e) Switch-ToolSecret $s.Tag 'Lic' 'Afficher la clé installée' }
-        $cpK = New-ToolIconButton 0xE8C8 'Copier la clé' $null { Set-ClipText $ToolsUI.LicFull; Write-UiLog 'Clé Windows installée copiée dans le presse-papiers.' 'APP' }
-        $kr = New-ToolRow 'Clé installée' $sk.Masked @($eyeK, $cpK) $null
-        $kr.Row.Margin = New-Thickness 30 6 10 0; $sk.Box = $kr.Sub
-        [void]$b.Children.Add($kr.Row)
-    } else { [void](Add-KV $b 'Clé installée' $(if ($R.Partial) { 'XXXXX-XXXXX-XXXXX-XXXXX-' + $R.Partial + '  (seule la fin est conservée par Windows : licence numérique ou clé générique)' } else { 'aucune' })) }
-    # clé d'origine du BIOS / UEFI (PC de marque) : masquée, affichable et copiable
-    if ($R.Oa3) {
-        $ToolsUI.LicKey = $R.Oa3
-        $sec = @{ Shown = $false; Clear = $R.Oa3; Masked = (Get-MaskedText $R.Oa3) }
-        $eye = New-ToolIconButton 0xE7B3 'Afficher / masquer la clé' $sec { param($s, $e) Switch-ToolSecret $s.Tag 'Lic' 'Afficher la clé Windows du BIOS' }
-        $cp = New-ToolIconButton 0xE8C8 'Copier la clé' $null { if (Request-ToolAuth 'Lic' 'Copier la clé Windows du BIOS') { Set-ClipText $ToolsUI.LicKey; Write-UiLog 'Clé Windows du BIOS copiée dans le presse-papiers.' 'APP' } }
-        $ToolsUI.LicOa3Row = New-ToolRow 'Clé d''origine du BIOS' (Get-MaskedText $R.Oa3) @($eye, $cp) $(if ($R.Oa3Desc) { $R.Oa3Desc } else { $null })
-        $ToolsUI.LicOa3Row.Row.Margin = New-Thickness 30 6 10 0; $sec.Box = $ToolsUI.LicOa3Row.Sub
-        [void]$b.Children.Add($ToolsUI.LicOa3Row.Row)
-    } else { [void](Add-KV $b 'Clé du BIOS' 'aucune (PC assemblé, ou licence numérique liée au matériel)') }
+    $on = $R.Status -eq 1
+    $st = $(switch ($R.Status) { 1 { 'Activé' } 0 { 'Non activé' } 2 { 'Période de grâce initiale' } 3 { 'Période de grâce (changement de matériel)' } 4 { 'Période de grâce (licence non authentique)' } 5 { 'Non activé (notifications)' } 6 { 'Période de grâce prolongée' } default { 'État inconnu' } })
+    if (-not $on -and $R.Grace -gt 0) { $st += ' ({0} jours restants)' -f [math]::Floor($R.Grace / 1440) }
+    $ed = "$(if ($R.Family) { $R.Family } else { $R.Name })"
+    [void](Add-KV $b 'Windows' ('{0}  ·  {1}  ·  {2}' -f $st, $ed, (Get-LicChannel $R.Desc)) $(if ($on) { 'OkFgBrush' } else { 'ErrFgBrush' }))
+    # clés
+    $same = $R.Full -and $R.Oa3 -and $R.Full -eq $R.Oa3
+    if ($R.Full) { Add-LicKeyRow $b $(if ($same) { 'Clé (installée = BIOS)' } else { 'Clé installée' }) $R.Full $null }
+    elseif ($R.Partial) { $v = Add-KV $b 'Clé installée' ('XXXXX-XXXXX-XXXXX-XXXXX-' + $R.Partial); $v.ToolTip = 'Windows ne conserve que la fin de la clé : licence numérique ou clé générique d''édition' }
+    else { [void](Add-KV $b 'Clé installée' 'aucune') }
+    if ($R.Oa3 -and -not $same) { Add-LicKeyRow $b 'Clé du BIOS' $R.Oa3 $(if ($R.Oa3Desc) { "$($R.Oa3Desc)" } else { $null }) }
+    elseif (-not $R.Oa3) { $v = Add-KV $b 'Clé du BIOS' 'aucune'; $v.ToolTip = 'PC assemblé, ou licence numérique liée au matériel' }
+    $ToolsUI.LicKey = $R.Oa3
+    # actions : activation en premier quand Windows n'est pas activé
     $btns = @()
-    if ($R.Oa3 -and $R.Status -ne 1) { $btns += New-ToolButton 'Activer avec la clé du BIOS' $null { if (Confirm-Action "Installer la clé du BIOS et activer Windows ?`n`nActivation en ligne auprès de Microsoft.") { Start-LicRead @{ Key = $ToolsUI.LicKey } } } 'PrimaryBtn' }
-    $btns += New-ToolButton 'Changer de clé de produit' $null {
+    if (-not $on) { $btns += $(if ($R.Oa3) { New-ToolButton 'Activer avec la clé du BIOS' $null { if (Confirm-Action "Installer la clé du BIOS et activer Windows ?`n`nActivation en ligne auprès de Microsoft.") { Start-LicRead @{ Key = $ToolsUI.LicKey } } } 'PrimaryBtn' } else { New-ToolButton 'Activer' $null { Start-LicRead @{ Key = '' } } 'PrimaryBtn' }) }
+    $btns += New-ToolButton 'Changer de clé' $null {
         $v = Read-ToolInput "Nouvelle clé de produit Windows`n`n25 caractères (XXXXX-XXXXX-XXXXX-XXXXX-XXXXX). La clé est installée puis Windows est activé en ligne ; une clé d'une autre édition (Famille vers Pro) change l'édition au redémarrage." @(@{ L = 'Clé'; V = '' }) 'Installer et activer' 560
         if (-not $v) { return }
         $k = ("$($v[0])".ToUpper() -replace '[^A-Z0-9]', '')
         if ($k.Length -ne 25) { Show-Info 'Clé invalide : 25 lettres et chiffres attendus.' 'Warn'; return }
         Start-LicRead @{ Key = ($k -replace '(.{5})(?!$)', '$1-') }
     }
-    if ($R.Status -ne 1) { $btns += New-ToolButton 'Réessayer l''activation' $null { Start-LicRead @{ Key = '' } } }
     $btns += New-ToolButton 'Paramètres d''activation' $null { Start-Process 'ms-settings:activation' }
     [void]$b.Children.Add((New-ToolBar $btns))
 }
@@ -461,7 +465,7 @@ function Update-EnvList {
             # dossiers introuvables (souvent laissés par une désinstallation) : retrait en un clic, avec récapitulatif
             $miss = @($v.Value -split ';' | Where-Object { $_ -and $v.Name -ne 'PATHEXT' -and -not (Test-EnvDir $_) })
             if ($miss.Count) {
-                $cl = New-Button ('Retirer les dossiers introuvables ({0})' -f $miss.Count); $cl.Height = 26; $cl.MinWidth = 0; $cl.Padding = New-Thickness 10 0 10 0; $cl.Margin = New-Thickness 0 6 0 2; $cl.HorizontalAlignment = 'Left'
+                $cl = New-Button ('Retirer les dossiers introuvables ({0})' -f $miss.Count); $cl.Height = 28; $cl.MinWidth = 0; $cl.Padding = New-Thickness 10 0 10 0; $cl.Margin = New-Thickness 0 6 0 2; $cl.HorizontalAlignment = 'Left'
                 $cl.Tag = @{ P = $path; V = $v }; $cl.Add_Click({ param($s, $e) Remove-EnvMissingDir $s.Tag.P $s.Tag.V }); [void]$vp.Children.Add($cl)
             }
         } else { $t = New-Text $v.Value; $t.TextWrapping = 'Wrap'; $t.FontFamily = [Windows.Media.FontFamily]::new('Consolas'); [void]$vp.Children.Add($t) }
