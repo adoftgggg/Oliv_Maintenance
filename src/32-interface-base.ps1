@@ -3,7 +3,29 @@ function Format-Pct([int]$Pct) { if ($Pct -gt 0) { "$Pct %  ·  " } else { '' } 
 # Journal de session (rapport d'intervention, 89-rapport.ps1) : actions réalisées depuis l'ouverture ; Level : ok | warn | error | info
 $Session = @{ Start = [DateTime]::Now; Events = [Collections.ArrayList]::new() }
 function Add-SessionEvent([string]$Cat, [string]$Title, [string]$Result, [string]$Level = 'ok', [string]$Detail = '') {
-    [void]$Session.Events.Add(@{ Time = [DateTime]::Now; Cat = $Cat; Title = $Title; Result = $Result; Level = $Level; Detail = $Detail })
+    $e = @{ Time = [DateTime]::Now; Cat = $Cat; Title = $Title; Result = $Result; Level = $Level; Detail = $Detail }
+    [void]$Session.Events.Add($e); Save-HistoryEvent $e
+}
+# Historique du poste : chaque action de l'application (réglage, tâche, mise à jour, installation...) ajoutée à
+# _etat\historique.jsonl (une ligne JSON), conservé d'une session et d'une version à l'autre ; Journal > Historique du poste
+function Save-HistoryEvent($E) {
+    try {
+        $f = Join-Path (Get-LogPath 'Etat') 'historique.jsonl'
+        $o = @{ Date = ([DateTime]$E.Time).ToString('o'); Cat = "$($E.Cat)"; Title = "$($E.Title)"; Result = "$($E.Result)"; Level = "$($E.Level)"; User = "$env:USERNAME" }
+        [IO.File]::AppendAllText($f, (ConvertTo-Json -Compress -InputObject $o) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    } catch { Write-Ignored 'Historique du poste' $_ }
+}
+function Show-History {
+    $f = Join-Path (Get-LogPath 'Etat') 'historique.jsonl'
+    $rows = @(); try { if (Test-Path -LiteralPath $f) { $rows = @(Get-Content -LiteralPath $f -Encoding UTF8 | Where-Object { $_ } | ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } | Where-Object { $_ }) } } catch { Write-Ignored 'Lecture de l''historique' $_ }
+    $lines = [Collections.Generic.List[string]]::new(); $day = ''
+    foreach ($r in @($rows | Sort-Object { [DateTime]$_.Date } -Descending | Select-Object -First 1000)) {
+        $d = [DateTime]$r.Date; $k = $d.ToString('dddd dd MMMM yyyy')
+        if ($k -ne $day) { if ($day) { $lines.Add('') }; $lines.Add($k.Substring(0, 1).ToUpper() + $k.Substring(1)); $day = $k }
+        $lines.Add('  {0:HH:mm}   {1}  ·  {2}  ·  {3}' -f $d, $r.Cat, $r.Title, $r.Result)
+    }
+    if (-not $lines.Count) { $lines.Add('Aucune action enregistrée pour l''instant.') }
+    [void](Show-Dialog ('Historique du poste  ·  {0} action{1} (1 000 dernières affichées)' -f $rows.Count, $(if ($rows.Count -gt 1) { 's' } else { '' })) 'Info' $null @($lines) $null 900)
 }
 function Write-UiLog([string]$Message, [string]$Level = 'INFO') {
     $line = '{0} [{1,-5}] {2}' -f (Get-Date -Format 'HH:mm:ss'), $Level, $Message

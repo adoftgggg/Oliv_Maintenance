@@ -56,7 +56,7 @@ function Get-RunEvent([switch]$Live) {
     }
     $ev.ToArray()
 }
-function Add-RunToSession { foreach ($e in @(Get-RunEvent)) { [void]$Session.Events.Add($e) } }
+function Add-RunToSession { foreach ($e in @(Get-RunEvent)) { [void]$Session.Events.Add($e); Save-HistoryEvent $e } }
 # Traitements en cours au moment du rapport (non encore enregistrés dans le journal de session)
 function Get-LiveEvent {
     $ev = [Collections.ArrayList]::new()
@@ -180,3 +180,5 @@ function Get-InfoField([string]$K) {
     $t = "$($f.Text)".Trim(); if ($t -eq '...') { '' } else { $t }
 }
 # rapport d'intervention retiré (1.2.0) : plus de besoin ; événements de session conservés pour le journal
+
+$Ui.HistoryBtn.Add_Click({ try { Show-History } catch { Write-UiLog "Historique du poste : $($_.Exception.Message)" 'ERROR' } })

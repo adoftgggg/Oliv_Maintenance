@@ -1052,6 +1052,7 @@
           <Border Grid.Row="1" Style="{StaticResource Panel}" Padding="16,12" Margin="0,0,0,10">
             <DockPanel>
               <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button x:Name="HistoryBtn" Content="Historique du poste" Style="{StaticResource PrimaryBtn}" Margin="0,0,8,0" ToolTip="Toutes les actions faites par l'application sur ce poste, jour par jour"/>
                 <Button x:Name="OpenLogDir" Content="Dossier des journaux" Style="{StaticResource ActionBtn}" Margin="0,0,8,0"/>
                 <Border Width="1" Height="22" Margin="4,0,12,0" Background="{DynamicResource LineBrush}" VerticalAlignment="Center"/>
                 <Button x:Name="LogPurgeOld" Content="Supprimer les plus de 30 jours" Style="{StaticResource ActionBtn}" Margin="0,0,8,0"/>
