@@ -16,7 +16,7 @@ function Set-BgActivity([string]$Key, [string]$Text, [double]$Pct, [string]$Tip,
         $bar = [Windows.Controls.ProgressBar]::new(); $bar.Height = 5; $bar.Margin = New-Thickness 0 5 0 0; $bar.Minimum = 0; $bar.Maximum = 100; $bar.BorderThickness = New-Thickness 0 0 0 0
         $bar.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, 'AccentBrush'); $bar.SetResourceReference([Windows.Controls.Control]::BackgroundProperty, 'LineBrush')
         [void]$sp.Children.Add($t); [void]$sp.Children.Add($bar); [void]$g.Children.Add($sp)
-        $b = New-Button 'Interrompre' 'WarnBtn'; $b.Height = 28; $b.Margin = New-Thickness 12 0 0 0; $b.VerticalAlignment = 'Center'; $b.Visibility = 'Collapsed'
+        $b = New-Button 'Interrompre' 'WarnBtn'; $b.Height = 30; $b.Margin = New-Thickness 12 0 0 0; $b.VerticalAlignment = 'Center'; $b.Visibility = 'Collapsed'
         $b.Add_Click({ param($s, $e) if ($s.Tag) { & $s.Tag } })
         [Windows.Controls.Grid]::SetColumn($b, 1); [void]$g.Children.Add($b)
         [void]$Ui.BgList.Children.Add($g)
@@ -39,8 +39,8 @@ function Show-ErrorBanner([string]$Msg) {
         $t = New-Text ''; $t.FontWeight = [Windows.FontWeights]::SemiBold; $t.TextTrimming = 'CharacterEllipsis'; $t.VerticalAlignment = 'Center'
         $t.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'ErrFgBrush'); [void]$g.Children.Add($t)
         $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; [Windows.Controls.Grid]::SetColumn($sp, 1)
-        $b1 = New-Button 'Voir le journal'; $b1.Height = 28; $b1.Margin = New-Thickness 12 0 0 0; $b1.Add_Click({ Show-Page 'Log' })
-        $b2 = New-Button 'Fermer'; $b2.Height = 28; $b2.Margin = New-Thickness 6 0 0 0
+        $b1 = New-Button 'Voir le journal'; $b1.Height = 30; $b1.Margin = New-Thickness 12 0 0 0; $b1.Add_Click({ Show-Page 'Log' })
+        $b2 = New-Button 'Fermer'; $b2.Height = 30; $b2.Margin = New-Thickness 6 0 0 0
         $b2.Add_Click({ [void]$Ui.BgList.Children.Remove($ErrBanner.Row); $ErrBanner.Row = $null; $ErrBanner.N = 0; if (-not $Ui.BgList.Children.Count) { $Ui.BgBar.Visibility = 'Collapsed' } })
         [void]$sp.Children.Add($b1); [void]$sp.Children.Add($b2); [void]$g.Children.Add($sp)
         $Ui.BgList.Children.Insert(0, $g); $ErrBanner.Row = $g; $ErrBanner.Text = $t

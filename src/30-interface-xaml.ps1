@@ -115,8 +115,8 @@
 
     <Style x:Key="ActionBtn" TargetType="Button" BasedOn="{StaticResource NavBtn}">
       <Setter Property="Width" Value="Auto"/>
-      <Setter Property="MinWidth" Value="110"/>
-      <Setter Property="Height" Value="32"/>
+      <Setter Property="MinWidth" Value="96"/>
+      <Setter Property="Height" Value="30"/>
       <Setter Property="FontSize" Value="13"/>
       <Setter Property="FontWeight" Value="Normal"/>
       <Setter Property="Padding" Value="14,0"/>
@@ -525,9 +525,9 @@
 
       <Border x:Name="PendingBar" Grid.Row="2" Background="{DynamicResource PendBgBrush}" BorderBrush="{DynamicResource WarnFgBrush}" BorderThickness="0,0,0,1" Padding="16,6" Visibility="Collapsed">
         <DockPanel LastChildFill="True">
-          <Button x:Name="PendingReboot" DockPanel.Dock="Right" Content="Redémarrer le poste" Style="{StaticResource ActionBtn}" Height="28" Margin="6,0,0,0"/>
-          <Button x:Name="PendingLogoff" DockPanel.Dock="Right" Content="Se déconnecter" Style="{StaticResource ActionBtn}" Height="28" Margin="6,0,0,0"/>
-          <Button x:Name="PendingExplorer" DockPanel.Dock="Right" Content="Redémarrer l'Explorateur" Style="{StaticResource ActionBtn}" Height="28" Margin="6,0,0,0"/>
+          <Button x:Name="PendingReboot" DockPanel.Dock="Right" Content="Redémarrer le poste" Style="{StaticResource ActionBtn}" Margin="6,0,0,0"/>
+          <Button x:Name="PendingLogoff" DockPanel.Dock="Right" Content="Se déconnecter" Style="{StaticResource ActionBtn}" Margin="6,0,0,0"/>
+          <Button x:Name="PendingExplorer" DockPanel.Dock="Right" Content="Redémarrer l'Explorateur" Style="{StaticResource ActionBtn}" Margin="6,0,0,0"/>
           <TextBlock x:Name="PendingText" Foreground="{DynamicResource WarnFgBrush}" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap"/>
         </DockPanel>
       </Border>
@@ -540,9 +540,9 @@
       </Border>
       <Border x:Name="UpdBar" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="0,0,0,2" Padding="16,6" Visibility="Collapsed">
         <DockPanel LastChildFill="True">
-          <Button x:Name="UpdLater" DockPanel.Dock="Right" Content="Plus tard" Style="{StaticResource ActionBtn}" Height="28" Margin="6,0,0,0"/>
-          <Button x:Name="UpdNotes" DockPanel.Dock="Right" Content="Nouveautés" Style="{StaticResource ActionBtn}" Height="28" Margin="6,0,0,0"/>
-          <Button x:Name="UpdGo" DockPanel.Dock="Right" Content="Mettre à jour" Style="{StaticResource PrimaryBtn}" Height="28" Margin="6,0,0,0"/>
+          <Button x:Name="UpdLater" DockPanel.Dock="Right" Content="Plus tard" Style="{StaticResource ActionBtn}" Margin="6,0,0,0"/>
+          <Button x:Name="UpdNotes" DockPanel.Dock="Right" Content="Nouveautés" Style="{StaticResource ActionBtn}" Margin="6,0,0,0"/>
+          <Button x:Name="UpdGo" DockPanel.Dock="Right" Content="Mettre à jour" Style="{StaticResource PrimaryBtn}" Margin="6,0,0,0"/>
           <ProgressBar x:Name="UpdProg" DockPanel.Dock="Bottom" Height="3" Margin="0,5,0,0" Visibility="Collapsed" Foreground="{DynamicResource AccentBrush}" Background="Transparent" BorderThickness="0"/>
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
             <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
@@ -573,7 +573,7 @@
                 <DockPanel><TextBlock Text="&#xE74D;" Style="{StaticResource CardIcon}" DockPanel.Dock="Left"/><TextBlock TextWrapping="Wrap" Text="Nettoyage" Style="{StaticResource Section}"/></DockPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                   <TextBlock TextWrapping="Wrap" x:Name="CleanScanText" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                  <Button x:Name="SpaceBtn" Content="Analyser l&apos;espace" Style="{StaticResource ActionBtn}" Height="28" Padding="12,0" Margin="0,0,6,0" ToolTip="Taille des dossiers et fichiers d&apos;un volume ou d&apos;un dossier (vue arborescente)"/>
+                  <Button x:Name="SpaceBtn" Content="Analyser l&apos;espace" Style="{StaticResource ActionBtn}" Padding="12,0" Margin="0,0,6,0" ToolTip="Taille des dossiers et fichiers d&apos;un volume ou d&apos;un dossier (vue arborescente)"/>
                   <Button x:Name="CleanRescan" Content="&#xE72C;" Style="{StaticResource IconBtn}" Width="32" Height="30" Margin="2,0,-6,0" ToolTip="Actualiser"/>
                 </StackPanel>
               </Grid>
@@ -626,8 +626,8 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="SmartLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="SmartBtn" Content="Analyser" Style="{StaticResource ActionBtn}" Margin="0,0,6,0" Width="124"/>
-                      <Button x:Name="SmartOpenBtn" Content="Ouvrir" Style="{StaticResource ActionBtn}" MinWidth="96" IsEnabled="False" ToolTip="Dernier rapport SMART"/>
+                      <Button x:Name="SmartBtn" Content="Analyser" Style="{StaticResource ActionBtn}" Margin="0,0,6,0"/>
+                      <Button x:Name="SmartOpenBtn" Content="Ouvrir" Style="{StaticResource ActionBtn}" IsEnabled="False" ToolTip="Dernier rapport SMART"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -639,7 +639,7 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="OptimizeLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="OptimizeBtn" Content="Optimiser" Style="{StaticResource ActionBtn}" Width="124"/>
+                      <Button x:Name="OptimizeBtn" Content="Optimiser" Style="{StaticResource ActionBtn}"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -651,8 +651,8 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="BatteryLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="BatteryBtn" Content="Générer" Style="{StaticResource ActionBtn}" Margin="0,0,6,0" Width="124"/>
-                      <Button x:Name="BatteryOpenBtn" Content="Ouvrir" Style="{StaticResource ActionBtn}" MinWidth="96" IsEnabled="False" ToolTip="Dernier rapport batterie"/>
+                      <Button x:Name="BatteryBtn" Content="Générer" Style="{StaticResource ActionBtn}" Margin="0,0,6,0"/>
+                      <Button x:Name="BatteryOpenBtn" Content="Ouvrir" Style="{StaticResource ActionBtn}" IsEnabled="False" ToolTip="Dernier rapport batterie"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -670,7 +670,7 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="WuResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="WuResetBtn" Content="Réinitialiser" Style="{StaticResource WarnBtn}" Width="124"/>
+                      <Button x:Name="WuResetBtn" Content="Réinitialiser" Style="{StaticResource WarnBtn}"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -682,7 +682,7 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="NetCheckLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="NetCheckBtn" Content="Tester" Style="{StaticResource ActionBtn}" Width="124"/>
+                      <Button x:Name="NetCheckBtn" Content="Tester" Style="{StaticResource ActionBtn}"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -694,7 +694,7 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="StoreResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="StoreResetBtn" Content="Vider le cache" Style="{StaticResource WarnBtn}" Width="124"/>
+                      <Button x:Name="StoreResetBtn" Content="Vider le cache" Style="{StaticResource WarnBtn}"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -706,7 +706,7 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="GpuResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="GpuResetBtn" Content="Redémarrer" Style="{StaticResource WarnBtn}" Width="124"/>
+                      <Button x:Name="GpuResetBtn" Content="Redémarrer" Style="{StaticResource WarnBtn}"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -718,7 +718,7 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="NetResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="NetResetBtn" Content="Réinitialiser" Style="{StaticResource WarnBtn}" Width="124"/>
+                      <Button x:Name="NetResetBtn" Content="Réinitialiser" Style="{StaticResource WarnBtn}"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -730,7 +730,7 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="SpoolResetLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="SpoolResetBtn" Content="Purger" Style="{StaticResource WarnBtn}" Width="124"/>
+                      <Button x:Name="SpoolResetBtn" Content="Purger" Style="{StaticResource WarnBtn}"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -742,7 +742,7 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="TimeSyncLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="TimeSyncBtn" Content="Synchroniser" Style="{StaticResource ActionBtn}" Width="124"/>
+                      <Button x:Name="TimeSyncBtn" Content="Synchroniser" Style="{StaticResource ActionBtn}"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -754,7 +754,7 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="GpForceLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                      <Button x:Name="GpForceBtn" Content="Appliquer" Style="{StaticResource WarnBtn}" Width="124"/>
+                      <Button x:Name="GpForceBtn" Content="Appliquer" Style="{StaticResource WarnBtn}"/>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -780,8 +780,8 @@
                 </DockPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                   <TextBlock x:Name="RestoreLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Right" TextWrapping="NoWrap" VerticalAlignment="Center" Margin="0,0,12,0" Text="..."/>
-                  <Button x:Name="PersoRestore" Content="Créer" Style="{StaticResource ActionBtn}" MinWidth="96"/>
-                  <Button x:Name="RestoreBack" Visibility="Collapsed" Content="Restaurer..." Style="{StaticResource ActionBtn}" MinWidth="96" Margin="8,0,0,0" ToolTip="Revenir à un point de restauration existant (redémarrage)"/>
+                  <Button x:Name="PersoRestore" Content="Créer" Style="{StaticResource ActionBtn}"/>
+                  <Button x:Name="RestoreBack" Visibility="Collapsed" Content="Restaurer..." Style="{StaticResource ActionBtn}" Margin="8,0,0,0" ToolTip="Revenir à un point de restauration existant (redémarrage)"/>
                 </StackPanel>
               </Grid>
             </Border>
@@ -1067,9 +1067,9 @@
           <!-- filtre du journal : niveau (tout / erreurs / avertissements et erreurs) et texte -->
           <DockPanel Grid.Row="2" Margin="0,0,0,8">
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-              <Button x:Name="LogFAll" Style="{StaticResource ActionBtn}" Height="30" Padding="12,0" Margin="0,0,6,0" Tag="on" Content="Tout"/>
-              <Button x:Name="LogFWarn" Style="{StaticResource ActionBtn}" Height="30" Padding="12,0" Margin="0,0,6,0" Content="Avertissements"/>
-              <Button x:Name="LogFErr" Style="{StaticResource ActionBtn}" Height="30" Padding="12,0" Margin="0,0,6,0" Content="Erreurs"/>
+              <Button x:Name="LogFAll" Style="{StaticResource ActionBtn}" Padding="12,0" Margin="0,0,6,0" Tag="on" Content="Tout"/>
+              <Button x:Name="LogFWarn" Style="{StaticResource ActionBtn}" Padding="12,0" Margin="0,0,6,0" Content="Avertissements"/>
+              <Button x:Name="LogFErr" Style="{StaticResource ActionBtn}" Padding="12,0" Margin="0,0,6,0" Content="Erreurs"/>
               <CheckBox x:Name="LogFApp" Style="{StaticResource TaskCheck}" Content="Messages de l'application" IsChecked="True" Margin="14,0,0,0" VerticalAlignment="Center"
                         ToolTip="Démarrage, affichage, paramètres de l'application, actualisations : décocher pour ne garder que les actions sur le poste"/>
               <!-- zoom du texte du journal : à gauche de la barre, donc jamais masqué quelle que soit la largeur de la fenêtre -->

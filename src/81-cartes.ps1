@@ -64,8 +64,8 @@ function Show-CardToast($C) {
         $fx = [Windows.Media.Effects.DropShadowEffect]::new(); $fx.BlurRadius = 16; $fx.ShadowDepth = 2; $fx.Opacity = 0.3; $fx.Direction = 270; $bd.Effect = $fx
         $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'
         $ToolsUI.UndoText = New-Text ''; $ToolsUI.UndoText.VerticalAlignment = 'Center'; $ToolsUI.UndoText.Margin = New-Thickness 0 0 14 0
-        $ub = New-Button 'Annuler'; $ub.Height = 28; $ub.MinWidth = 80; $ub.Margin = New-Thickness 0 0 6 0; $ub.Add_Click({ Undo-CardHide })
-        $gb = New-Button 'Choisir les cartes'; $gb.Height = 28; $gb.MinWidth = 80; $gb.Margin = New-Thickness 0 0 0 0; $gb.Add_Click({ $ToolsUI.UndoPop.IsOpen = $false; Show-CardPicker })
+        $ub = New-Button 'Annuler'; $ub.Height = 30; $ub.MinWidth = 80; $ub.Margin = New-Thickness 0 0 6 0; $ub.Add_Click({ Undo-CardHide })
+        $gb = New-Button 'Choisir les cartes'; $gb.Height = 30; $gb.MinWidth = 80; $gb.Margin = New-Thickness 0 0 0 0; $gb.Add_Click({ $ToolsUI.UndoPop.IsOpen = $false; Show-CardPicker })
         [void]$sp.Children.Add($ToolsUI.UndoText); [void]$sp.Children.Add($ub); [void]$sp.Children.Add($gb); $bd.Child = $sp; $pp.Child = $bd
         $ToolsUI.UndoPop = $pp
         $ToolsUI.UndoTimer = [Windows.Threading.DispatcherTimer]::new(); $ToolsUI.UndoTimer.Interval = [TimeSpan]::FromSeconds(10)
@@ -89,8 +89,8 @@ function Update-CardSetting {
     $b = $SetUI.CardsBody; if (-not $b) { return }
     $b.Children.Clear()
     $bar = [Windows.Controls.WrapPanel]::new(); $bar.Margin = New-Thickness 38 0 10 14
-    $pk = New-Button 'Choisir les cartes affichées...' 'PrimaryBtn'; $pk.Height = 28; $pk.Margin = New-Thickness 0 0 8 0; $pk.Add_Click({ Show-CardPicker })
-    $all = New-Button 'Tout réafficher'; $all.Height = 28; $all.Margin = New-Thickness 0 0 8 0; $all.Add_Click({ Show-AllCard })
+    $pk = New-Button 'Choisir les cartes affichées...' 'PrimaryBtn'; $pk.Height = 30; $pk.Margin = New-Thickness 0 0 8 0; $pk.Add_Click({ Show-CardPicker })
+    $all = New-Button 'Tout réafficher'; $all.Height = 30; $all.Margin = New-Thickness 0 0 8 0; $all.Add_Click({ Show-AllCard })
     $SetUI.CardsCount = New-Text '' 'Muted'; $SetUI.CardsCount.VerticalAlignment = 'Center'; $SetUI.CardsCount.Margin = New-Thickness 6 0 0 0
     [void]$bar.Children.Add($pk); [void]$bar.Children.Add($all); [void]$bar.Children.Add($SetUI.CardsCount)
     [void]$b.Children.Add($bar)

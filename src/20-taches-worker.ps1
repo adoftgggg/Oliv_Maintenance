@@ -1116,6 +1116,12 @@ function Invoke-Task_SoftUpgrade {
             Write-TaskLog 'winget : aucune mise à jour applicable (0x8A15002B), installation de la nouvelle version par-dessus l''existante (--force).' 'WARN'
             $rc = Invoke-SoftWinget $x $wg @('install', '-e', '--id', $x.Id, '--force', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') $onLine
         }
+        # Windows App Runtime (Microsoft.WindowsAppRuntime.x.y) : son installeur échoue (0x8A150006) quand des applications
+        # utilisent le composant ; nouvel essai avec ses options documentées --quiet --force (ferme ces applications)
+        if ($rc -eq -1978335226 -and "$($x.Id)" -like 'Microsoft.WindowsAppRuntime*' -and -not $Sync.Cancel) {
+            Write-TaskLog 'Windows App Runtime : installeur en échec (0x8A150006, composant utilisé par des applications ouvertes) : nouvel essai en forçant la fermeture de ces applications (--quiet --force).' 'WARN'
+            $rc = Invoke-SoftWinget $x $wg @('install', '-e', '--id', $x.Id, '--force', '--override', '--quiet --force', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') $onLine
+        }
         $good = $rc -eq 0
         # installeur terminé sans erreur : version réellement installée relue (certains logiciels, Discord, EA app...,
         # ne changent de version qu'au prochain lancement, ou s'installent pour un autre compte que celui de l'utilisateur)

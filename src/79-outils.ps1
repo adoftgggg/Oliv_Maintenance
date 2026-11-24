@@ -26,7 +26,7 @@ function New-ToolIconButton([int]$Glyph, [string]$Tip, $Tag, [scriptblock]$Click
     $x.ToolTip = $Tip; $x.Tag = $Tag; $x.Add_Click($Click); $x
 }
 function New-ToolButton([string]$Text, $Tag, [scriptblock]$Click, [string]$StyleKey = 'ActionBtn') {
-    $x = New-Button $Text $StyleKey; $x.Height = 28; $x.MinWidth = 0; $x.Padding = New-Thickness 12 0 12 0; $x.Margin = New-Thickness 0 0 8 0; $x.Tag = $Tag; $x.Add_Click($Click); $x
+    $x = New-Button $Text $StyleKey; $x.Height = 30; $x.MinWidth = 0; $x.Padding = New-Thickness 12 0 12 0; $x.Margin = New-Thickness 0 0 8 0; $x.Tag = $Tag; $x.Add_Click($Click); $x
 }
 function New-ToolBar([object[]]$Buttons) {
     $w = [Windows.Controls.WrapPanel]::new(); $w.Margin = New-Thickness 38 8 10 12
@@ -128,10 +128,10 @@ function Add-LicKeyRow($Body, [string]$Label, [string]$Key, [string]$Tip) {
     if ($Tip) { $v.ToolTip = $Tip }
     $col = Add-AutoColumn $g
     $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; $sp.VerticalAlignment = 'Center'
-    $b1 = New-Button 'Afficher'; $b1.Height = 28; $b1.MinWidth = 96; $b1.Margin = New-Thickness 8 0 0 0
+    $b1 = New-Button 'Afficher'; $b1.Height = 30; $b1.MinWidth = 96; $b1.Margin = New-Thickness 8 0 0 0
     $b1.Tag = @{ Box = $v; Key = $Key; Shown = $false }
     $b1.Add_Click({ param($s, $e) $t = $s.Tag; $t.Shown = -not $t.Shown; $t.Box.Text = $(if ($t.Shown) { $t.Key } else { Get-MaskedText $t.Key }); $s.Content = $(if ($t.Shown) { 'Masquer' } else { 'Afficher' }) })
-    $b2 = New-Button 'Copier'; $b2.Height = 28; $b2.MinWidth = 96; $b2.Margin = New-Thickness 6 0 0 0; $b2.Tag = $Key
+    $b2 = New-Button 'Copier'; $b2.Height = 30; $b2.MinWidth = 96; $b2.Margin = New-Thickness 6 0 0 0; $b2.Tag = $Key
     $b2.Add_Click({ param($s, $e) Set-ClipText "$($s.Tag)"; Write-UiLog 'Clé Windows copiée dans le presse-papiers.' 'APP' })
     [void]$sp.Children.Add($b1); [void]$sp.Children.Add($b2)
     [Windows.Controls.Grid]::SetColumn($sp, $col); [void]$g.Children.Add($sp)
@@ -465,7 +465,7 @@ function Update-EnvList {
             # dossiers introuvables (souvent laissés par une désinstallation) : retrait en un clic, avec récapitulatif
             $miss = @($v.Value -split ';' | Where-Object { $_ -and $v.Name -ne 'PATHEXT' -and -not (Test-EnvDir $_) })
             if ($miss.Count) {
-                $cl = New-Button ('Retirer les dossiers introuvables ({0})' -f $miss.Count); $cl.Height = 28; $cl.MinWidth = 0; $cl.Padding = New-Thickness 10 0 10 0; $cl.Margin = New-Thickness 0 6 0 2; $cl.HorizontalAlignment = 'Left'
+                $cl = New-Button ('Retirer les dossiers introuvables ({0})' -f $miss.Count); $cl.Height = 30; $cl.MinWidth = 0; $cl.Padding = New-Thickness 10 0 10 0; $cl.Margin = New-Thickness 0 6 0 2; $cl.HorizontalAlignment = 'Left'
                 $cl.Tag = @{ P = $path; V = $v }; $cl.Add_Click({ param($s, $e) Remove-EnvMissingDir $s.Tag.P $s.Tag.V }); [void]$vp.Children.Add($cl)
             }
         } else { $t = New-Text $v.Value; $t.TextWrapping = 'Wrap'; $t.FontFamily = [Windows.Media.FontFamily]::new('Consolas'); [void]$vp.Children.Add($t) }

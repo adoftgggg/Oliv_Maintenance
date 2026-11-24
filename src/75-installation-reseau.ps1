@@ -405,7 +405,7 @@ $NetUI = @{}
 # carte Réseau de l'accueil : un seul bouton, ports ouverts et connexions actives dans une fenêtre
 function New-NetPortSection($Body) {
     $hd = [Windows.Controls.DockPanel]::new(); $hd.Margin = New-Thickness 46 10 18 2
-    $bt = New-Button 'Ports et connexions'; $bt.Height = 28; $bt.MinWidth = 140; $bt.HorizontalAlignment = 'Left'
+    $bt = New-Button 'Ports et connexions'; $bt.Height = 30; $bt.MinWidth = 140; $bt.HorizontalAlignment = 'Left'
     $bt.ToolTip = 'Ports ouverts sur le réseau (programmes joignables depuis d''autres postes) et connexions actives'
     $bt.Add_Click({ Show-NetConnection })
     [void]$hd.Children.Add($bt); [void]$Body.Children.Add($hd)

@@ -209,6 +209,7 @@ function Show-SoftMenu($Row) {
 }
 # codes de retour de winget (APPINSTALLER_CLI_ERROR_*, documentation winget-cli) : signification et conduite à tenir
 $WingetErr = @{
+    '0x8A150006' = @('SHELLEXEC_INSTALL_FAILED', 'l''installeur du logiciel s''est arrêté en erreur (souvent : logiciel ou composant en cours d''utilisation)')
     '0x8A150101' = @('INSTALL_PACKAGE_IN_USE', 'le logiciel est ouvert : le fermer puis relancer la mise à jour')
     '0x8A150102' = @('INSTALL_INSTALL_IN_PROGRESS', 'une autre installation est déjà en cours : réessayer plus tard')
     '0x8A150103' = @('INSTALL_FILE_IN_USE', 'des fichiers du logiciel sont utilisés : le fermer puis relancer la mise à jour')

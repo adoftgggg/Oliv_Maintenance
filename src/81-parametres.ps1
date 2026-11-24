@@ -136,8 +136,8 @@ function New-SettingsPage {
         Write-UiLog $(if ($on) { "Lancement à l'ouverture de session activé (tâche \Oliv_Maintenance\$AutoTaskName, exe $StableExe)." } else { 'Lancement à l''ouverture de session désactivé.' }) 'APP'
     }
     $lb = [Windows.Controls.WrapPanel]::new(); $lb.Margin = New-Thickness 46 0 10 14
-    $b1 = New-Button 'Épingler à la barre des tâches...'; $b1.Height = 28; $b1.Margin = New-Thickness 0 0 8 4; $b1.Add_Click({ Request-TaskbarPin })
-    $b2 = New-Button 'Raccourci dans le menu Démarrer'; $b2.Height = 28; $b2.Margin = New-Thickness 0 0 8 4
+    $b1 = New-Button 'Épingler à la barre des tâches...'; $b1.Height = 30; $b1.Margin = New-Thickness 0 0 8 4; $b1.Add_Click({ Request-TaskbarPin })
+    $b2 = New-Button 'Raccourci dans le menu Démarrer'; $b2.Height = 30; $b2.Margin = New-Thickness 0 0 8 4
     $b2.Add_Click({ try { New-StartMenuShortcut; Write-UiLog "Raccourci du menu Démarrer créé : $StartLnk." 'OK'; Show-Info 'Raccourci Oliv_Maintenance ajouté au menu Démarrer (Toutes les applications).' 'Ok' } catch { Show-Info "Raccourci impossible.`n`n$($_.Exception.Message)" 'Error' } })
     [void]$lb.Children.Add($b1); [void]$lb.Children.Add($b2); [void]$c.Body.Children.Add($lb)
     & $setCell $c 0 2
@@ -147,8 +147,8 @@ function New-SettingsPage {
     $t = New-Text 'Exporter : réglages gérés par l''application, applications du catalogue installées, onglets et cartes masqués, dans un fichier. Importer sur un autre poste : réglages différents préparés (bandeau Appliquer, rien n''est changé sans validation), applications manquantes sélectionnées dans Applications > Installer.' 'Muted'
     $t.Margin = New-Thickness 46 0 18 8; [void]$c.Body.Children.Add($t)
     $bar = [Windows.Controls.StackPanel]::new(); $bar.Orientation = 'Horizontal'; $bar.Margin = New-Thickness 46 0 18 14
-    $b = New-Button 'Exporter...' 'PrimaryBtn'; $b.Height = 28; $b.MinWidth = 96; $b.Margin = New-Thickness 0 0 8 0; $b.Add_Click({ try { Export-PcConfig } catch { Write-UiLog "Exportation de la configuration : $($_.Exception.Message)" 'ERROR' } }); [void]$bar.Children.Add($b)
-    $b = New-Button 'Importer...'; $b.Height = 28; $b.MinWidth = 96; $b.Add_Click({ try { Import-PcConfig } catch { Write-UiLog "Importation de la configuration : $($_.Exception.Message)" 'ERROR' } }); [void]$bar.Children.Add($b)
+    $b = New-Button 'Exporter...' 'PrimaryBtn'; $b.Height = 30; $b.MinWidth = 96; $b.Margin = New-Thickness 0 0 8 0; $b.Add_Click({ try { Export-PcConfig } catch { Write-UiLog "Exportation de la configuration : $($_.Exception.Message)" 'ERROR' } }); [void]$bar.Children.Add($b)
+    $b = New-Button 'Importer...'; $b.Height = 30; $b.MinWidth = 96; $b.Add_Click({ try { Import-PcConfig } catch { Write-UiLog "Importation de la configuration : $($_.Exception.Message)" 'ERROR' } }); [void]$bar.Children.Add($b)
     [void]$c.Body.Children.Add($bar)
     $c.Card.Margin = New-Thickness 0 0 0 12
     [void]$p.Children.Add($c.Card)
@@ -197,9 +197,9 @@ function New-SettingsPage {
         param($s, $e) Set-SoftAuto ("$($s.DataContext)" -eq 'On'); foreach ($x in $SetUI.SoftAuto) { $x.Tag = $(if ($x.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
         Write-UiLog ('Recherche des mises à jour des logiciels au lancement : {0}.' -f $(if ("$($s.DataContext)" -eq 'On') { 'activée' } else { 'désactivée' })) 'APP' }
     $ub = [Windows.Controls.WrapPanel]::new(); $ub.Margin = New-Thickness 38 0 10 14
-    $bt = New-Button 'Rechercher maintenant'; $bt.Height = 28; $bt.Margin = New-Thickness 0 0 12 0; $bt.Add_Click({ Start-UpdCheck $true })
+    # recherche manuelle : bouton de l'en-tête de Paramètres (pas de doublon ici), état rappelé
     $SetUI.UpdStatus = New-Text '' 'Muted'; $SetUI.UpdStatus.VerticalAlignment = 'Center'; $SetUI.UpdStatus.TextWrapping = 'Wrap'
-    [void]$ub.Children.Add($bt); [void]$ub.Children.Add($SetUI.UpdStatus); [void]$c.Body.Children.Add($ub)
+    [void]$ub.Children.Add($SetUI.UpdStatus); [void]$c.Body.Children.Add($ub)
     $c.Card.Margin = New-Thickness 0 12 0 0
     [void]$p.Children.Add($c.Card)
     Update-UpdStatus $(if ($UpdUI.Info) { 'Version {0} disponible.' -f (Get-UpdVersion $UpdUI.Info.Tag) } elseif ($UpdUI.Checked) { "Oliv_Maintenance $AppVersion est à jour." } else { 'Pas encore vérifié pendant cette session.' })
@@ -208,7 +208,7 @@ function New-SettingsPage {
     # onglets : un bouton par onglet (Accueil toujours affiché), coché = visible
     $tb = [Windows.Controls.WrapPanel]::new(); $tb.Margin = New-Thickness 46 4 16 12
     foreach ($pg in $TabLabels.Keys) {
-        $bt = New-Button $TabLabels[$pg]; $bt.Height = 28; $bt.MinWidth = 96; $bt.Margin = New-Thickness 0 2 6 2; $bt.DataContext = $pg
+        $bt = New-Button $TabLabels[$pg]; $bt.Height = 30; $bt.MinWidth = 96; $bt.Margin = New-Thickness 0 2 6 2; $bt.DataContext = $pg
         $bt.Tag = $(if ($HiddenTabs.Contains($pg)) { '' } else { 'on' })
         $bt.ToolTip = 'Cliquer pour afficher ou masquer cet onglet'
         $bt.Add_Click({ param($s, $e) $k = "$($s.DataContext)"; if ($HiddenTabs.Contains($k)) { [void]$HiddenTabs.Remove($k); $s.Tag = 'on' } else { [void]$HiddenTabs.Add($k); $s.Tag = '' }; Save-HiddenTab; Update-TabVisibility })
@@ -247,6 +247,7 @@ function New-SettingsPage {
     [void]$c.Body.Children.Add($sig)
     [void]$p.Children.Add($c.Card)
     Set-SettingsLayout $p $cols
+    Update-UpdStatus $(if ($UpdUI.Info) { 'Version {0} disponible.' -f (Get-UpdVersion $UpdUI.Info.Tag) } elseif ($UpdUI.Checked) { "Oliv_Maintenance $AppVersion est à jour." } else { 'Pas encore vérifié pendant cette session.' })
     $SetUI.Built = $true
 }
 # Disposition des Paramètres : toutes les cartes à droite, rubrique par rubrique ; sommaire à gauche, qui reste visible
@@ -256,8 +257,8 @@ $SettingsSections = [ordered]@{
     Update = @{ T = 'Mises à jour'; G = 0xE895; C = @('Mises à jour de l''application') }
     Look   = @{ T = 'Apparence'; G = 0xE790; C = @('Apparence', 'Onglets et cartes affichés') }
     Start  = @{ T = 'Démarrage et fermeture'; G = 0xE7E8; C = @('Démarrage') }
-    Save   = @{ T = 'Sauvegarde et réinitialisation'; G = 0xE777; C = @('Configuration du poste', 'Restauration des réglages', 'Réinitialisation') }
-    About  = @{ T = 'À propos'; G = 0xE946; C = @('À propos') }
+    Save   = @{ T = 'Sauvegarde et réinitialisation'; G = 0xE777; C = @('Configuration du poste', 'Restauration des réglages', 'Réinitialisation'); Merge = $true }
+
 }
 function Set-SettingsLayout($P, $Cols) {
     $cards = @{}
@@ -272,6 +273,8 @@ function Set-SettingsLayout($P, $Cols) {
     $nav = [Windows.Controls.StackPanel]::new(); $nav.Margin = New-Thickness 0 0 16 0; $nav.VerticalAlignment = 'Top'
     $nav.RenderTransform = [Windows.Media.TranslateTransform]::new()
     $sh = [Windows.Controls.StackPanel]::new(); $sh.MaxWidth = 960; $sh.HorizontalAlignment = 'Stretch'; [Windows.Controls.Grid]::SetColumn($sh, 1)
+    # en-tête : logo, version, état de la mise à jour et action directe (remplace la carte « À propos »)
+    [void]$sh.Children.Add((New-SettingsHero))
     $SetUI.SecHost = $sh; $SetUI.SecCards = $cards; $SetUI.SecBtns = @{}; $SetUI.SecFirst = [ordered]@{}; $SetUI.SecNav = $nav; $SetUI.SecGrid = $g
     foreach ($k in $SettingsSections.Keys) {
         $sec = $SettingsSections[$k]
@@ -283,8 +286,22 @@ function Set-SettingsLayout($P, $Cols) {
         [void]$sp.Children.Add($ic); [void]$sp.Children.Add($tx); $b.Content = $sp
         $b.Add_Click({ param($s, $e) Show-SettingsSection "$($s.DataContext)" })
         [void]$nav.Children.Add($b); $SetUI.SecBtns[$k] = $b
-        # cartes de la rubrique, dans l'ordre ; 1re carte = point d'arrivée du sommaire
-        foreach ($t in $sec.C) { $c = $cards[$t]; if ($c) { [void]$sh.Children.Add($c); if (-not $SetUI.SecFirst.Contains($k)) { $SetUI.SecFirst[$k] = $c } } }
+        # titre de rubrique (repère en défilant), puis ses cartes ; rubrique « Merge » : cartes fondues en une seule carte à
+        # sous-parties séparées par un filet ; titre = point d'arrivée du sommaire
+        $hd = New-Text $sec.T; $hd.FontSize = 20; $hd.FontWeight = [Windows.FontWeights]::SemiBold; $hd.Margin = New-Thickness 4 18 0 10
+        $hd.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'HeadBrush')
+        [void]$sh.Children.Add($hd); $SetUI.SecFirst[$k] = $hd
+        $list = @($sec.C | ForEach-Object { $cards[$_] } | Where-Object { $_ })
+        if ($sec.Merge -and $list.Count -gt 1) {
+            $host0 = $list[0].Child
+            foreach ($c in $list[1..($list.Count - 1)]) {
+                $sep = [Windows.Controls.Border]::new(); $sep.Height = 1; $sep.Margin = New-Thickness 16 6 16 0; $sep.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'LineBrush')
+                [void]$host0.Children.Add($sep)
+                $kids = @($c.Child.Children); $c.Child.Children.Clear(); foreach ($x in $kids) { [void]$host0.Children.Add($x) }
+            }
+            $list = @($list[0])
+        }
+        foreach ($c in $list) { [void]$sh.Children.Add($c) }
     }
     [void]$g.Children.Add($nav); [void]$g.Children.Add($sh)
     [void]$P.Children.Add($g)
@@ -517,4 +534,27 @@ function Import-PcConfig {
     Write-UiLog ('Configuration importée ({0}) : {1} réglages préparés, {2} applications sélectionnées.' -f [IO.Path]::GetFileName($dlg.FileName), $chg.Count, $apps.Count) 'APP'
     Add-SessionEvent 'Configuration' 'Importation de la configuration' ('{0} réglages, {1} applications' -f $chg.Count, $apps.Count) 'ok'
     [void](Show-Dialog ("Configuration de {0} importée.`n`n{1} réglage(s) préparé(s) : cliquer sur Appliquer dans le bandeau du bas pour les appliquer. {2} application(s) sélectionnée(s) : Applications > Installer." -f $o.Poste, $chg.Count, $apps.Count) 'Info' $null $(if ($lines.Count) { $lines } else { @('Ce poste est déjà configuré comme le fichier.') }))
+}
+
+# En-tête de Paramètres : logo sur fond blanc, nom, version et date, état de la mise à jour, bouton de recherche
+function New-SettingsHero {
+    $b = [Windows.Controls.Border]::new(); $b.Style = $Window.FindResource('Panel'); $b.Padding = New-Thickness 20 18 20 18; $b.Margin = New-Thickness 0 0 0 4
+    $g = [Windows.Controls.Grid]::new()
+    foreach ($w in 'Auto', '*', 'Auto') { $cd = [Windows.Controls.ColumnDefinition]::new(); $cd.Width = $(if ($w -eq '*') { [Windows.GridLength]::new(1, 'Star') } else { [Windows.GridLength]::Auto }); [void]$g.ColumnDefinitions.Add($cd) }
+    $logo = Get-EmbeddedImage $LogoFullB64
+    if ($logo) {
+        $li = [Windows.Controls.Image]::new(); $li.Source = $logo; $li.Width = 150; $li.Stretch = 'Uniform'; [Windows.Media.RenderOptions]::SetBitmapScalingMode($li, 'HighQuality')
+        $lb = [Windows.Controls.Border]::new(); $lb.Background = [Windows.Media.Brushes]::White; $lb.CornerRadius = [Windows.CornerRadius]::new(8); $lb.Padding = New-Thickness 10 6 10 6; $lb.Margin = New-Thickness 0 0 20 0; $lb.VerticalAlignment = 'Center'; $lb.Child = $li
+        [void]$g.Children.Add($lb)
+    }
+    $sp = [Windows.Controls.StackPanel]::new(); $sp.VerticalAlignment = 'Center'; [Windows.Controls.Grid]::SetColumn($sp, 1)
+    $t1 = New-Text 'Oliv_Maintenance'; $t1.FontSize = 22; $t1.FontWeight = [Windows.FontWeights]::SemiBold; [void]$sp.Children.Add($t1)
+    $bd = $BuildDate; try { $bd = '{0:dd/MM/yyyy}' -f [DateTime]::ParseExact($BuildDate, 'yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) } catch { $null = $_ }
+    $t2 = New-Text ('Version {0}  ·  {1}  ·  développé par Oliv' -f $AppVersion, $bd) 'Muted'; $t2.Margin = New-Thickness 0 2 0 6; [void]$sp.Children.Add($t2)
+    $SetUI.HeroStatus = New-Text '' 'Muted'; $SetUI.HeroStatus.TextWrapping = 'Wrap'; [void]$sp.Children.Add($SetUI.HeroStatus)
+    [void]$g.Children.Add($sp)
+    $bt = New-Button 'Rechercher une mise à jour' 'PrimaryBtn'; $bt.Height = 34; $bt.Padding = New-Thickness 16 0 16 0; $bt.VerticalAlignment = 'Center'; $bt.Margin = New-Thickness 16 0 0 0
+    $bt.Add_Click({ Start-UpdCheck $true }); [Windows.Controls.Grid]::SetColumn($bt, 2); [void]$g.Children.Add($bt)
+    $b.Child = $g
+    $b
 }

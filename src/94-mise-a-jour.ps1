@@ -79,7 +79,11 @@ $BgJobDone['Upd'] = {
         Update-UpdStatus ("Oliv_Maintenance $AppVersion est à jour" + $(if ($new) { " (dernière publiée : $new)" } else { '' }) + '.')
     }
 }
-function Update-UpdStatus([string]$Text) { if ($SetUI.UpdStatus) { $SetUI.UpdStatus.Text = $Text + $(if ($UpdUI.Checked) { '  ·  vérifié {0:HH:mm}' -f $UpdUI.Checked } else { '' }) } }
+function Update-UpdStatus([string]$Text) {
+    $t = $Text + $(if ($UpdUI.Checked) { '  ·  vérifié {0:HH:mm}' -f $UpdUI.Checked } else { '' })
+    if ($SetUI.UpdStatus) { $SetUI.UpdStatus.Text = $t }
+    if ($SetUI.HeroStatus) { $SetUI.HeroStatus.Text = $t; $SetUI.HeroStatus.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($UpdUI.Info) { 'WarnFgBrush' } elseif ($UpdUI.Checked) { 'OkFgBrush' } else { 'MutedBrush' })) }
+}
 function Show-UpdBar {
     $r = $UpdUI.Info; if (-not $r -or $UpdUI.Dismissed) { return }
     $Ui.UpdText.Text = 'Oliv_Maintenance {0} est disponible (installée : {1}){2}' -f (Get-UpdVersion $r.Tag), $AppVersion, $(if ($r.Size) { '  ·  {0:N1} Mo' -f ($r.Size / 1MB) } else { '' })
