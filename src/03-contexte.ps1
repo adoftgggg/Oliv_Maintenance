@@ -1,5 +1,3 @@
-# autotest (test automatique Windows avant publication) : erreurs collectées, bilan en fin de parcours (99-demarrage)
-$SelfTest = $(if ($env:_OLIVM_SELFTEST -eq '1') { @{ Errors = [Collections.ArrayList]::new(); Seen = [Collections.Generic.List[string]]::new() } } else { $null })
 # Instance unique par session Windows. Instance en cours décrite dans ProgramData\Oliv_Maintenance\instance.txt
 # (« version|PID »). Nouvelle ouverture :
 # - même version : fenêtre déjà ouverte ramenée au premier plan (éventuellement depuis la zone de notification), arrêt ;

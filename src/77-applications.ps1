@@ -335,6 +335,19 @@ function Set-AppsIcon {
         if ($o.IconReal) { continue }
         $b = Join-Path $AppsUI.IconDir ($o.Id -replace '[^\w.+-]', '_')
         $real = [IO.File]::Exists("$b.app.png")
+        # banque embarquée : icône nette tout de suite, sans téléchargement (remplacée par l'icône réelle une fois installé)
+        # version actualisée de la banque (téléchargée en arrière-plan) prioritaire sur la version embarquée
+        $fresh = "$b.bank.png"; $hasFresh = [IO.File]::Exists($fresh) -and ([IO.FileInfo]::new($fresh)).Length -gt 200
+        if (-not $real -and -not $o.IconSet -and ($hasFresh -or $AppIconBank.ContainsKey($o.Id))) {
+            try {
+                $bi = [Windows.Media.Imaging.BitmapImage]::new(); $bi.BeginInit(); $bi.CacheOption = 'OnLoad'; $bi.DecodePixelWidth = 64
+                if ($hasFresh) { $bi.UriSource = [Uri]::new($fresh) } else { $bi.StreamSource = [IO.MemoryStream]::new([Convert]::FromBase64String($AppIconBank[$o.Id])) }
+                $bi.EndInit(); $bi.Freeze()
+                $im = [Windows.Controls.Image]::new(); $im.Source = $bi; $im.Width = 30; $im.Height = 30; [Windows.Media.RenderOptions]::SetBitmapScalingMode($im, 'HighQuality')
+                $o.Icon.Background = [Windows.Media.Brushes]::White; $o.Icon.Child = $im; $o.IconSet = $true
+            } catch { Write-Ignored 'Icône embarquée' $_ }
+            continue
+        }
         if ($o.IconSet -and -not $real) { continue }
         $f = $(if ($real) { "$b.app.png" } else { "$b.png" })
         if (-not [IO.File]::Exists($f) -or (Get-Item -LiteralPath $f).Length -lt 200) { continue }
@@ -353,19 +366,27 @@ function Start-AppsIconDownload {
             $f = Join-Path $AppsUI.IconDir (($o.Id -replace '[^\w.+-]', '_') + '.png')
             # favicon absent, ou générique (16 px) téléchargé il y a plus de 7 jours : nouvel essai
             $old = $(if ([IO.File]::Exists($f)) { $fi = [IO.FileInfo]::new($f); $fi.Length -lt 200 -and $fi.LastWriteTime -lt [DateTime]::Now.AddDays(-7) } else { $true })
-            if ($old) { @{ F = $f; D = "$($o.A[2])" } } })
+            if ($old -and -not $AppIconBank.ContainsKey($o.Id)) { @{ F = $f; D = "$($o.A[2])" } } })
     # programmes installés sans icône réelle extraite : nom de la vignette cherché dans les entrées de désinstallation
     $real = @(foreach ($o in $AppsUI.Tiles.Values) {
             $b = Join-Path $AppsUI.IconDir ($o.Id -replace '[^\w.+-]', '_')
             if ($AppsUI.Installed -and $AppsUI.Installed.Contains($o.Id) -and -not [IO.File]::Exists("$b.app.png")) { @{ F = "$b.app.png"; N = "$($o.A[0])" } } })
-    if (-not $todo.Count -and -not $real.Count) { return }
-    $Sync.AppsIconTodo = $todo; $Sync.AppsIconReal = $real; $Sync.AppsIconDir = $AppsUI.IconDir
+    # banque : icônes réactualisées depuis le dépôt source (30 jours au plus)
+    $bank = @(foreach ($o in $AppsUI.Tiles.Values) {
+            if (-not $AppIconSlug.ContainsKey($o.Id)) { continue }
+            $f = Join-Path $AppsUI.IconDir (($o.Id -replace '[^\w.+-]', '_') + '.bank.png')
+            if (-not [IO.File]::Exists($f) -or [IO.File]::GetLastWriteTime($f) -lt [DateTime]::Now.AddDays(-30)) { @{ F = $f; S = $AppIconSlug[$o.Id] } } })
+    if (-not $todo.Count -and -not $real.Count -and -not $bank.Count) { return }
+    $Sync.AppsIconTodo = $todo; $Sync.AppsIconReal = $real; $Sync.AppsIconBank = $bank; $Sync.AppsIconDir = $AppsUI.IconDir
     Start-BgJob 'AppsIcons' @'
 [void][IO.Directory]::CreateDirectory($Sync.AppsIconDir)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $wc = [Net.WebClient]::new()
 foreach ($x in @($Sync.AppsIconTodo)) {
     try { $wc.DownloadFile(('https://www.google.com/s2/favicons?domain={0}&sz=64' -f [uri]::EscapeDataString(($x.D -split '/')[0])), $x.F) } catch {}
+}
+foreach ($x in @($Sync.AppsIconBank)) {
+    try { $tmp = $x.F + '.tmp'; $wc.DownloadFile(('https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/png/{0}.png' -f $x.S), $tmp); if ((Get-Item -LiteralPath $tmp).Length -gt 200) { Move-Item -LiteralPath $tmp -Destination $x.F -Force } else { Remove-Item -LiteralPath $tmp -Force } } catch { $null = $_ }
 }
 $wc.Dispose()
 if (@($Sync.AppsIconReal).Count) {

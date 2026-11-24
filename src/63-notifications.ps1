@@ -15,7 +15,8 @@ function Initialize-AppNotifier {
             $ni.Icon = [System.Drawing.SystemIcons]::Information
         }
         $ni.Text = 'Oliv_Maintenance'
-        $ni.Add_BalloonTipClicked({ try { Show-MainWindow } catch { Write-Ignored 'Ouverture de la fenêtre' $_ } })
+        # clic sur la notification : fenêtre ramenée et ouverte à l'endroit concerné (mises à jour, Accueil, Nettoyage...)
+        $ni.Add_BalloonTipClicked({ try { Show-MainWindow; if ($script:NotifGo) { & $script:NotifGo } } catch { Write-Ignored 'Ouverture depuis la notification' $_ } })
         $ni.Add_MouseClick({ param($s, $e) if ($e.Button -eq 'Left') { try { Show-MainWindow } catch { Write-Ignored 'Ouverture de la fenêtre' $_ } } })
         # clic droit : ouvrir / quitter (utile quand la fenêtre est réduite dans la zone de notification)
         $cm = [System.Windows.Forms.ContextMenuStrip]::new()
@@ -30,7 +31,8 @@ function Initialize-AppNotifier {
     } catch { Write-UiLog "Notifications Windows indisponibles : $($_.Exception.Message)" 'WARN'; $false }
 }
 # Kind : Info | Warning | Error ; Duration : durée de l'opération (pas de notification sous 20 s)
-function Send-AppNotification([string]$Title, [string]$Text, [string]$Kind = 'Info', $Duration = $null) {
+function Send-AppNotification([string]$Title, [string]$Text, [string]$Kind = 'Info', $Duration = $null, [scriptblock]$Go = $null) {
+    $script:NotifGo = $Go
     if ($Duration -and $Duration.TotalSeconds -lt 20) { return }
     if ($Window.IsActive -and $Window.WindowState -ne 'Minimized') { return }
     if (-not (Initialize-AppNotifier)) { return }
@@ -55,20 +57,20 @@ $Ui.AutoReboot.Add_Click({ param($s, $e)
 $AlertSeen = @{}
 function Get-AlertOn { $v = Get-RegValue $CardRegKey 'AlertesPoste'; $null -eq $v -or [int]$v -eq 1 }
 function Watch-PcAlert {
-    if ($SelfTest -or -not (Get-AlertOn)) { return }
+    if (-not (Get-AlertOn)) { return }
     $al = [ordered]@{}
-    try { $rs = Get-RebootState; if ($rs -and @($rs.Why).Count) { $al['reboot|' + (@($rs.Why) -join ';')] = @('Redémarrage en attente', (@($rs.Why) -join ' ; '), 'Warning') } } catch { $null = $_ }
-    try { $n = @($Sync.WuPending.Items | Where-Object { $_ }).Count; if ($n) { $al["wu|$n"] = @('Mises à jour Windows', ('{0} {1} : Accueil > Mises à jour Windows.' -f $n, (Get-Plural $n 'mise à jour disponible' 'mises à jour disponibles')), 'Info') } } catch { $null = $_ }
-    try { $n = @(Get-SoftUpdate | Where-Object { -not $SoftExcl[(Get-SoftKey $_)] }).Count; if ($n) { $al["soft|$n"] = @('Mises à jour de logiciels', ('{0} {1} : Applications > Mettre à jour.' -f $n, (Get-Plural $n 'logiciel à mettre à jour' 'logiciels à mettre à jour')), 'Info') } } catch { $null = $_ }
+    try { $rs = Get-RebootState; if ($rs -and @($rs.Why).Count) { $al['reboot|' + (@($rs.Why) -join ';')] = @('Redémarrage en attente', ((@($rs.Why) -join ' ; ') + '. Cliquer pour voir le détail.'), 'Warning', { Show-Page 'Info' }) } } catch { $null = $_ }
+    try { $n = @($Sync.WuPending.Items | Where-Object { $_ }).Count; if ($n) { $al["wu|$n"] = @('Mises à jour Windows', ('{0} {1}. Cliquer pour les voir.' -f $n, (Get-Plural $n 'mise à jour disponible' 'mises à jour disponibles')), 'Info', { Show-Page 'Info' }) } } catch { $null = $_ }
+    try { $n = @(Get-SoftUpdate | Where-Object { -not $SoftExcl[(Get-SoftKey $_)] }).Count; if ($n) { $al["soft|$n"] = @('Mises à jour de logiciels', ('{0} {1}. Cliquer pour les mettre à jour.' -f $n, (Get-Plural $n 'logiciel à mettre à jour' 'logiciels à mettre à jour')), 'Info', { Show-Page 'Apps'; Set-AppsMode 'Upd' }) } } catch { $null = $_ }
     try {
         foreach ($v in @($Sync.Vols)) {
             if (-not $v -or -not $v.Total) { continue }
-            if ($v.Free / $v.Total -lt 0.1) { $al["disk|$($v.Name)"] = @('Disque presque plein', ('{0} : {1:N1} Go libres sur {2:N0} Go. Maintenance > Nettoyage.' -f $v.Name.TrimEnd('\'), ($v.Free / 1GB), ($v.Total / 1GB)), 'Warning') }
+            if ($v.Free / $v.Total -lt 0.1) { $al["disk|$($v.Name)"] = @('Disque presque plein', ('{0} : {1:N1} Go libres sur {2:N0} Go. Cliquer pour nettoyer.' -f $v.Name.TrimEnd('\'), ($v.Free / 1GB), ($v.Total / 1GB)), 'Warning', { Show-Page 'Maint' }) }
         }
     } catch { $null = $_ }
     foreach ($k in $al.Keys) {
         if ($AlertSeen.ContainsKey($k)) { continue }
         $AlertSeen[$k] = 1; $a = $al[$k]
-        Send-AppNotification $a[0] $a[1] $a[2]
+        Send-AppNotification $a[0] $a[1] $a[2] $null $a[3]
     }
 }

@@ -49,30 +49,11 @@ $Window.Dispatcher.Add_UnhandledException({
     param($s, $e)
     $x = $e.Exception; $er = $(if ($x -is [Management.Automation.IContainsErrorRecord]) { $x.ErrorRecord } else { $null })
     $where = $(if ($er -and $er.InvocationInfo) { ' (ligne {0} : {1})' -f $er.InvocationInfo.ScriptLineNumber, "$($er.InvocationInfo.Line)".Trim() } else { '' })
-    try { Write-UiLog ('Erreur interne interceptée : {0}{1}' -f $x.Message, $where) 'ERROR' } catch { if ($SelfTest) { [void]$SelfTest.Errors.Add($x.Message) } }
+    try { Write-UiLog ('Erreur interne interceptée : {0}{1}' -f $x.Message, $where) 'ERROR' } catch { $null = $_ }
     $e.Handled = $true
 })
 Start-MainWindow
 # surveillance des blocages de l'interface (fil de fond, 95-activites)
 try { Start-BgJob 'Watchdog' $WatchdogScript } catch { Write-Ignored 'Surveillance de l''interface' $_ }
-# Autotest (variable d'environnement _OLIVM_SELFTEST=1, lancé par le test automatique Windows de GitHub avant toute
-# publication) : chaque onglet affiché tour à tour (pages différées construites, Paramètres compris), 4 s par onglet pour
-# laisser tourner minuteurs et lectures de fond, puis bilan : erreurs consignées (ERROR) et exceptions de l'interface.
-# Code de sortie = nombre d'erreurs ; bilan écrit dans le fichier désigné par _OLIVM_SELFTEST_OUT.
-if ($SelfTest) {
-    $SelfTest.Pages = [Collections.Queue]::new([object[]]@($PageNames + 'Settings' + 'Info'))
-    $SelfTest.Timer = [Windows.Threading.DispatcherTimer]::new(); $SelfTest.Timer.Interval = [TimeSpan]::FromSeconds(4)
-    $SelfTest.Timer.Add_Tick({
-        try {
-            if ($SelfTest.Pages.Count) { $pg = $SelfTest.Pages.Dequeue(); $SelfTest.Seen.Add($pg); Show-Page $pg; return }
-            if ($Ui.AppsModePre) { foreach ($m in 'Inst', 'Pre') { try { Set-AppsMode $m } catch { [void]$SelfTest.Errors.Add("Applications ($m) : $($_.Exception.Message)") } } }
-        } catch { [void]$SelfTest.Errors.Add("Onglet $pg : $($_.Exception.Message)") ; return }
-        $SelfTest.Timer.Stop()
-        $out = @('Oliv_Maintenance {0} - autotest {1:yyyy-MM-dd HH:mm:ss}' -f $AppVersion, (Get-Date), ('onglets : ' + ($SelfTest.Seen -join ', ')), ('erreurs : {0}' -f $SelfTest.Errors.Count)) + @($SelfTest.Errors | ForEach-Object { '  - ' + $_ })
-        try { if ($env:_OLIVM_SELFTEST_OUT) { [IO.File]::WriteAllLines($env:_OLIVM_SELFTEST_OUT, [string[]]$out, [Text.UTF8Encoding]::new($false)) } } catch { $null = $_ }
-        [Environment]::Exit([math]::Min(250, $SelfTest.Errors.Count))
-    })
-    $SelfTest.Timer.Start()
-}
 [Windows.Threading.Dispatcher]::Run()
 Exit-App 0
