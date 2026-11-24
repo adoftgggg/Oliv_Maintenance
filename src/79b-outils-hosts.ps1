@@ -1,5 +1,7 @@
 # ================= Fichier hosts : blocage pubs / traqueurs (liste StevenBlack, entre 2 repères), édition, sauvegarde
-function Read-HostsFile { try { [IO.File]::ReadAllText($HostsFile) } catch { '' } }
+# hosts lu et réécrit en ANSI (page de code du système, lecture de Windows) : octets des lignes de l'utilisateur gardés à
+# l'identique (avant : lecture UTF-8 puis écriture ASCII, tout caractère accentué d'un commentaire devenait « ? »)
+function Read-HostsFile { try { [IO.File]::ReadAllText($HostsFile, [Text.Encoding]::Default) } catch { '' } }
 # contenu hors bloc de blocage, et bloc (lignes) séparés
 function Split-HostsContent([string]$Text) {
     $own = [Collections.Generic.List[string]]::new(); $blk = [Collections.Generic.List[string]]::new(); $in = $false
@@ -17,7 +19,7 @@ function Write-HostsFile([string]$Own, [string[]]$Block) {
     # fichier momentanément ouvert par le service Client DNS (relecture après modification) ou l'antivirus : nouvel essai
     # toutes les 250 ms, 15 s au plus, avant de signaler l'échec
     for ($k = 0; ; $k++) {
-        try { [IO.File]::WriteAllText($HostsFile, $txt, [Text.Encoding]::ASCII); break }
+        try { [IO.File]::WriteAllText($HostsFile, $txt, [Text.Encoding]::Default); break }
         catch [IO.IOException] { if ($k -ge 60) { throw 'fichier hosts occupé par un autre programme depuis 15 s (service Client DNS ou antivirus) : réessayer dans un instant.' }; Start-Sleep -Milliseconds 250 }
     }
     # vidage du cache DNS sans attendre (Clear-DnsClientCache bloquait l'interface pendant la relecture du fichier par le service)
@@ -143,7 +145,7 @@ try {
     if ($l.Count -lt 1000) { throw "liste inattendue ($($l.Count) entrées)" }
     $P.Step = 'write'; $P.Pct = 90.0
     # fichier actuel : entrées personnelles gardées, ancien bloc comparé (ajouts / retraits)
-    $txt = try { [IO.File]::ReadAllText($Sync.HostsPath) } catch { '' }
+    $txt = try { [IO.File]::ReadAllText($Sync.HostsPath, [Text.Encoding]::Default) } catch { '' }
     $own = [Collections.Generic.List[string]]::new(); $old = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $in = $false
     foreach ($x in $txt.Split([char]10)) {
         $x = $x.TrimEnd([char]13)
@@ -162,7 +164,7 @@ try {
     for ($i = 0; $i -lt $l.Count; $i += 9) { [void]$sb.Append('0.0.0.0 ').Append(($l.GetRange($i, [math]::Min(9, $l.Count - $i)) -join ' ')).Append("`r`n") }
     [void]$sb.Append($Sync.HostsB + "`r`n")
     # écriture par blocs de 256 Ko : avancement réel 90 > 99 %
-    $bytes = [Text.Encoding]::ASCII.GetBytes($sb.ToString()); $tw = [DateTime]::Now
+    $bytes = [Text.Encoding]::Default.GetBytes($sb.ToString()); $tw = [DateTime]::Now
     # fichier momentanément ouvert par le service Client DNS ou l'antivirus : nouvel essai toutes les 250 ms, 30 s au plus
     $fs = $null
     for ($k = 0; -not $fs; $k++) {
@@ -191,7 +193,7 @@ $h = Join-Path $env:windir 'System32\drivers\etc\hosts'; $log = Join-Path $PSScr
 $A = '# >>> Oliv_Maintenance : blocage pubs et traqueurs'; $B = '# <<< Oliv_Maintenance'; $url = 'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts'
 function Write-Line([string]$M) { Add-Content -LiteralPath $log -Value ('{0:yyyy-MM-dd HH:mm} {1}' -f (Get-Date), $M) -Encoding UTF8 }
 try {
-    $txt = [IO.File]::ReadAllText($h)
+    $txt = [IO.File]::ReadAllText($h, [Text.Encoding]::Default)
     if (-not $txt.Contains($A)) { Write-Line 'blocage non actif : rien à faire'; exit 0 }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $t = (New-Object Net.WebClient).DownloadString($url)
@@ -204,7 +206,7 @@ try {
     $blk = @("$A ($((Get-Date).ToString('dd/MM/yyyy'))) - source : $url - ne pas modifier") + @($g9) + @($B)
     $fi = [IO.FileInfo]::new($h); if ($fi.IsReadOnly) { $fi.IsReadOnly = $false }
     $txt2 = (($own -join "`r`n").TrimEnd() + "`r`n`r`n" + ($blk -join "`r`n") + "`r`n")
-    for ($k = 0; ; $k++) { try { [IO.File]::WriteAllText($h, $txt2, [Text.Encoding]::ASCII); break } catch [IO.IOException] { if ($k -ge 120) { throw }; Start-Sleep -Milliseconds 250 } }
+    for ($k = 0; ; $k++) { try { [IO.File]::WriteAllText($h, $txt2, [Text.Encoding]::Default); break } catch [IO.IOException] { if ($k -ge 120) { throw }; Start-Sleep -Milliseconds 250 } }
     try { Start-Process -FilePath (Join-Path $env:windir 'System32\ipconfig.exe') -ArgumentList '/flushdns' -WindowStyle Hidden } catch { $null = $_ }
     Write-Line ('liste mise à jour : {0} domaines bloqués' -f $l.Count)
 } catch { Write-Line ('échec : ' + $_.Exception.Message); exit 1 }

@@ -123,9 +123,13 @@ function Start-UsbCreation {
     elseif ($u -notmatch '^[\w][\w .-]{0,19}$' -or $u -match '(?i)^(administrateur|administrator|invité|guest|system)$') { $err = 'Nom de compte invalide : 20 caractères au plus, lettres, chiffres, espace, point ou tiret, pas un nom réservé de Windows.' }
     if ($err) { $UsbUI.Err.Text = $err; $UsbUI.Err.Visibility = 'Visible'; return }
     if ((Show-Dialog ("Effacer entièrement la clé « {0} » et y installer {1} ?`n`nToutes les données de la clé seront perdues." -f $sel.Content, $UsbUI.Ver.SelectedItem) 'Warn' @(@{ T = 'Annuler'; V = $false; D = $true; C = $true }, @{ T = 'Effacer et créer'; V = $true; S = 'WarnBtn' })) -ne $true) { return }
+    # identité de la clé relevée au clic (le numéro de disque change si une clé est retirée ou un disque USB branché pendant
+    # le téléchargement : effacement refusé si le disque n° N n'est plus la même clé)
+    $did = try { $g = Get-Disk -Number ([int]$sel.Tag) -ErrorAction Stop; if ("$($g.BusType)" -ne 'USB' -or $g.IsSystem -or $g.IsBoot) { $null } else { @{ U = "$($g.UniqueId)"; S = "$($g.SerialNumber)".Trim(); Z = [long]$g.Size } } } catch { $null }
+    if (-not $did) { $UsbUI.Err.Text = 'La clé choisie n''est plus détectée à ce numéro : bouton Relire.'; $UsbUI.Err.Visibility = 'Visible'; return }
     $win11 = $UsbUI.Ver.SelectedIndex -eq 0
     $Sync.UsbCancel = $false
-    $Sync.UsbParams = @{ Win = $(if ($win11) { '11' } else { '10' }); Iso = $(if ($UsbUI.SrcIso.IsChecked) { $UsbUI.Iso } else { $null }); Disk = [int]$sel.Tag
+    $Sync.UsbParams = @{ Win = $(if ($win11) { '11' } else { '10' }); Iso = $(if ($UsbUI.SrcIso.IsChecked) { $UsbUI.Iso } else { $null }); Disk = [int]$sel.Tag; DiskId = $did
         Xml = (New-UnattendXml $u $UsbUI.Pass.Password ($win11 -and [bool]$UsbUI.Bypass.IsChecked)); Dl = (Join-Path $UserProfilePath 'Downloads'); Tools = $GameDir }
     $Sync.Usb = [hashtable]::Synchronized(@{ Phase = 'Préparation'; Pct = -1; Detail = ''; Done = $false; Ok = $false; Msg = '' })
     $UsbUI.Form.Visibility = 'Collapsed'; $UsbUI.Run.Visibility = 'Visible'; $UsbUI.Ok.Visibility = 'Collapsed'; $UsbUI.Cancel.Content = 'Interrompre'
@@ -196,6 +200,7 @@ try {
     Set-UsbState 'Préparation de la clé USB' -1 'Effacement et formatage (FAT32)'
     $d = Get-Disk -Number $p.Disk -ErrorAction Stop
     if ("$($d.BusType)" -ne 'USB') { throw 'le disque choisi n''est plus une clé USB : arrêt.' }
+    if ($d.IsSystem -or $d.IsBoot -or "$($d.UniqueId)" -ne $p.DiskId.U -or "$($d.SerialNumber)".Trim() -ne $p.DiskId.S -or [long]$d.Size -ne $p.DiskId.Z) { throw ('le disque n° {0} n''est plus la clé choisie (clé retirée ou autre disque USB branché) : rien n''a été effacé, relancer après avoir rebranché la clé.' -f $p.Disk) }
     if ($d.IsReadOnly) { Set-Disk -Number $p.Disk -IsReadOnly $false }
     # clé déjà en GPT (préparée par un autre outil) : Clear-Disk / Initialize-Disk échouaient sans bruit, la clé restait en
     # GPT et New-Partition -IsActive était refusé (« MbrType and IsActive cannot be used on a GPT disk »). Tout par diskpart :

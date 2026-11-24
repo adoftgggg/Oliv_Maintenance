@@ -34,6 +34,16 @@ function Format-Size {
     if ($Bytes -ge 1GB) { '{0:N2} Go' -f ($Bytes / 1GB) } elseif ($Bytes -ge 1MB) { '{0:N1} Mo' -f ($Bytes / 1MB) } else { '{0:N0} Ko' -f ($Bytes / 1KB) }
 }
 function Get-DirSize { param([string]$Path) Get-FastSize $Path }
+# suppression récursive qui ne traverse jamais un point de jonction ou un lien (le lien seul est supprimé, jamais sa cible)
+function Remove-TreeSafe([string]$Dir) {
+    foreach ($e in [IO.DirectoryInfo]::new($Dir).EnumerateFileSystemInfos()) {
+        try {
+            if ($e.Attributes -band [IO.FileAttributes]::ReparsePoint) { if ($e -is [IO.DirectoryInfo]) { [IO.Directory]::Delete($e.FullName, $false) } else { [IO.File]::Delete($e.FullName) }; continue }
+            if ($e -is [IO.DirectoryInfo]) { Remove-TreeSafe $e.FullName } else { if ($e.Attributes -band [IO.FileAttributes]::ReadOnly) { $e.Attributes = 'Normal' }; $e.Delete() }
+        } catch { $null = $_ }
+    }
+    try { [IO.Directory]::Delete($Dir, $false) } catch { $null = $_ }
+}
 function Clear-Folder {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return [double]0 }
@@ -43,7 +53,7 @@ function Clear-Folder {
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
                 if ($item.PSIsContainer) { [IO.Directory]::Delete($item.FullName, $false) } else { [IO.File]::Delete($item.FullName) }
             } else {
-                Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                if ($item.PSIsContainer) { Remove-TreeSafe $item.FullName } else { if ($item.Attributes -band [IO.FileAttributes]::ReadOnly) { $item.Attributes = 'Normal' }; $item.Delete() }
             }
         } catch {}
     }

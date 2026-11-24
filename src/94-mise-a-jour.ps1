@@ -39,9 +39,25 @@ $UpdDlScript = @'
 $p = $Sync.UpdDl; $st = $Sync.UpdDlState
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    $part = $p.Dest + '.part'
     $rq = [Net.HttpWebRequest]::Create($p.Url); $rq.UserAgent = 'Oliv_Maintenance'; $rq.Timeout = 20000
-    $rs = $rq.GetResponse(); $tot = [long]$rs.ContentLength; $in = $rs.GetResponseStream()
+    try { $rs = $rq.GetResponse() }
+    catch [Net.WebException] {
+        # 404 : version annoncée retirée du dépôt entre la recherche et le clic (nouvelle publication) -> dernière version relue puis téléchargée
+        if (-not ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 404)) { throw }
+        $h = @{ 'User-Agent' = 'Oliv_Maintenance'; 'Accept' = 'application/vnd.github+json' }
+        $j = Invoke-RestMethod -Uri ('https://api.github.com/repos/{0}/releases/latest' -f $p.Repo) -Headers $h -TimeoutSec 12 -UseBasicParsing -ErrorAction Stop
+        $v = "$($j.tag_name)" -replace '^[vV]', ''; $name = "Oliv_Maintenance_$v.exe"
+        if ($name -eq (Split-Path -Leaf $p.Dest)) { throw }
+        $p.Url = 'https://raw.githubusercontent.com/{0}/binaires/{1}' -f $p.Repo, $name; $p.Dest = Join-Path (Split-Path -Parent $p.Dest) $name; $p.Tag = "$($j.tag_name)"
+        $p.Size = $null; $p.Digest = $null
+        if ("$($j.body)" -match '(?i)SHA-?256\W+([0-9a-f]{64})') { $p.Digest = 'sha256:' + $Matches[1].ToLower() }
+        if ("$($j.body)" -match '(?i)taille\W+(\d+)\s*octets') { $p.Size = [long]$Matches[1] }
+        $st.Retarget = $v
+        $rq = [Net.HttpWebRequest]::Create($p.Url); $rq.UserAgent = 'Oliv_Maintenance'; $rq.Timeout = 20000
+        $rs = $rq.GetResponse()
+    }
+    $part = $p.Dest + '.part'
+    $tot = [long]$rs.ContentLength; $in = $rs.GetResponseStream()
     $out = [IO.File]::Create($part); $buf = New-Object byte[] 65536; $done = 0L
     try { while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) { $out.Write($buf, 0, $n); $done += $n; if ($tot -gt 0) { $st.Pct = [int](100 * $done / $tot) } } }
     finally { $out.Close(); $in.Close(); $rs.Close() }
@@ -71,10 +87,12 @@ $BgJobDone['Upd'] = {
     }
     $new = Get-UpdVersion $r.Tag; $cur = Get-UpdVersion $AppVersion
     if ($new -and $cur -and $new -gt $cur -and $r.Url) {
-        $UpdUI.Info = $r; $UpdUI.Dismissed = $false
-        Write-UiLog ('Nouvelle version disponible : {0} (installée : {1}).' -f $new, $AppVersion) 'APP'
+        $chg = -not $UpdUI.Info -or "$($UpdUI.Info.Tag)" -ne "$($r.Tag)"; if ($chg) { $UpdUI.Dismissed = $false }
+        $UpdUI.Info = $r
+        if ($chg -or $UpdUI.Manual) { Write-UiLog ('Nouvelle version disponible : {0} (installée : {1}).' -f $new, $AppVersion) 'APP' }
         Show-UpdBar; Update-UpdStatus ('Version {0} disponible.' -f $new)
     } else {
+        $UpdUI.Info = $null; if (-not $BgJobs.ContainsKey('UpdDl')) { $Ui.UpdBar.Visibility = 'Collapsed' }
         if ($UpdUI.Manual) { Write-UiLog "Oliv_Maintenance $AppVersion est à jour." 'APP' }
         Update-UpdStatus ("Oliv_Maintenance $AppVersion est à jour" + $(if ($new) { " (dernière publiée : $new)" } else { '' }) + '.')
     }
@@ -95,7 +113,7 @@ function Start-UpdInstall {
     if ($Sync.Running) { Show-Info 'Une tâche est en cours. Mettre à jour une fois terminée.'; return }
     $exe = "$env:_OLIVM_EXE"
     $dir = $(if ($exe -and (Test-Path -LiteralPath $exe)) { Split-Path -Parent $exe } else { Join-Path $UserProfilePath 'Downloads' })
-    $Sync.UpdDl = @{ Url = $r.Url; Size = $r.Size; Digest = $r.Digest; Dest = (Join-Path $dir $r.Name); Old = $exe }
+    $Sync.UpdDl = [hashtable]::Synchronized(@{ Url = $r.Url; Size = $r.Size; Digest = $r.Digest; Dest = (Join-Path $dir $r.Name); Old = $exe; Repo = $UpdRepo })
     $Sync.UpdDlState = [hashtable]::Synchronized(@{ Pct = 0; Ok = $false; Msg = ''; Hash = $false })
     $Ui.UpdGo.IsEnabled = $false; $Ui.UpdProg.Value = 0; $Ui.UpdProg.Visibility = 'Visible'; $Ui.UpdText.Text = 'Téléchargement de la version {0}...' -f (Get-UpdVersion $r.Tag)
     Write-UiLog ('Mise à jour : téléchargement de {0}.' -f $r.Url) 'APP'
@@ -111,6 +129,7 @@ $BgJobDone['UpdDl'] = {
         Write-UiLog "Mise à jour : échec du téléchargement - $m" 'ERROR'; Show-Info "Téléchargement de la mise à jour impossible.`n`n$m" 'Error'
         Show-UpdBar; return
     }
+    if ($st.Retarget) { Write-UiLog ('Mise à jour : la version annoncée a été remplacée sur le dépôt, version {0} téléchargée à la place.' -f $st.Retarget) 'APP' }
     Write-UiLog ('Mise à jour téléchargée : {0}{1}.' -f $p.Dest, $(if ($st.Hash) { ' (empreinte SHA-256 vérifiée)' } else { ' (empreinte non publiée : taille vérifiée)' })) 'OK'
     # lancé par l'exe : relance sur la nouvelle version, ancien exe supprimé après la fermeture ; sinon dossier ouvert
     if (-not $p.Old) { Start-Process explorer.exe -ArgumentList ('/select,"{0}"' -f $p.Dest); $Ui.UpdBar.Visibility = 'Collapsed'; return }
@@ -138,14 +157,21 @@ $Ui.UpdLater.Add_Click({ $UpdUI.Dismissed = $true; $Ui.UpdBar.Visibility = 'Coll
 # recherche au lancement, une fois l'interface prête (réseau en tâche de fond, sans effet sur l'ouverture)
 if (Get-SoftAuto) {
     $SoftAutoTimer = [Windows.Threading.DispatcherTimer]::new(); $SoftAutoTimer.Interval = [TimeSpan]::FromSeconds(30)
+    # 30 s après l'ouverture puis toutes les 12 h (application gardée ouverte dans la zone de notification)
     $SoftAutoTimer.Add_Tick({
-        $SoftAutoTimer.Stop()
+        $SoftAutoTimer.Interval = [TimeSpan]::FromHours(12)
+        if (-not (Get-SoftAuto)) { return }
         try {
-            if ($Sync.WgRunning -or $Sync.Running -or (Test-SoftUpgrading)) { Write-UiLog 'Recherche des mises à jour des logiciels au lancement : reportée (tâche déjà en cours).' 'APP'; return }
-            Write-UiLog 'Recherche des mises à jour des logiciels installés en arrière-plan (lancement de l''application).' 'APP'
+            if ($Sync.WgRunning -or $Sync.Running -or (Test-SoftUpgrading)) { $SoftAutoTimer.Interval = [TimeSpan]::FromMinutes(5); Write-UiLog 'Recherche automatique des mises à jour des logiciels : reportée de 5 minutes (tâche déjà en cours).' 'APP'; return }
+            Write-UiLog 'Recherche des mises à jour des logiciels installés en arrière-plan (automatique).' 'APP'
             Start-SoftSearch
         } catch { Write-Ignored 'Recherche des mises à jour des logiciels au lancement' $_ }
     })
     $SoftAutoTimer.Start()
 }
+# application restée ouverte (zone de notification, lancement à l'ouverture de session) : nouvelle vérification toutes les 6 h,
+# sinon la version annoncée au lancement peut avoir été remplacée sur le dépôt
+$UpdUI.Recheck = [Windows.Threading.DispatcherTimer]::new(); $UpdUI.Recheck.Interval = [TimeSpan]::FromHours(6)
+$UpdUI.Recheck.Add_Tick({ if ((Get-UpdAuto) -and -not $BgJobs.ContainsKey('UpdDl')) { try { Start-UpdCheck $false } catch { Write-Ignored 'Recherche de mise à jour' $_ } } })
+$UpdUI.Recheck.Start()
 if (Get-UpdAuto) { [void]$Window.Dispatcher.BeginInvoke([Action]{ try { Start-UpdCheck $false } catch { Write-Ignored 'Recherche de mise à jour' $_ } }, [Windows.Threading.DispatcherPriority]::ApplicationIdle) }

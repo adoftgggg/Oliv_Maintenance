@@ -32,13 +32,15 @@ function Initialize-AppNotifier {
 }
 # Kind : Info | Warning | Error ; Duration : durée de l'opération (pas de notification sous 20 s)
 function Send-AppNotification([string]$Title, [string]$Text, [string]$Kind = 'Info', $Duration = $null, [scriptblock]$Go = $null) {
-    $script:NotifGo = $Go
+    # $script:NotifShown : notification affichée ou non (action du clic remplacée seulement si affichée)
+    $script:NotifShown = $false
     if ($Duration -and $Duration.TotalSeconds -lt 20) { return }
     if ($Window.IsActive -and $Window.WindowState -ne 'Minimized') { return }
     if (-not (Initialize-AppNotifier)) { return }
+    $script:NotifGo = $Go
     if ($Text.Length -gt 240) { $Text = $Text.Substring(0, 237) + '...' }
     try {
-        $script:Notif.ShowBalloonTip(10000, $Title, $(if ($Text) { $Text } else { ' ' }), [System.Windows.Forms.ToolTipIcon]$Kind)
+        $script:Notif.ShowBalloonTip(10000, $Title, $(if ($Text) { $Text } else { ' ' }), [System.Windows.Forms.ToolTipIcon]$Kind); $script:NotifShown = $true
     } catch {
         Write-Ignored 'Notification Windows' $_
     }
@@ -70,7 +72,7 @@ function Watch-PcAlert {
     } catch { $null = $_ }
     foreach ($k in $al.Keys) {
         if ($AlertSeen.ContainsKey($k)) { continue }
-        $AlertSeen[$k] = 1; $a = $al[$k]
-        Send-AppNotification $a[0] $a[1] $a[2] $null $a[3]
+        # une bulle par contrôle (une bulle chasse la précédente) ; alerte marquée vue seulement une fois affichée
+        $a = $al[$k]; Send-AppNotification $a[0] $a[1] $a[2] $null $a[3]; if ($script:NotifShown) { $AlertSeen[$k] = 1; break }
     }
 }

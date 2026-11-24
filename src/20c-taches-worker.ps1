@@ -75,7 +75,8 @@ function Invoke-SoftToolAsUser([string[]]$A, [string]$Name, [scriptblock]$OnLine
         [void][IO.Directory]::CreateDirectory($dir)
         $q = @($A | ForEach-Object { '"' + ("$_" -replace '%', '%%' -replace '"', '') + '"' }) -join ' '
         $cmd = "@echo off`r`nwinget $q >`"$out`" 2>&1`r`n>`"$rcf.tmp`" echo %ERRORLEVEL%`r`nmove /y `"$rcf.tmp`" `"$rcf`" >nul`r`n"
-        [IO.File]::WriteAllText((Join-Path $dir 'run.cmd'), $cmd, [Text.Encoding]::ASCII)
+        # page de code OEM (850 en France) : cmd lit les .cmd ainsi ; en ASCII un profil accentué (C:\Users\Frédéric) devenait « Fr?d?ric »
+        [IO.File]::WriteAllText((Join-Path $dir 'run.cmd'), $cmd, [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage))
         $act = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" -Argument ('--headless "{0}\System32\cmd.exe" /d /c "{1}"' -f $env:SystemRoot, (Join-Path $dir 'run.cmd'))
         $pr = New-ScheduledTaskPrincipal -UserId $Sync.UserName -LogonType Interactive -RunLevel Limited
         $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 2) -Hidden
