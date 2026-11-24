@@ -24,6 +24,7 @@ function Move-TabIndicator([string]$Name, [bool]$Animate = $true) {
 }
 # Changement d'onglet : page affichée (avec son effet de glissement) puis trait déplacé sous l'onglet
 function Show-Page([string]$Name) {
+    $Sync.UiStep = "ouverture de l'onglet $Name"
     foreach ($p in $PageNames) { $Ui["Nav$p"].Tag = $(if ($p -eq $Name) { 'on' } else { '' }) }
     $Sync.CurPage = $Name
     if ($Name -eq 'Settings') { $Ui.TabIndicator.Opacity = 0; Show-PageContent $Name; return }

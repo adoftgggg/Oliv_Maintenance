@@ -24,6 +24,6 @@ jobs:
           $arg = "-NoProfile -STA -ExecutionPolicy Bypass -Command `"`$global:_OlivMScriptPath='$cmd'; Invoke-Expression ([IO.File]::ReadAllText('$cmd', [Text.Encoding]::UTF8))`""
           $p = Start-Process -FilePath "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList $arg -PassThru -WindowStyle Hidden
           if (-not $p.WaitForExit(600000)) { $p.Kill(); Write-Host '::error::autotest bloqué plus de 10 minutes (fenêtre modale ?)'; exit 1 }
-          if (Test-Path $out) { Get-Content $out | ForEach-Object { Write-Host $_ } } else { Write-Host '::error::aucun bilan d autotest' }
+          if (Test-Path $out) { Get-Content $out -Encoding UTF8 | ForEach-Object { if ($_ -like '  - *') { Write-Host "::warning::$_" } else { Write-Host "::notice::$_" } } } else { Write-Host '::error::aucun bilan d autotest' }
           Write-Host "Code de sortie : $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { Write-Host "::error::autotest en échec ($($p.ExitCode) erreur(s))"; exit 1 }

@@ -28,10 +28,51 @@ function Set-BgActivity([string]$Key, [string]$Text, [double]$Pct, [string]$Tip,
     $a.Btn.Tag = $Stop; $a.Btn.Visibility = $(if ($Stop) { 'Visible' } else { 'Collapsed' })
     $Ui.BgBar.Visibility = 'Visible'
 }
+# Bandeau d'erreur : dernière erreur (texte complet en infobulle), boutons « Voir le journal » et « Fermer » ; erreurs
+# suivantes comptées (« et 2 autres »). Visible depuis tous les onglets, ne bloque rien.
+$ErrBanner = @{ Row = $null; N = 0 }
+function Show-ErrorBanner([string]$Msg) {
+    if (-not $Ui.BgList) { return }
+    if (-not $ErrBanner.Row) {
+        $g = [Windows.Controls.Grid]::new(); $g.Margin = New-Thickness 0 2 0 2
+        [void]$g.ColumnDefinitions.Add([Windows.Controls.ColumnDefinition]::new()); $c = [Windows.Controls.ColumnDefinition]::new(); $c.Width = [Windows.GridLength]::Auto; [void]$g.ColumnDefinitions.Add($c)
+        $t = New-Text ''; $t.FontWeight = [Windows.FontWeights]::SemiBold; $t.TextTrimming = 'CharacterEllipsis'; $t.VerticalAlignment = 'Center'
+        $t.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'ErrFgBrush'); [void]$g.Children.Add($t)
+        $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; [Windows.Controls.Grid]::SetColumn($sp, 1)
+        $b1 = New-Button 'Voir le journal'; $b1.Height = 28; $b1.Margin = New-Thickness 12 0 0 0; $b1.Add_Click({ Show-Page 'Log' })
+        $b2 = New-Button 'Fermer'; $b2.Height = 28; $b2.Margin = New-Thickness 6 0 0 0
+        $b2.Add_Click({ [void]$Ui.BgList.Children.Remove($ErrBanner.Row); $ErrBanner.Row = $null; $ErrBanner.N = 0; if (-not $Ui.BgList.Children.Count) { $Ui.BgBar.Visibility = 'Collapsed' } })
+        [void]$sp.Children.Add($b1); [void]$sp.Children.Add($b2); [void]$g.Children.Add($sp)
+        $Ui.BgList.Children.Insert(0, $g); $ErrBanner.Row = $g; $ErrBanner.Text = $t
+    }
+    $ErrBanner.N++
+    $ErrBanner.Text.Text = 'Erreur : ' + $Msg + $(if ($ErrBanner.N -gt 1) { '  (et {0} autre{1})' -f ($ErrBanner.N - 1), $(if ($ErrBanner.N -gt 2) { 's' } else { '' }) } else { '' })
+    $ErrBanner.Row.ToolTip = $Msg
+    $Ui.BgBar.Visibility = 'Visible'
+}
+# Surveillance de l'interface : un fil de fond vérifie chaque seconde que la fenêtre répond (horodatage posé par le
+# minuteur de l'interface) ; blocage de plus de 2 s consigné avec l'étape en cours (avertissement, ou erreur au-delà de
+# 10 s), pour repérer et corriger chaque traitement trop long fait dans l'interface
+$WatchdogScript = @'
+while (-not $Sync.InfoStop) {
+    Start-Sleep -Milliseconds 500
+    $p = $Sync.UiPing; if (-not $p) { continue }
+    $late = ([DateTime]::Now - $p).TotalSeconds
+    if ($late -gt 2 -and -not $Sync.UiFreeze) { $Sync.UiFreeze = @{ Start = $p; Step = "$($Sync.UiStep)" } }
+}
+'@
+function Watch-UiFreeze {
+    $now = [DateTime]::Now; $f = $Sync.UiFreeze
+    if ($f) {
+        $Sync.UiFreeze = $null; $d = ($now - $f.Start).TotalSeconds
+        if ($d -gt 2) { Write-UiLog ('Interface bloquée {0:N1} s (étape : {1}).' -f $d, $(if ($f.Step) { $f.Step } else { 'action de l''utilisateur' })) $(if ($d -gt 10) { 'ERROR' } else { 'WARN' }) }
+    }
+    $Sync.UiPing = $now
+}
 function Remove-BgActivity([string]$Key) {
     $a = $Activities[$Key]; if (-not $a) { return }
     [void]$Ui.BgList.Children.Remove($a.Row); $Activities.Remove($Key)
-    if (-not $Activities.Count) { $Ui.BgBar.Visibility = 'Collapsed' }
+    if (-not $Activities.Count -and -not $ErrBanner.Row) { $Ui.BgBar.Visibility = 'Collapsed' }
 }
 
 # ---- BitLocker

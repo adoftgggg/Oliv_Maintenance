@@ -3,7 +3,8 @@
 # exception arrêtait le reste du tick sans trace). Erreur journalisée une seule fois par étape et par message.
 $TickErrors = @{}
 function Invoke-TickStep([string]$Name, [scriptblock]$Step) {
-    try { & $Step }
+    $Sync.UiStep = $Name
+    try { & $Step; $Sync.UiStep = '' }
     catch {
         $m = $_.Exception.Message
         if ($TickErrors[$Name] -ne $m) { $TickErrors[$Name] = $m; Write-UiLog ('Rafraîchissement ({0}) : {1}' -f $Name, $m) 'WARN' }
@@ -13,7 +14,11 @@ function Invoke-TickStep([string]$Name, [scriptblock]$Step) {
 # journal : lignes en attente des runspaces
 function Receive-LogQueue {
     $sb = [System.Text.StringBuilder]::new(); $line = $null
-    while ($Sync.Queue.TryDequeue([ref]$line)) { [void]$sb.AppendLine($line) }
+    while ($Sync.Queue.TryDequeue([ref]$line)) {
+        [void]$sb.AppendLine($line)
+        # toute erreur (interface, tâches, recherches) rendue visible : bandeau rouge avec accès au journal
+        if ($line -match '^\S+ \[ERROR\] (.+)$') { try { Show-ErrorBanner $Matches[1] } catch { $null = $_ } }
+    }
     if ($sb.Length -gt 0) { Add-LogLine $sb.ToString() }
 }
 
@@ -143,6 +148,8 @@ function Update-RunProgress {
 $Timer = [Windows.Threading.DispatcherTimer]::new()
 $Timer.Interval = [TimeSpan]::FromMilliseconds(250)
 $Timer.Add_Tick({
+    # interface vivante (surveillance des blocages, 95-activites) : avant tout autre traitement
+    Watch-UiFreeze
     # effet visuel en cours : tick sauté (repris 250 ms plus tard), aucune image perdue
     if (Test-AnimBusy) { return }
     $Sync.Tick = 1 + [int]$Sync.Tick

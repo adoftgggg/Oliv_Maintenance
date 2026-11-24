@@ -52,6 +52,8 @@ $Window.Dispatcher.Add_UnhandledException({
     $e.Handled = $true
 })
 Start-MainWindow
+# surveillance des blocages de l'interface (fil de fond, 95-activites)
+try { Start-BgJob 'Watchdog' $WatchdogScript } catch { Write-Ignored 'Surveillance de l''interface' $_ }
 # Autotest (variable d'environnement _OLIVM_SELFTEST=1, lancé par le test automatique Windows de GitHub avant toute
 # publication) : chaque onglet affiché tour à tour (pages différées construites, Paramètres compris), 4 s par onglet pour
 # laisser tourner minuteurs et lectures de fond, puis bilan : erreurs consignées (ERROR) et exceptions de l'interface.
