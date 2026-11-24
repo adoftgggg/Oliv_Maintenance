@@ -245,8 +245,14 @@ function Write-HostsFile([string]$Own, [string[]]$Block) {
     if (-not (Test-Path -LiteralPath $HostsBackup)) { try { [void][IO.Directory]::CreateDirectory((Split-Path $HostsBackup)); Copy-Item -LiteralPath $HostsFile -Destination $HostsBackup -Force } catch { Write-Ignored 'Sauvegarde du fichier hosts' $_ } }
     $fi = [IO.FileInfo]::new($HostsFile); if ($fi.Exists -and $fi.IsReadOnly) { $fi.IsReadOnly = $false }
     $txt = $Own.TrimEnd() + "`r`n" + $(if ($Block -and $Block.Count) { "`r`n" + ($Block -join "`r`n").TrimEnd() + "`r`n" } else { '' })
-    [IO.File]::WriteAllText($HostsFile, $txt, [Text.Encoding]::ASCII)
-    try { Clear-DnsClientCache -ErrorAction Stop } catch { Write-Ignored 'Vidage du cache DNS' $_ }
+    # fichier momentanément ouvert par le service Client DNS (relecture après modification) ou l'antivirus : nouvel essai
+    # toutes les 250 ms, 15 s au plus, avant de signaler l'échec
+    for ($k = 0; ; $k++) {
+        try { [IO.File]::WriteAllText($HostsFile, $txt, [Text.Encoding]::ASCII); break }
+        catch [IO.IOException] { if ($k -ge 60) { throw 'fichier hosts occupé par un autre programme depuis 15 s (service Client DNS ou antivirus) : réessayer dans un instant.' }; Start-Sleep -Milliseconds 250 }
+    }
+    # vidage du cache DNS sans attendre (Clear-DnsClientCache bloquait l'interface pendant la relecture du fichier par le service)
+    try { Start-Process -FilePath (Join-Path $env:windir 'System32\ipconfig.exe') -ArgumentList '/flushdns' -WindowStyle Hidden } catch { Write-Ignored 'Vidage du cache DNS' $_ }
 }
 # entrées personnelles : « IP nom [nom...] [# commentaire] » ; une paire (IP, nom) par nom
 function Get-HostsEntry([string]$Own) {
@@ -286,7 +292,7 @@ function Save-HostsOwn([string]$Own, $Block, [string]$What) {
 function Update-HostsCard {
     $b = $ToolsUI.HostsBody; $b.Children.Clear()
     $p = Split-HostsContent (Read-HostsFile)
-    $nb = 0; foreach ($x in $p.Block) { if ($x.StartsWith('0.0.0.0 ') -or $x.StartsWith("0.0.0.0`t")) { $nb++ } }
+    $nb = 0; foreach ($x in $p.Block) { if ($x.StartsWith('0.0.0.0 ') -or $x.StartsWith("0.0.0.0`t")) { $nb += @($x.Trim() -split '\s+').Count - 1 } }
     $date = $(if ($p.Block.Count -and $p.Block[0] -match '\((\d{2}/\d{2}/\d{4})\)') { $Matches[1] } else { '' })
     [void](Add-KV $b 'Blocage pubs et traqueurs' $(if ($nb) { '{0:N0} domaines bloqués (liste du {1})' -f $nb, $date } else { 'désactivé' }) $(if ($nb) { 'OkFgBrush' } else { '' }))
     if ($nb) {
@@ -344,7 +350,7 @@ $HostsScript = @'
 # analyse 70-90 % (lignes traitées, dédoublonnage par HashSet : l'ancien Select-Object -Unique, quadratique, prenait plusieurs
 # minutes sur 80 000 lignes), écriture 90-100 % (fusion avec les entrées personnelles, écriture, vidage du cache DNS)
 $r = @{}
-$P = $Sync.HostsProg = @{ Done = 0; Total = 0; Step = 'dl'; Pct = 0.0; N = 0; Of = 0 }
+$P = $Sync.HostsProg = @{ Done = 0; Total = 0; Step = 'dl'; Pct = 0.0; N = 0; Of = 0 }; $t0j = [DateTime]::Now
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $rq = [Net.HttpWebRequest]::Create($Sync.HostsUrl); $rq.UserAgent = 'Oliv_Maintenance'; $rq.Timeout = 30000; $rq.ReadWriteTimeout = 30000
@@ -362,7 +368,7 @@ try {
     $re = [regex]'^0\.0\.0\.0\s+([^\s#]+)'
     for ($i = 0; $i -lt $lines.Length; $i++) {
         $m = $re.Match($lines[$i])
-        if ($m.Success) { $d = $m.Groups[1].Value; if ($d -ne '0.0.0.0' -and $set.Add($d)) { $l.Add('0.0.0.0 ' + $d) } }
+        if ($m.Success) { $d = $m.Groups[1].Value; if ($d -ne '0.0.0.0' -and $set.Add($d)) { $l.Add($d) } }
         if (($i -band 4095) -eq 0) { $P.N = $i; $P.Pct = 70.0 + 20.0 * $i / $lines.Length }
     }
     if ($l.Count -lt 1000) { throw "liste inattendue ($($l.Count) entrées)" }
@@ -373,7 +379,7 @@ try {
     foreach ($x in $txt.Split([char]10)) {
         $x = $x.TrimEnd([char]13)
         if ($x.StartsWith($Sync.HostsA)) { $in = $true; continue }
-        if ($in) { if ($x.StartsWith($Sync.HostsB)) { $in = $false } elseif ($x.StartsWith('0.0.0.0')) { [void]$old.Add(($x -split '\s+')[1]) }; continue }
+        if ($in) { if ($x.StartsWith($Sync.HostsB)) { $in = $false } elseif ($x.StartsWith('0.0.0.0')) { foreach ($d in @($x -split '\s+' | Select-Object -Skip 1)) { if ($d) { [void]$old.Add($d) } } }; continue }
         $own.Add($x)
     }
     $plus = 0; foreach ($d in $set) { if (-not $old.Contains($d)) { $plus++ } }
@@ -382,13 +388,26 @@ try {
     $fi = [IO.FileInfo]::new($Sync.HostsPath); if ($fi.Exists -and $fi.IsReadOnly) { $fi.IsReadOnly = $false }
     $sb = [Text.StringBuilder]::new(($own -join "`r`n").TrimEnd()); [void]$sb.Append("`r`n`r`n")
     [void]$sb.Append($Sync.HostsA + ' (' + (Get-Date).ToString('dd/MM/yyyy') + ') - source : ' + $Sync.HostsUrl + " - ne pas modifier`r`n")
-    foreach ($x in $l) { [void]$sb.Append($x).Append("`r`n") }
+    # 9 domaines par ligne (format « compressé » de StevenBlack) : 9 fois moins de lignes à relire par le service Client DNS
+    # de Windows, qui ralentissait fortement avec une entrée par ligne
+    for ($i = 0; $i -lt $l.Count; $i += 9) { [void]$sb.Append('0.0.0.0 ').Append(($l.GetRange($i, [math]::Min(9, $l.Count - $i)) -join ' ')).Append("`r`n") }
     [void]$sb.Append($Sync.HostsB + "`r`n")
-    $P.Pct = 95.0
-    [IO.File]::WriteAllText($Sync.HostsPath, $sb.ToString(), [Text.Encoding]::ASCII)
-    try { Clear-DnsClientCache -ErrorAction Stop } catch { $null = $_ }
+    # écriture par blocs de 256 Ko : avancement réel 90 > 99 %
+    $bytes = [Text.Encoding]::ASCII.GetBytes($sb.ToString()); $tw = [DateTime]::Now
+    # fichier momentanément ouvert par le service Client DNS ou l'antivirus : nouvel essai toutes les 250 ms, 30 s au plus
+    $fs = $null
+    for ($k = 0; -not $fs; $k++) {
+        try { $fs = [IO.FileStream]::new($Sync.HostsPath, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::Read) }
+        catch [IO.IOException] { if ($k -ge 120) { throw 'fichier hosts occupé par un autre programme depuis 30 s (service Client DNS ou antivirus).' }; $P.Step = 'busy'; Start-Sleep -Milliseconds 250 }
+    }
+    $P.Step = 'write'
+    try { for ($o = 0; $o -lt $bytes.Length; $o += 262144) { $fs.Write($bytes, $o, [math]::Min(262144, $bytes.Length - $o)); $P.Pct = 90.0 + 9.0 * ($o / $bytes.Length) } } finally { $fs.Dispose() }
+    $r.WriteS = ([DateTime]::Now - $tw).TotalSeconds
+    # cache DNS : vidage lancé sans attendre (Clear-DnsClientCache attendait que le service Client DNS ait relu tout le
+    # fichier, plusieurs minutes) ; le service relit de lui-même le fichier hosts modifié
+    try { Start-Process -FilePath (Join-Path $env:windir 'System32\ipconfig.exe') -ArgumentList '/flushdns' -WindowStyle Hidden } catch { $null = $_ }
     $P.Pct = 100.0
-    $r.Count = $l.Count; $r.Plus = $plus; $r.Moins = $moins; $r.OldCount = $old.Count
+    $r.Count = $l.Count; $r.Plus = $plus; $r.Moins = $moins; $r.OldCount = $old.Count; $r.TotalS = ([DateTime]::Now - $t0j).TotalSeconds
 } catch { $r.Error = $_.Exception.Message }
 $Sync.HostsDl = $r
 '@
@@ -408,14 +427,16 @@ try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $t = (New-Object Net.WebClient).DownloadString($url)
     $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $l = [Collections.Generic.List[string]]::new(); $re = [regex]'^0\.0\.0\.0\s+([^\s#]+)'
-    foreach ($x in $t.Split([char]10)) { $m = $re.Match($x); if ($m.Success) { $d = $m.Groups[1].Value; if ($d -ne '0.0.0.0' -and $set.Add($d)) { $l.Add('0.0.0.0 ' + $d) } } }
+    foreach ($x in $t.Split([char]10)) { $m = $re.Match($x); if ($m.Success) { $d = $m.Groups[1].Value; if ($d -ne '0.0.0.0' -and $set.Add($d)) { $l.Add($d) } } }
     if ($l.Count -lt 1000) { throw "liste inattendue ($($l.Count) entrées)" }
     $own = [Collections.Generic.List[string]]::new(); $in = $false
     foreach ($x in ($txt -split "`r?`n")) { if ($x.StartsWith($A)) { $in = $true; continue }; if ($in) { if ($x.StartsWith($B)) { $in = $false }; continue }; [void]$own.Add($x) }
-    $blk = @("$A ($((Get-Date).ToString('dd/MM/yyyy'))) - source : $url - ne pas modifier") + $l + @($B)
+    $g9 = for ($i = 0; $i -lt $l.Count; $i += 9) { '0.0.0.0 ' + ($l.GetRange($i, [math]::Min(9, $l.Count - $i)) -join ' ') }
+    $blk = @("$A ($((Get-Date).ToString('dd/MM/yyyy'))) - source : $url - ne pas modifier") + @($g9) + @($B)
     $fi = [IO.FileInfo]::new($h); if ($fi.IsReadOnly) { $fi.IsReadOnly = $false }
-    [IO.File]::WriteAllText($h, (($own -join "`r`n").TrimEnd() + "`r`n`r`n" + ($blk -join "`r`n") + "`r`n"), [Text.Encoding]::ASCII)
-    try { Clear-DnsClientCache } catch { $null = $_ }
+    $txt2 = (($own -join "`r`n").TrimEnd() + "`r`n`r`n" + ($blk -join "`r`n") + "`r`n")
+    for ($k = 0; ; $k++) { try { [IO.File]::WriteAllText($h, $txt2, [Text.Encoding]::ASCII); break } catch [IO.IOException] { if ($k -ge 120) { throw }; Start-Sleep -Milliseconds 250 } }
+    try { Start-Process -FilePath (Join-Path $env:windir 'System32\ipconfig.exe') -ArgumentList '/flushdns' -WindowStyle Hidden } catch { $null = $_ }
     Write-Line ('liste mise à jour : {0} domaines bloqués' -f $l.Count)
 } catch { Write-Line ('échec : ' + $_.Exception.Message); exit 1 }
 '@
@@ -463,6 +484,7 @@ function Start-HostsBlock([bool]$On) {
         $what = $(switch ($g.Step) {
                 'dl' { $(if ($g.Total -gt 0) { 'téléchargement {0} / {1}' -f (Format-SizeUi $g.Done '0 Ko'), (Format-SizeUi $g.Total) } else { 'téléchargement {0} reçus (taille non annoncée)' -f (Format-SizeUi $g.Done '0 Ko') }) }
                 'parse' { 'analyse de la liste ({0:N0} / {1:N0} lignes)' -f $g.N, $g.Of }
+                'busy' { 'fichier hosts occupé (service Client DNS ou antivirus), nouvel essai...' }
                 default { 'écriture du fichier hosts' } })
         $pb.IsIndeterminate = ($g.Step -eq 'dl' -and $g.Total -le 0); $pb.Value = $pc
         $t.Text = 'Blocage pubs et traqueurs : {0:N0} %  ·  {1}  ·  {2} s' -f $pc, $what, $el
@@ -482,7 +504,7 @@ $BgJobDone['Hosts'] = {
     $r = $Sync.HostsDl
     if (-not $r -or $r.Error) { $m = $(if ($r) { $r.Error } else { 'tâche interrompue' }); Write-UiLog "Fichier hosts : liste de blocage non appliquée - $m" 'ERROR'; Show-Info "Mise à jour de la liste de blocage impossible.`n`n$m" 'Error'; Update-HostsCard; return }
     $chg = $(if ($r.OldCount) { '{0:N0} domaines ajoutés, {1:N0} retirés depuis la liste précédente' -f $r.Plus, $r.Moins } else { 'blocage activé' })
-    Write-UiLog ('Fichier hosts : {0:N0} domaines de pubs et traqueurs bloqués ({1}).' -f $r.Count, $chg) 'OK'
+    Write-UiLog ('Fichier hosts : {0:N0} domaines de pubs et traqueurs bloqués ({1}) en {2:N0} s (écriture du fichier : {3:N1} s).' -f $r.Count, $chg, $r.TotalS, $r.WriteS) 'OK'
     # 1re activation : mise à jour automatique hebdomadaire mise en place d'office (désactivable dans la carte)
     if (-not $r.OldCount -and -not (Get-HostsAutoTask)) { try { Set-HostsAuto $true; Write-UiLog 'Fichier hosts : mise à jour automatique hebdomadaire de la liste activée.' 'APP' } catch { Write-Ignored 'Tâche de mise à jour du fichier hosts' $_ } }
     $nx = Get-HostsAutoNext
@@ -502,7 +524,7 @@ function Restore-HostsFile {
     if (-not (Confirm-Action "Remettre le fichier hosts d'origine (sauvegardé avant la 1re modification par l'application) ?`n`nVos entrées et le blocage ajoutés depuis sont retirés.")) { return }
     try {
         $fi = [IO.FileInfo]::new($HostsFile); if ($fi.Exists -and $fi.IsReadOnly) { $fi.IsReadOnly = $false }
-        Copy-Item -LiteralPath $HostsBackup -Destination $HostsFile -Force; try { Clear-DnsClientCache -ErrorAction Stop } catch { Write-Ignored 'Vidage du cache DNS' $_ }
+        Copy-Item -LiteralPath $HostsBackup -Destination $HostsFile -Force; try { Start-Process -FilePath (Join-Path $env:windir 'System32\ipconfig.exe') -ArgumentList '/flushdns' -WindowStyle Hidden } catch { Write-Ignored 'Vidage du cache DNS' $_ }
         Write-UiLog 'Fichier hosts d''origine restauré.' 'OK'
     } catch { Show-Info "Restauration impossible.`n`n$($_.Exception.Message)" 'Error' }
     Update-HostsCard
