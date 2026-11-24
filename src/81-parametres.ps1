@@ -197,9 +197,7 @@ function New-SettingsPage {
         param($s, $e) Set-SoftAuto ("$($s.DataContext)" -eq 'On'); foreach ($x in $SetUI.SoftAuto) { $x.Tag = $(if ($x.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
         Write-UiLog ('Recherche des mises à jour des logiciels au lancement : {0}.' -f $(if ("$($s.DataContext)" -eq 'On') { 'activée' } else { 'désactivée' })) 'APP' }
     $ub = [Windows.Controls.WrapPanel]::new(); $ub.Margin = New-Thickness 38 0 10 14
-    # recherche manuelle : bouton de l'en-tête de Paramètres (pas de doublon ici), état rappelé
-    $SetUI.UpdStatus = New-Text '' 'Muted'; $SetUI.UpdStatus.VerticalAlignment = 'Center'; $SetUI.UpdStatus.TextWrapping = 'Wrap'
-    [void]$ub.Children.Add($SetUI.UpdStatus); [void]$c.Body.Children.Add($ub)
+    # recherche manuelle et état : en-tête de Paramètres (pas de doublon dans cette carte)
     $c.Card.Margin = New-Thickness 0 12 0 0
     [void]$p.Children.Add($c.Card)
     Update-UpdStatus $(if ($UpdUI.Info) { 'Version {0} disponible.' -f (Get-UpdVersion $UpdUI.Info.Tag) } elseif ($UpdUI.Checked) { "Oliv_Maintenance $AppVersion est à jour." } else { 'Pas encore vérifié pendant cette session.' })
@@ -297,7 +295,9 @@ function Set-SettingsLayout($P, $Cols) {
             foreach ($c in $list[1..($list.Count - 1)]) {
                 $sep = [Windows.Controls.Border]::new(); $sep.Height = 1; $sep.Margin = New-Thickness 16 6 16 0; $sep.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'LineBrush')
                 [void]$host0.Children.Add($sep)
-                $kids = @($c.Child.Children); $c.Child.Children.Clear(); foreach ($x in $kids) { [void]$host0.Children.Add($x) }
+                # carte à pied de boutons (grille : contenu ligne 0, boutons ligne 1) : ordre des lignes conservé
+                $kids = @($c.Child.Children | Sort-Object { [Windows.Controls.Grid]::GetRow($_) }); $c.Child.Children.Clear()
+                foreach ($x in $kids) { [Windows.Controls.Grid]::SetRow($x, 0); [void]$host0.Children.Add($x) }
             }
             $list = @($list[0])
         }
