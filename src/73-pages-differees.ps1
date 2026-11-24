@@ -74,6 +74,12 @@ function Initialize-LazyStep {
 function Invoke-LazyStep {
     if (-not $Lazy.Steps -or $Lazy.Steps.Count -eq 0) { return $false }
     $s = $Lazy.Steps.Dequeue()
+    # cartes de réglages : attente des lectures lentes faites en arrière-plan (Start-TweakPrefetch), 30 s au plus
+    if ($s.K -eq 'T' -and $Sync.TwPreSrc -and -not $Sync.TwPreDone -and -not $Lazy.PreWait) { $Lazy.PreWait = [DateTime]::Now }
+    if ($s.K -eq 'T' -and $Sync.TwPreSrc -and -not $Sync.TwPreDone -and ([DateTime]::Now - $Lazy.PreWait).TotalSeconds -lt 30) {
+        $q2 = [Collections.Queue]::new(); $q2.Enqueue($s); while ($Lazy.Steps.Count) { $q2.Enqueue($Lazy.Steps.Dequeue()) }; $Lazy.Steps = $q2
+        Start-Sleep -Milliseconds 50; return $true
+    }
     switch ($s.K) {
         'T' {
             if ($s.Page -eq 'Perf') { Add-TweakCard 'Perf' $Ui.PerfLeft $Ui.PerfRight @('Windows Update') $s.Group }

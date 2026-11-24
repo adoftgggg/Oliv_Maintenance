@@ -242,13 +242,18 @@ function Get-RebootState([switch]$Force) {
     $wr = @($Sync.WuPending.Reboot | Where-Object { $_ })
     if ($wr.Count) { $why.Add('Windows Update : ' + ((@($wr | ForEach-Object { if ($_.KB) { $_.KB } else { "$($_.Title)" } }) | Select-Object -Unique) -join ', ') + ' installée(s), finalisée(s) au redémarrage') }
     if ($Sync.OemReboot) { $why.Add('mises à jour constructeur installées') }
-    $pfr = @(Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager' 'PendingFileRenameOperations' | Where-Object { $_ })
-    # fichiers à remplacer : programme d'origine déduit du 1er chemin (dossier Program Files / Windows)
-    if ($pfr.Count) {
-        $f1 = @($pfr | Where-Object { "$_" -match '\\' } | ForEach-Object { "$_" -replace '^\\\?\?\\', '' -replace '^!', '' })
-        $who = @($f1 | ForEach-Object { if ($_ -match '(?i)\\Program Files( \(x86\))?\\([^\\]+)') { $Matches[2] } elseif ($_ -match '(?i)\\Windows\\') { 'Windows' } else { Split-Path $_ -Leaf } } | Select-Object -Unique -First 3)
-        $why.Add('fichiers à remplacer au démarrage (PendingFileRenameOperations : ' + ($who -join ', ') + ')')
+    # PendingFileRenameOperations : paires (source, destination) ; destination vide = simple suppression de fichier temporaire
+    # au démarrage (restes d'installation Windows Installer *.rbf dans Config.Msi, fichiers temporaires), sans redémarrage
+    # nécessaire : seules les substitutions de fichiers (destination renseignée) comptent, avec le programme concerné
+    $pfr = @(Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager' 'PendingFileRenameOperations')
+    $rep = [Collections.Generic.List[string]]::new()
+    for ($i = 0; $i + 1 -lt $pfr.Count; $i += 2) {
+        $dst = "$($pfr[$i + 1])" -replace '^!', '' -replace '^\\\?\?\\', ''
+        if (-not $dst.Trim()) { continue }
+        $who = $(if ($dst -match '(?i)\\Program Files( \(x86\))?\\([^\\]+)') { $Matches[2] } elseif ($dst -match '(?i)\\Windows\\(System32|SysWOW64)\\drivers\\') { 'pilote Windows' } elseif ($dst -match '(?i)\\Windows\\') { 'fichier système Windows' } elseif ($dst -match '(?i)\\ProgramData\\([^\\]+)') { $Matches[1] } else { Split-Path $dst -Leaf })
+        if (-not $rep.Contains($who)) { $rep.Add($who) }
     }
+    if ($rep.Count) { $why.Add('fichiers en cours d''utilisation à remplacer au démarrage : ' + (@($rep | Select-Object -First 3) -join ', ') + $(if ($rep.Count -gt 3) { ' et {0} autre(s)' -f ($rep.Count - 3) } else { '' })) }
     $cn1 = Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' 'ComputerName'; $cn2 = Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName' 'ComputerName'
     if ($cn1 -and $cn2 -and $cn1 -ne $cn2) { $why.Add("nouveau nom du poste ($cn2)") }
     # vérification de disque : bit dirty (chkdsk /f programmé sur un volume en cours d'utilisation) ou BootExecute modifié (chkntfs)

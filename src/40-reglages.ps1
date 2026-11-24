@@ -1,4 +1,19 @@
+# Lectures lentes (modules CIM : Defender, pare-feu, partage SMB ; plusieurs secondes au 1er appel, interface figée
+# 10 s à l'ouverture de Sécurité) faites à l'avance en arrière-plan au démarrage (Start-TweakPrefetch) ; valeur utilisée
+# une seule fois (construction de la ligne), les relectures suivantes (après un changement) sont faites en direct.
+$TwSlowPattern = 'Get-SmbServerConfiguration|Get-NetFirewallProfile|Get-MpPreference'
+function Start-TweakPrefetch {
+    $src = @{}
+    foreach ($t in $Tweaks) { if ($t.Get -and $t.Get.ToString() -match $TwSlowPattern) { $src["$($t.Id)"] = $t.Get.ToString() } }
+    if (-not $src.Count) { return }
+    $Sync.TwPreSrc = $src; $Sync.TwCache = [hashtable]::Synchronized(@{}); $Sync.TwPreDone = $false
+    Start-BgJob 'TwPrefetch' @'
+foreach ($k in @($Sync.TwPreSrc.Keys)) { try { $Sync.TwCache[$k] = [bool](& ([scriptblock]::Create($Sync.TwPreSrc[$k]))) } catch { $null = $_ } }
+$Sync.TwPreDone = $true
+'@
+}
 function Get-TweakState($Tw) {
+    if ($Sync.TwCache -and $Sync.TwCache.ContainsKey("$($Tw.Id)")) { $v = $Sync.TwCache["$($Tw.Id)"]; $Sync.TwCache.Remove("$($Tw.Id)"); return $v }
     if ($Tw.Get) { return [bool](& $Tw.Get) }
     $r = $Tw.Reg[0]
     if ($r.T -eq 'Key') { return (Test-RegKey $r.P) }
@@ -639,9 +654,10 @@ $DnsProviders = [ordered]@{
 function Get-DnsAdapter { @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { "$($_.Status)" -eq 'Up' }) }
 # fournisseur en vigueur : DNS IPv4 de la 1re carte active ; DHCP (aucun serveur fixé dans le registre de la carte) = Auto
 function Get-DnsProvider {
-    $ad = @(Get-DnsAdapter); if (-not $ad.Count) { return 'Auto' }
-    $a = $ad[0]
-    $static = "$(Get-RegValue "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\$($a.InterfaceGuid)" 'NameServer')".Trim()
+    # carte active (Ethernet ou Wi-Fi) lue par .NET : instantané, Get-NetAdapter (CIM) figeait l'interface
+    $a = @([Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | Where-Object { "$($_.OperationalStatus)" -eq 'Up' -and "$($_.NetworkInterfaceType)" -in 'Ethernet', 'Wireless80211' -and $_.Description -notmatch '(?i)virtual|hyper-v|vpn|tap|loopback' })[0]
+    if (-not $a) { return 'Auto' }
+    $static = "$(Get-RegValue "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\$($a.Id)" 'NameServer')".Trim()
     if (-not $static) { return 'Auto' }
     $ips = @($static -split '[ ,]+' | Where-Object { $_ })
     foreach ($k in $DnsProviders.Keys) { if ($DnsProviders[$k].V4 -contains $ips[0]) { return $k } }

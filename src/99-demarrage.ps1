@@ -29,6 +29,7 @@ $Window.Add_ContentRendered({
     $last = $null
     try { $last = [DateTime]::Parse("$($Sync.OemResult.Time)", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) } catch {}
     if (-not $last -or ([DateTime]::Now - $last).TotalDays -ge 7) { Start-OemScan $true }
+    try { Start-TweakPrefetch } catch { Write-Ignored 'Lecture anticipée des réglages' $_ }
     Initialize-LazyStep
     [void]$Window.Dispatcher.BeginInvoke([Action]{ Invoke-LazyNext }, [Windows.Threading.DispatcherPriority]::Background)
 })
