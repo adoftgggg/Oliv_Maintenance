@@ -225,7 +225,7 @@ try {
     $wim = @($files | Where-Object { $_.FullName -ieq (Join-Path $src 'sources\install.wim') })[0]
     $split = $wim -and $wim.Length -ge 4GB - 1MB
     $tot = [double]0; foreach ($f in $files) { if (-not ($split -and $f -eq $wim)) { $tot += $f.Length } }
-    $done = [double]0
+    $done = [double]0; $tc = [DateTime]::Now
     foreach ($f in $files) {
         if ($split -and $f -eq $wim) { continue }
         Test-UsbCancel
@@ -233,7 +233,19 @@ try {
         [void][IO.Directory]::CreateDirectory((Split-Path $to))
         $pc = 100 * $done / [math]::Max([double]1, $tot)
         Set-UsbState 'Copie des fichiers de Windows' $pc ('{0:N0} %  ·  {1:N2} Go sur {2:N2} Go  ·  {3}' -f $pc, ($done / 1GB), ($tot / 1GB), $rel)
-        [IO.File]::Copy($f.FullName, $to, $true); $done += $f.Length
+        # copie par blocs de 4 Mo : avancement mis à jour pendant les gros fichiers (boot.wim, install.wim...), pas seulement entre deux fichiers
+        $fin = [IO.File]::OpenRead($f.FullName); $fout = [IO.File]::Create($to)
+        try {
+            $buf = New-Object byte[] 4194304; $tl = [DateTime]::Now
+            while (($n = $fin.Read($buf, 0, $buf.Length)) -gt 0) {
+                $fout.Write($buf, 0, $n); $done += $n
+                if (([DateTime]::Now - $tl).TotalMilliseconds -ge 400) {
+                    $tl = [DateTime]::Now; Test-UsbCancel
+                    $pc = 100 * $done / [math]::Max([double]1, $tot); $sp = $done / [math]::Max([double]1, ([DateTime]::Now - $tc).TotalSeconds)
+                    Set-UsbState 'Copie des fichiers de Windows' $pc ('{0:N0} %  ·  {1:N2} Go sur {2:N2} Go  ·  {3:N1} Mo/s  ·  {4}' -f $pc, ($done / 1GB), ($tot / 1GB), ($sp / 1MB), $rel)
+                }
+            }
+        } finally { $fout.Dispose(); $fin.Dispose() }
     }
     if ($split) {
         Set-UsbState 'Découpage de l''image Windows (plus de 4 Go)' 0 'DISM /Split-Image : install.wim en morceaux de 3,8 Go'
