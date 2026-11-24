@@ -459,12 +459,12 @@ function Update-AppsSelection {
 }
 function Invoke-AppsInstall([switch]$NoConfirm) {
     if ($Sync.Running) { Show-Info 'Une tâche est déjà en cours. Relancer l''installation une fois terminée.'; return }
-    $sel = @(foreach ($id in @($AppsUI.Sel)) { $AppsUI.Tiles[$id].A })
+    $sel = @(foreach ($id in @($AppsUI.Sel)) { , $AppsUI.Tiles[$id].A })
     if (-not $sel.Count) { return }
     $one = $sel.Count -eq 1
     $head = $(if ($one) { "Installer $($sel[0][0]) ?" } else { "Installer ces $($sel.Count) applications ?" })
     $lines = @($sel | ForEach-Object { '{0}  ·  {1}' -f $_[0], $_[3] })
-    if (-not $NoConfirm -and -not (Confirm-List $head $lines ('Dernière version, installation silencieuse' + $(if ($one) { '.' } else { ', une application après l''autre.' }) + ' Conditions de licence des éditeurs acceptées automatiquement.') 'Installer' 'ActionBtn')) { return }
+    if (-not $NoConfirm -and -not (Confirm-List $head $lines ('Dernière version, installation silencieuse' + $(if ($one) { '.' } else { ', une application après l''autre.' }) + ' Conditions de licence des éditeurs acceptées automatiquement.') 'Installer' 'PrimaryBtn')) { return }
     $Sync.Params = @{ Soft = @($sel | ForEach-Object { @{ Name = "$($_[0])"; Id = "$($_[1])"; Src = 'winget'; Source = $(if ($_.Count -gt 4) { "$($_[4])" } else { '' }); Pfn = ''; From = ''; To = 'dernière version'; Match = $true; Install = $true; Unknown = $false; User = ($AppUserScope.Contains("$($_[1])") -or ($_.Count -gt 4 -and "$($_[4])" -eq 'msstore')) } }) }
     [void](Start-Worker @('AppInstall'))
     Update-AppsRunState
