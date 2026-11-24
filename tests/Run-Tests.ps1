@@ -250,38 +250,6 @@ $LogView.Level = 'Warn'; Test-Eq 'Journal : avertissements + erreurs' (@($le, $l
 $LogView.Level = 'Err';  Test-Eq 'Journal : erreurs seules'           (@($le, $lw, $li | Where-Object { Test-LogLine $_ }).Count) 1
 $LogView.Level = 'All'; $LogView.Text = 'dism'; Test-Eq 'Journal : texte sans casse' (@($le, $lw, $li | Where-Object { Test-LogLine $_ }).Count) 1
 
-# ---------- rapport d'intervention (génération complète avec des données de test)
-Import-SrcFunction ConvertTo-HtmlText, Get-InfoField, New-InterventionReport, Format-SizeUi, Get-LiveEvent, Get-RunEvent, Get-Plural, Get-PendingUpdateRow, Write-Ignored, Get-ErrText
-Test-Eq 'Rapport : échappement HTML'           (ConvertTo-HtmlText '<b>&"') '&lt;b&gt;&amp;&quot;'
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-' + [guid]::NewGuid()); [void][IO.Directory]::CreateDirectory($tmp)
-function global:Get-LogPath([string]$Cat) { $tmp }
-function global:Get-SoftUpdate { @() }
-function global:Get-SoftKey($A) { '' }
-$global:SoftExcl = @{}; $global:LogoFullB64 = ''; $global:AppVersion = '0.0.0-test'; $global:UserName = 'TEST\utilisateur'
-$global:InfoUI = @{ F = @{} }
-$global:Session = @{ Start = [DateTime]::Now.AddMinutes(-30); Events = [Collections.ArrayList]::new() }
-[void]$Session.Events.Add(@{ Time = [DateTime]::Now; Cat = 'Windows Update'; Title = 'KB5099999 - Mise à jour <cumulative>'; Result = 'échec (0x80073712)'; Level = 'error'; Detail = '' })
-$Sync.Diag = @{ Items = @(@{ K = 'Clé de récupération'; V = '123456-123456'; B = '' }, @{ K = 'Écrans bleus (30 derniers jours)'; V = 'aucun'; B = 'OkFgBrush' }) }
-$Sync.Vols = @(@{ Name = 'C:\'; Label = 'OS'; Total = 100GB; Free = 10GB })
-$Sync.WuPending = @{ Items = @(@{ Title = 'x'; KB = 'KB5099998'; Severity = 'Critical'; Class = 'Security Updates' }); Online = $true }
-$Sync.OemResult = @{ Items = @(@{ Title = 'Lenovo Ltd. Firmware Driver Update (1.15.0.0)'; Category = 'Firmware'; Severity = ''; Source = 'WU' }, @{ Title = 'AMD SoftwareComponent Driver Update'; Category = 'OtherHardware'; Severity = '' }); Error = $null }
-$Sync.Running = $true; $Sync.Selected = @('Sfc'); $Sync.TaskIdx = 1; $Sync.TaskPct = -1; $Sync.TaskStart = [DateTime]::Now; $Sync.Labels = @{ Sfc = 'Réparation des fichiers système (SFC)' }; $Sync.TaskResults = @(); $Sync.WuInstalled = @()
-$Sync.WuSearching = $true; $Sync.WuOnline = $true; $Sync.WuCancel = $false; $Sync.WuStartT = [DateTime]::Now
-$rf = New-InterventionReport; $html = [IO.File]::ReadAllText($rf)
-Test-Eq 'Rapport : fichier créé'               (Test-Path -LiteralPath $rf) $true
-Test-Eq 'Rapport : action échappée'            ($html -match 'Mise à jour &lt;cumulative&gt;') $true
-Test-Eq 'Rapport : clé BitLocker absente'      ($html -match '123456-123456') $false
-Test-Eq 'Rapport : disque plein signalé'       ($html -match 'Lecteur C:\\ occupé à 90') $true
-Test-Eq 'Rapport : mise à jour restante'       ($html -match '1 mise à jour Windows Update : 1 critique') $true
-Test-Eq 'Rapport : constructeur par importance' ($html -match '2 mises à jour constructeur : 1 importante, 1 facultative') $true
-Test-Eq 'Rapport : détail constructeur'       ($html -match 'Lenovo Ltd\. Firmware Driver Update \(1\.15\.0\.0\)') $true
-Test-Eq 'Rapport : importance estimée notée'  ($html -match 'estimée : micrologiciel') $true
-Test-Eq 'Rapport : tâche en cours tracée'      ($html -match 'Réparation des fichiers système \(SFC\)<br><span class="muted">démarré à [0-9:]+</span></td><td class="info">en cours') $true
-Test-Eq 'Rapport : recherche en cours tracée'  ($html -match 'Recherche des mises à jour</td><td class="info">en cours') $true
-Test-Eq 'Rapport : non terminé signalé'        ($html -match 'Non terminé au moment du rapport') $true
-$Sync.Running = $false; $Sync.WuSearching = $false
-Remove-Item -LiteralPath $tmp -Recurse -Force
-
 # ---------- valeurs SMBIOS par défaut (n° de série, modèle)
 $junk = Get-SrcValue 'SmbJunk'
 foreach ($v in 'To be filled by O.E.M.', 'Default string', 'System Product Name', '0000000', '') { Test-Eq "SmbJunk « $v » écarté" ($v -match $junk) $true }

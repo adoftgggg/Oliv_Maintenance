@@ -41,7 +41,8 @@ function New-DebloatCard {
     $script:AppxList = [Windows.Controls.StackPanel]::new()
     $AppxList.Margin = New-Thickness 50 0 16 12
     [void]$dx.Body.Children.Add($AppxList)
-    [void]$Ui.PersoRight.Children.Add($dx.Card)
+    # onglet Applications, mode « Préinstallées »
+    [void]$Ui.AppsPreList.Children.Add($dx.Card)
     # lecture lancée au démarrage (fin de ce fichier) : résultat affiché s'il est arrivé, sinon à son arrivée (minuteur)
     if ($Sync.AppxScan) { Show-AppxList }
     elseif ($Sync.AppxRunning) {
@@ -81,7 +82,7 @@ function Invoke-LazyStep {
                 $pn = $(switch ($s.Group) { 'Confidentialité' { $Ui.SecuMid } 'Publicités et suggestions' { $Ui.SecuRight } default { $Ui.SecuLeft } })
                 Add-TweakCard 'Secu' $pn $pn @() $s.Group
             }
-            else { Add-TweakCard 'Perso' $Ui.PersoLeft $Ui.PersoRight @('Explorateur de fichiers', 'Intelligence artificielle') $s.Group }
+            else { Add-TweakCard 'Perso' $Ui.PersoLeft $Ui.PersoRight @('Explorateur, souris et presse-papiers', 'Intelligence artificielle') $s.Group }
         }
         'GameMode' { New-GameCard }
         'Startup' { New-StartupCard }

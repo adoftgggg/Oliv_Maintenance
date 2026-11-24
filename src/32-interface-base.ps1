@@ -157,11 +157,12 @@ function New-HoverCheck($Parent, [string]$Label, [string]$Tip, [scriptblock]$Aft
     $b = [Windows.Controls.Border]::new()
     $b.Style = $Window.FindResource('HoverRow')
     $cb = [Windows.Controls.CheckBox]::new()
-    $cb.Style = $Window.FindResource('TaskCheck'); $cb.Content = $Label; $cb.Margin = New-Thickness 8 4 8 4
+    # explication : « ? » à côté de l'intitulé (comme partout ailleurs), plus d'infobulle sur toute la ligne
+    $cb.Style = $Window.FindResource('TaskCheck'); $cb.Margin = New-Thickness 8 4 8 4
+    $cb.Content = $(if ($Tip) { $lt = New-Text $Label; $lt.TextWrapping = 'Wrap'; New-LabelWithHelp $lt $Tip } else { $Label })
     if ($After) { $cb.Add_Click($After) }
     $b.Child = $cb
     $b.Tag = @{ Check = $cb; After = $After }
-    if ($Tip) { $b.ToolTip = $Tip; [Windows.Controls.ToolTipService]::SetShowDuration($b, 30000) }
     $b.Add_MouseLeftButtonUp($HoverToggleUp)
     [void]$Parent.Children.Add($b)
     $cb

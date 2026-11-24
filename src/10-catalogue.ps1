@@ -172,7 +172,7 @@ $Tweaks = @(
         Tip='Explorer\Advanced\TaskbarDeveloperSettings\TaskbarEndTask (Windows 11 23H2+).'
         Reg=@( @{ P="$ADV\TaskbarDeveloperSettings"; N='TaskbarEndTask'; T='DWord'; On=1; Off=0; D=0 }) }
 
-    [pscustomobject]@{ Id='MousePrecision'; Page='Perso'; Group='Souris et presse-papiers'; MinBuild=0; Effect='I'
+    [pscustomobject]@{ Id='MousePrecision'; Page='Perso'; Group='Explorateur, souris et presse-papiers'; MinBuild=0; Effect='I'
         Label='Améliorer la précision du pointeur'
         Desc='Accélération de la souris : le pointeur va plus loin quand la souris bouge vite. Désactivé : déplacement proportionnel au geste, souvent préféré en jeu et en dessin.'
         Tip='HKCU\Control Panel\Mouse : MouseSpeed 1 / 0, MouseThreshold1 6 / 0, MouseThreshold2 10 / 0 (défauts de Windows : 1, 6, 10). Appliqué tout de suite à la session (SystemParametersInfo).'
@@ -181,39 +181,39 @@ $Tweaks = @(
             @{ P='HKCU\Control Panel\Mouse'; N='MouseThreshold1'; T='String'; On='6'; Off='0'; D='6' }
             @{ P='HKCU\Control Panel\Mouse'; N='MouseThreshold2'; T='String'; On='10'; Off='0'; D='10' })
         PostSet={ $on = "$(Get-RegValue 'HKCU\Control Panel\Mouse' 'MouseSpeed')" -eq '1'; [void][_OlivM.Mouse]::Apply($(if ($on) { 6 } else { 0 }), $(if ($on) { 10 } else { 0 }), $(if ($on) { 1 } else { 0 })) } }
-    [pscustomobject]@{ Id='ClipHistory'; Page='Perso'; Group='Souris et presse-papiers'; MinBuild=17763; Effect='I'
+    [pscustomobject]@{ Id='ClipHistory'; Page='Perso'; Group='Explorateur, souris et presse-papiers'; MinBuild=17763; Effect='I'
         Label='Historique du presse-papiers'
         Desc='Garde les derniers éléments copiés, rappelés avec Windows + V. Sans effet si une stratégie l''interdit.'
         Tip='HKCU\Software\Microsoft\Clipboard\EnableClipboardHistory : 1 activé, 0 désactivé (défaut). Stratégie HKLM\SOFTWARE\Policies\Microsoft\Windows\System\AllowClipboardHistory = 0 : interdit pour tous les comptes.'
         Reg=@( @{ P='HKCU\Software\Microsoft\Clipboard'; N='EnableClipboardHistory'; T='DWord'; On=1; Off=0; D=0 }) }
 
-    [pscustomobject]@{ Id='LaunchTo'; Page='Perso'; Group='Explorateur de fichiers'; MinBuild=0; Effect='I'; Kind='Choice'
+    [pscustomobject]@{ Id='LaunchTo'; Page='Perso'; Group='Explorateur, souris et presse-papiers'; MinBuild=0; Effect='I'; Kind='Choice'
         Label='Ouvrir l''Explorateur sur'
         Desc='Dossier affiché à l''ouverture d''une nouvelle fenêtre (Accueil = Accès rapide sous Windows 10).'
         Tip='Explorer\Advanced\LaunchTo : 2 Accueil / Accès rapide, 1 Ce PC.'
         Options=@( @{ L='Accueil'; V=2 }, @{ L='Ce PC'; V=1 })
         Reg=@( @{ P=$ADV; N='LaunchTo'; T='DWord'; D=2 }) }
-    [pscustomobject]@{ Id='FileExt'; Page='Perso'; Group='Explorateur de fichiers'; MinBuild=0; Effect='E'
+    [pscustomobject]@{ Id='FileExt'; Page='Perso'; Group='Explorateur, souris et presse-papiers'; MinBuild=0; Effect='E'
         Label='Afficher les extensions de fichiers'
         Desc='Affiche .pdf, .exe, .docx... Évite de confondre « facture.pdf.exe » avec un PDF.'
         Tip='Explorer\Advanced\HideFileExt = 0.'
         Reg=@( @{ P=$ADV; N='HideFileExt'; T='DWord'; On=0; Off=1; D=1 }) }
-    [pscustomobject]@{ Id='Hidden'; Page='Perso'; Group='Explorateur de fichiers'; MinBuild=0; Effect='E'
+    [pscustomobject]@{ Id='Hidden'; Page='Perso'; Group='Explorateur, souris et presse-papiers'; MinBuild=0; Effect='E'
         Label='Afficher les fichiers cachés'
         Desc='Affiche les fichiers et dossiers marqués « caché » (AppData, etc.).'
         Tip='Explorer\Advanced\Hidden = 1 (affichés) / 2 (masqués).'
         Reg=@( @{ P=$ADV; N='Hidden'; T='DWord'; On=1; Off=2; D=2 }) }
-    [pscustomobject]@{ Id='ClassicMenu'; Page='Perso'; Group='Explorateur de fichiers'; MinBuild=22000; Effect='E'
+    [pscustomobject]@{ Id='ClassicMenu'; Page='Perso'; Group='Explorateur, souris et presse-papiers'; MinBuild=22000; Effect='E'
         Label='Menu clic droit complet (style Windows 10)'
         Desc='Affiche directement toutes les options, sans passer par « Afficher plus d''options ».'
         Tip='HKCU\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32 (défaut vide).'
         Reg=@( @{ P='HKCU\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32'; T='Key'; KillPath='HKCU\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}' }) }
-    [pscustomobject]@{ Id='SyncAds'; Page='Perso'; Group='Explorateur de fichiers'; MinBuild=0; Effect='E'
+    [pscustomobject]@{ Id='SyncAds'; Page='Perso'; Group='Explorateur, souris et presse-papiers'; MinBuild=0; Effect='E'
         Label='Bandeaux publicitaires OneDrive / Microsoft 365'
         Desc='Messages promotionnels affichés en haut des fenêtres de l''Explorateur.'
         Tip='Explorer\Advanced\ShowSyncProviderNotifications.'
         Reg=@( @{ P=$ADV; N='ShowSyncProviderNotifications'; T='DWord'; On=1; Off=0; D=1 }) }
-    [pscustomobject]@{ Id='LongPaths'; Page='Perso'; Group='Explorateur de fichiers'; MinBuild=0; Effect='R'
+    [pscustomobject]@{ Id='LongPaths'; Page='Perso'; Group='Explorateur, souris et presse-papiers'; MinBuild=0; Effect='R'
         Label='Chemins de plus de 260 caractères'
         Desc='Lève la limite historique de longueur des chemins pour les applications compatibles.'
         Tip='HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled (applications longPathAware uniquement).'
@@ -392,11 +392,11 @@ $Tweaks = @(
         Desc='Windows donne la priorité au jeu au premier plan et suspend certaines tâches de fond (mises à jour, notifications) pendant la partie.'
         Tip='HKCU\Software\Microsoft\GameBar\AutoGameModeEnabled : 1 activé (défaut), 0 désactivé.'
         Reg=@( @{ P='HKCU\Software\Microsoft\GameBar'; N='AutoGameModeEnabled'; T='DWord'; On=1; Off=0; D=1 }) }
-    [pscustomobject]@{ Id='DnsProvider'; Def='Auto'; Page='Secu'; Group='Réseau'; MinBuild=0; Effect='I'; Kind='Choice'
+    [pscustomobject]@{ Id='DnsProvider'; Def='Auto'; Page='Secu'; Group='Sécurité'; MinBuild=0; Effect='I'; Kind='Choice'
         Label='Serveurs DNS'
         Desc='Appliqué à toutes les cartes réseau actives (Ethernet, Wi-Fi), IPv4 et IPv6. Windows 11 : requêtes chiffrées (DNS over HTTPS) quand le fournisseur le permet, repli en clair si le chiffrement échoue. Automatique = DNS donnés par la box ou le routeur.'
-        Tip='Set-DnsClientServerAddress (Reset = automatique), cache DNS vidé. Chiffrement : modèle DoH du fournisseur avec AutoUpgrade (Set / Add-DnsClientDohServerAddress). Cloudflare 1.1.1.1, Quad9 9.9.9.9, Google 8.8.8.8, AdGuard 94.140.14.14 (blocage des publicités).'
-        Options=@( @{ L='Automatique'; V='Auto' }, @{ L='Cloudflare'; V='Cloudflare' }, @{ L='Quad9'; V='Quad9' }, @{ L='Google'; V='Google' }, @{ L='AdGuard'; V='AdGuard' }, @{ L='Autres serveurs'; V='Other'; H=$true })
+        Tip='Set-DnsClientServerAddress (Reset = automatique), cache DNS vidé. Chiffrement : modèle DoH du fournisseur avec AutoUpgrade (Set / Add-DnsClientDohServerAddress). Cloudflare 1.1.1.1, Google 8.8.8.8, AdGuard 94.140.14.14 (blocage des publicités).'
+        Options=@( @{ L='Automatique'; V='Auto' }, @{ L='Cloudflare'; V='Cloudflare' }, @{ L='Google'; V='Google' }, @{ L='AdGuard'; V='AdGuard' }, @{ L='Autres serveurs'; V='Other'; H=$true })
         GetV={ Get-DnsProvider }
         SetV={ param($v) Set-DnsProvider "$v" } }
     [pscustomobject]@{ Id='Smb1'; Def=$false; Page='Secu'; Group='Sécurité'; MinBuild=0; Effect='I'

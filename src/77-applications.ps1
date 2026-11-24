@@ -501,7 +501,9 @@ function Complete-AppsInstall {
 # modes de l'onglet : Installer (catalogue) / Mettre à jour (logiciels installés, vue intégrée construite à la 1re ouverture)
 function Set-AppsMode([string]$Mode) {
     $AppsUI.Mode = $Mode
-    $Ui.AppsModeInst.Tag = $(if ($Mode -eq 'Inst') { 'on' } else { '' }); $Ui.AppsModeMine.Tag = $(if ($Mode -eq 'Mine') { 'on' } else { '' }); $Ui.AppsModeUpd.Tag = $(if ($Mode -eq 'Upd') { 'on' } else { '' })
+    $Ui.AppsModeInst.Tag = $(if ($Mode -eq 'Inst') { 'on' } else { '' }); $Ui.AppsModeMine.Tag = $(if ($Mode -eq 'Mine') { 'on' } else { '' }); $Ui.AppsModeUpd.Tag = $(if ($Mode -eq 'Upd') { 'on' } else { '' }); $Ui.AppsModePre.Tag = $(if ($Mode -eq 'Pre') { 'on' } else { '' })
+    # Préinstallées : applications fournies avec Windows ou le constructeur, à désinstaller (cases + bandeau Appliquer)
+    $Ui.AppsPreHost.Visibility = $(if ($Mode -eq 'Pre') { 'Visible' } else { 'Collapsed' })
     $Ui.AppsInstView.Visibility = $(if ($Mode -eq 'Inst') { 'Visible' } else { 'Collapsed' })
     $Ui.AppsUpdHost.Visibility = $(if ($Mode -in 'Upd', 'Mine') { 'Visible' } else { 'Collapsed' })
     if ($Mode -eq 'Inst' -and -not $AppsUI.Built) { New-AppsPage }
@@ -511,6 +513,7 @@ function Set-AppsMode([string]$Mode) {
         Set-SoftScope $Mode
     }
 }
+$Ui.AppsModePre.Add_Click({ try { Set-AppsMode 'Pre' } catch { Write-UiLog "Applications préinstallées : $($_.Exception.Message)" 'ERROR' } })
 $Ui.AppsModeInst.Add_Click({ try { Set-AppsMode 'Inst' } catch { Write-UiLog "Applications : $($_.Exception.Message)" 'ERROR' } })
 $Ui.AppsModeMine.Add_Click({ try { Set-AppsMode 'Mine' } catch { Write-UiLog "Mes applications : $($_.Exception.Message)" 'ERROR' } })
 $Ui.AppsModeUpd.Add_Click({ try { Set-AppsMode 'Upd' } catch { Write-UiLog "Mises à jour des logiciels : $($_.Exception.Message)" 'ERROR' } })

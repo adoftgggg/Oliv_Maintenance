@@ -545,6 +545,7 @@ function Show-WuPending {
         else { $InfoUI.WuProg = Add-ProgressLine $InfoUI.WuPanel ''; Update-WuProgress }
         $InfoUI.WuBtn.IsEnabled = $false; $InfoUI.WuAge.Text = ''; return
     }
+    foreach ($it in @($InfoUI.WuHist)) { if ($it) { $hv = Add-KV $InfoUI.WuPanel ("$($it.K)" -replace '^Dernière mise à jour ', 'Dernière ') $it.V $it.B; if ($it.T) { $hv.ToolTip = $it.T } } }
     if ($w.Error) { Add-StateLine $InfoUI.WuPanel ('Lecture impossible : ' + $w.Error) 'ErrFgBrush'; $InfoUI.WuBtn.IsEnabled = $false; return }
     $rb = @($w.Reboot | Where-Object { $_ })
     if ($rb.Count) {

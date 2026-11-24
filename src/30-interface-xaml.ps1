@@ -561,15 +561,7 @@
             <ColumnDefinition Width="*"/>
           </Grid.ColumnDefinitions>
           <DockPanel x:Name="MaintLeft" Grid.Column="0" VerticalAlignment="Top">
-          <Border DockPanel.Dock="Bottom" Style="{StaticResource Panel}" Padding="16,14,16,14" Margin="0,12,0,0">
-            <Grid>
-              <StackPanel VerticalAlignment="Center" Margin="0,0,130,0">
-                <DockPanel><TextBlock Text="&#xEDA2;" Style="{StaticResource CardIcon}" DockPanel.Dock="Left"/><TextBlock TextWrapping="Wrap" Text="Espace disque" Style="{StaticResource Section}"/></DockPanel>
-                <TextBlock Style="{StaticResource Muted}" Margin="30,4,0,0" TextWrapping="Wrap" Text="Taille des dossiers et fichiers d&apos;un volume ou d&apos;un dossier, vue en blocs proportionnels"/>
-              </StackPanel>
-              <Button x:Name="SpaceBtn" Content="Analyser" Style="{StaticResource ActionBtn}" MinWidth="110" Margin="0,0,14,0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
-            </Grid>
-          </Border>
+          <!-- Espace disque : bouton « Analyser l'espace » dans l'en-tête de Nettoyage -->
           <Border Style="{StaticResource Panel}" VerticalAlignment="Top">
             <Grid>
               <Grid.RowDefinitions>
@@ -581,6 +573,7 @@
                 <DockPanel><TextBlock Text="&#xE74D;" Style="{StaticResource CardIcon}" DockPanel.Dock="Left"/><TextBlock TextWrapping="Wrap" Text="Nettoyage" Style="{StaticResource Section}"/></DockPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                   <TextBlock TextWrapping="Wrap" x:Name="CleanScanText" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                  <Button x:Name="SpaceBtn" Content="Analyser l&apos;espace" Style="{StaticResource ActionBtn}" Height="28" Padding="12,0" Margin="0,0,6,0" ToolTip="Taille des dossiers et fichiers d&apos;un volume ou d&apos;un dossier (vue arborescente)"/>
                   <Button x:Name="CleanRescan" Content="&#xE72C;" Style="{StaticResource IconBtn}" Width="32" Height="30" Margin="2,0,-6,0" ToolTip="Actualiser"/>
                 </StackPanel>
               </Grid>
@@ -624,7 +617,7 @@
                 </Border>
                 <Border Style="{StaticResource Panel}" Padding="16,14,16,10" Margin="0,0,0,12">
                 <StackPanel>
-                <DockPanel Margin="0,0,0,6"><TextBlock Text="&#xEDA2;" Style="{StaticResource CardIcon}" DockPanel.Dock="Left"/><TextBlock x:Name="DiskCardTitle" TextWrapping="Wrap" Text="Disques et batterie" Style="{StaticResource Section}"/></DockPanel>
+                <DockPanel Margin="0,0,0,6"><TextBlock Text="&#xE83F;" Style="{StaticResource CardIcon}" DockPanel.Dock="Left"/><TextBlock x:Name="DiskCardTitle" TextWrapping="Wrap" Text="Disques et batterie" Style="{StaticResource Section}"/></DockPanel>
                 <Border Style="{StaticResource HoverPlain}">
                   <Grid Margin="8,4">
                     <StackPanel VerticalAlignment="Center" Margin="0,0,330,0">
@@ -668,7 +661,7 @@
                 </Border>
                 <Border Style="{StaticResource Panel}" Padding="16,14,16,10" Margin="0,0,0,12">
                 <StackPanel>
-                <DockPanel Margin="0,0,0,6"><TextBlock Text="&#xE7BA;" Style="{StaticResource CardIcon}" DockPanel.Dock="Left"/><TextBlock TextWrapping="Wrap" Text="Dépannage" Style="{StaticResource Section}"/></DockPanel>
+                <DockPanel Margin="0,0,0,6"><TextBlock Text="&#xE713;" Style="{StaticResource CardIcon}" DockPanel.Dock="Left"/><TextBlock TextWrapping="Wrap" Text="Dépannage" Style="{StaticResource Section}"/></DockPanel>
                 <Border Style="{StaticResource HoverPlain}">
                   <Grid Margin="8,4">
                     <StackPanel VerticalAlignment="Center" Margin="0,0,250,0">
@@ -858,6 +851,9 @@
             <Button x:Name="AppsModeMine" Style="{StaticResource ActionBtn}" Height="34" Padding="16,0" Margin="0,0,8,0" Tag="on">
               <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8FD;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBlock x:Name="AppsModeMineTxt" Text="Mes applications" VerticalAlignment="Center"/></StackPanel>
             </Button>
+            <Button x:Name="AppsModePre" Style="{StaticResource ActionBtn}" Height="34" Padding="16,0" Margin="0,0,8,0">
+              <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBlock Text="Préinstallées"/></StackPanel>
+            </Button>
             <Button x:Name="AppsModeUpd" Style="{StaticResource ActionBtn}" Height="34" Padding="16,0">
               <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE895;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBlock x:Name="AppsModeUpdTxt" Text="Mettre à jour" VerticalAlignment="Center"/></StackPanel>
             </Button>
@@ -898,6 +894,7 @@
             </ScrollViewer>
           </Grid>
           <Grid x:Name="AppsUpdHost" Grid.Row="1" Visibility="Collapsed"/>
+          <ScrollViewer x:Name="AppsPreHost" Grid.Row="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="AppsPreList" MaxWidth="1100" HorizontalAlignment="Stretch"/></ScrollViewer>
         </Grid>
 
         <!-- Services Windows : tiers / Microsoft (éditeur du fichier du service), démarrer, arrêter, désactiver à l'unité -->
@@ -1055,7 +1052,6 @@
           <Border Grid.Row="1" Style="{StaticResource Panel}" Padding="16,12" Margin="0,0,0,10">
             <DockPanel>
               <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button x:Name="ReportBtn" Content="Rapport d'intervention" Style="{StaticResource PrimaryBtn}" Margin="0,0,8,0" ToolTip="Rapport de la session : poste, état, actions réalisées, mises à jour, points d'attention (page web imprimable en PDF)"/>
                 <Button x:Name="OpenLogDir" Content="Dossier des journaux" Style="{StaticResource ActionBtn}" Margin="0,0,8,0"/>
                 <Border Width="1" Height="22" Margin="4,0,12,0" Background="{DynamicResource LineBrush}" VerticalAlignment="Center"/>
                 <Button x:Name="LogPurgeOld" Content="Supprimer les plus de 30 jours" Style="{StaticResource ActionBtn}" Margin="0,0,8,0"/>

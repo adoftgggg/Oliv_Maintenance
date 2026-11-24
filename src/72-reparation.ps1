@@ -20,9 +20,9 @@ function Update-RepairButton {
 $RepairAfter = { Update-RepairButton }
 # ordre affiché = ordre d'exécution : DISM répare d'abord le magasin de composants, puis SFC s'en sert pour réparer
 # les fichiers système (ordre recommandé par Microsoft, KB929833), CHKDSK programmé en dernier
-$RepDism = New-HoverCheck $Ui.RepairList 'DISM (maintenance de l''image Windows)' 'Analyser : /ScanHealth. Réparer : /RestoreHealth (source Windows Update / WSUS). Exécuté en premier.' $RepairAfter
-$RepSfc  = New-HoverCheck $Ui.RepairList 'SFC (vérificateur des fichiers système)' 'Analyser : /verifyonly. Réparer : /scannow, après DISM (réparation à partir de l''image Windows remise en état).' $RepairAfter
-$RepChk  = New-HoverCheck $Ui.RepairList 'CHKDSK (vérification du disque système)' 'Analyser : état du volume sans analyse disque (bit dirty, événements NTFS 55 / 98, dernier résultat CHKDSK). Réparer : CHKDSK /F programmé au prochain démarrage.' $RepairAfter
+$RepDism = New-HoverCheck $Ui.RepairList 'DISM' 'Maintenance de l''image Windows. Analyser : /ScanHealth. Réparer : /RestoreHealth (source Windows Update / WSUS). Exécuté en premier.' $RepairAfter
+$RepSfc  = New-HoverCheck $Ui.RepairList 'SFC' 'Vérificateur des fichiers système. Analyser : /verifyonly. Réparer : /scannow, après DISM (réparation à partir de l''image Windows remise en état).' $RepairAfter
+$RepChk  = New-HoverCheck $Ui.RepairList 'CHKDSK' 'Vérification du disque système. Analyser : état du volume sans analyse disque (bit dirty, événements NTFS 55 / 98, dernier résultat CHKDSK). Réparer : CHKDSK /F programmé au prochain démarrage.' $RepairAfter
 Update-RepairButton
 
 $LastRunFile = Join-Path (Get-LogPath 'Etat') 'dernieres-actions.json'

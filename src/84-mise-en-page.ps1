@@ -242,6 +242,7 @@ function Update-Responsive {
         Set-TwoCol $Ui.ToolsLeft.Parent $Ui.ToolsLeft $Ui.ToolsRight 0 $one $false
     }
     # Sécurité : 3 colonnes sur grand écran (tout visible sans défiler), 2 puis 1 en dessous
+    # 3 colonnes sur grand écran (Sécurité | Confidentialité | Publicités), 2 puis 1 en dessous
     $sm = $(if ($w -ge 1450) { 3 } elseif ($w -ge 1100) { 2 } else { 1 })
     if ($sm -ne $Resp.SecuCols) { $Resp.SecuCols = $sm; Set-SecuLayout $sm }
 }
@@ -272,6 +273,8 @@ function Set-SecuLayout([int]$Cols) {
     $pos = $(switch ($Cols) { 3 { @(@(0, 0, 1), @(0, 2, 1), @(0, 4, 1)) } 2 { @(@(0, 0, 1), @(0, 2, 1), @(1, 0, 3)) } default { @(@(0, 0, 1), @(1, 0, 1), @(2, 0, 1)) } })
     $i = 0
     foreach ($p in $Ui.SecuLeft, $Ui.SecuMid, $Ui.SecuRight) {
-        [Windows.Controls.Grid]::SetRow($p, $pos[$i][0]); [Windows.Controls.Grid]::SetColumn($p, $pos[$i][1]); [Windows.Controls.Grid]::SetColumnSpan($p, $pos[$i][2]); $i++
+        [Windows.Controls.Grid]::SetRow($p, $pos[$i][0]); [Windows.Controls.Grid]::SetColumn($p, $pos[$i][1]); [Windows.Controls.Grid]::SetColumnSpan($p, $pos[$i][2])
+        # 2 colonnes : Sécurité sur toute la hauteur à gauche
+        $i++
     }
 }

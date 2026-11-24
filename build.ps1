@@ -225,18 +225,11 @@ Write-Host ('Oliv_Maintenance {0} ({1}) : {2} sources, {3} scripts embarqués, {
 # ---------- lanceur Oliv_Maintenance.exe (launcher\Lanceur.cs)
 # Compilateur C# du .NET Framework 4.x (CodeDom) : disponible uniquement sous Windows PowerShell 5.1. Ailleurs, l'exe n'est
 # pas produit ; si le compilateur Mono (mcs) est présent, la syntaxe du lanceur est tout de même contrôlée.
-# clé XOR propre à cette compilation (48 octets aléatoires) : la charge utile embarquée change à chaque build et diffère
-# de l'édition professionnelle, même sources identiques
-$xorKey = [byte[]]::new(48); [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($xorKey)
-$xorCs = ($xorKey | ForEach-Object { '0x{0:X2}' -f $_ }) -join ', '
-$cs = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'launcher') 'Lanceur.cs'), $utf8).Replace('__VERSION4__', "$ver.0").Replace('__VERSION__', $ver).Replace('__XORKEY__', $xorCs)
+$cs = [IO.File]::ReadAllText((Join-Path (Join-Path $root 'launcher') 'Lanceur.cs'), $utf8).Replace('__VERSION4__', "$ver.0").Replace('__VERSION__', $ver)
 $gz = Join-Path $obj 'app.ps1.gz'
 $ms = [IO.File]::Create($gz)
 try { $z = [IO.Compression.GZipStream]::new($ms, [IO.Compression.CompressionMode]::Compress); $b = $utf8.GetBytes($code.Replace("`n", "`r`n") + "`r`n"); $z.Write($b, 0, $b.Length); $z.Dispose() } finally { $ms.Dispose() }
-# chiffrement de la charge utile compressée (XOR clé du build + mélange par position), déchiffré par le lanceur
-$plain = [IO.File]::ReadAllBytes($gz)
-for ($i = 0; $i -lt $plain.Length; $i++) { $plain[$i] = $plain[$i] -bxor ([byte](($xorKey[$i % $xorKey.Length] -bxor (($i * 31 + 17) -band 0xFF)) -band 0xFF)) }
-[IO.File]::WriteAllBytes($gz, $plain)
+
 $m = [regex]::Match($code, "(?m)^\`$LogoIcoB64\s*=\s*'([A-Za-z0-9+/=]+)'")
 if (-not $m.Success) { throw 'Icône $LogoIcoB64 introuvable dans les sources' }
 $ico = Join-Path $obj 'olivm.ico'

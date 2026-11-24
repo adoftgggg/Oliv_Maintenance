@@ -402,46 +402,40 @@ $KnownPorts = @{ 135 = 'appel de procédure à distance (RPC)'; 139 = 'NetBIOS';
     49664 = 'service système Windows (RPC)'; 49665 = 'service système Windows (RPC)'; 49666 = 'service système Windows (RPC)'; 49667 = 'service système Windows (RPC)'; 49668 = 'service système Windows (RPC)'; 49669 = 'service système Windows (RPC)'; 49670 = 'service système Windows (RPC)' }
 $NetUI = @{}
 # section de la carte Réseau de l'accueil : intertitre, ports, liens Actualiser / Connexions actives
+# carte Réseau de l'accueil : un seul bouton, ports ouverts et connexions actives dans une fenêtre
 function New-NetPortSection($Body) {
-    $hd = [Windows.Controls.Grid]::new(); $hd.Margin = New-Thickness 46 10 18 2
-    foreach ($w in '*', 'Auto') { $cd = [Windows.Controls.ColumnDefinition]::new(); $cd.Width = $(if ($w -eq '*') { [Windows.GridLength]::new(1, 'Star') } else { [Windows.GridLength]::Auto }); [void]$hd.ColumnDefinitions.Add($cd) }
-    $t = New-Text 'Ports ouverts sur le réseau'; $t.FontWeight = [Windows.FontWeights]::SemiBold; $t.VerticalAlignment = 'Center'; [void]$hd.Children.Add($t)
-    $lk = [Windows.Controls.StackPanel]::new(); $lk.Orientation = 'Horizontal'; [Windows.Controls.Grid]::SetColumn($lk, 1)
-    foreach ($x in @(@('Connexions actives', { Show-NetConnection }), @('Actualiser', { Update-NetCard }))) {
-        # boutons standard (même style que le reste de l'application), plus de liens
-        $bt = New-Button $x[0]; $bt.Height = 26; $bt.MinWidth = 84; $bt.Margin = New-Thickness 8 0 0 0; $bt.Add_Click($x[1]); [void]$lk.Children.Add($bt)
-    }
-    [void]$hd.Children.Add($lk); [void]$Body.Children.Add($hd)
-    $NetUI.Body = [Windows.Controls.StackPanel]::new(); [void]$Body.Children.Add($NetUI.Body)
-    [void]$Window.Dispatcher.BeginInvoke([Action]{ try { Update-NetCard } catch { Write-Ignored 'Ports ouverts sur le réseau' $_ } }, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
+    $hd = [Windows.Controls.DockPanel]::new(); $hd.Margin = New-Thickness 46 10 18 2
+    $bt = New-Button 'Ports et connexions'; $bt.Height = 28; $bt.MinWidth = 140; $bt.HorizontalAlignment = 'Left'
+    $bt.ToolTip = 'Ports ouverts sur le réseau (programmes joignables depuis d''autres postes) et connexions actives'
+    $bt.Add_Click({ Show-NetConnection })
+    [void]$hd.Children.Add($bt); [void]$Body.Children.Add($hd)
 }
 function Get-ProcName([int]$ProcId) {
     if ($ProcId -eq 4) { return 'System' }
     $p = Get-Process -Id $ProcId -ErrorAction SilentlyContinue; $(if ($p) { $p.ProcessName } else { "processus $ProcId" })
 }
-function Update-NetCard {
-    $b = $NetUI.Body; if (-not $b) { return }
-    $b.Children.Clear()
-    try { $ls = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalAddress -notin '127.0.0.1', '::1' -and $_.LocalAddress -notlike '127.*' }) }
-    catch { [void]$b.Children.Add((New-Text "Lecture impossible : $($_.Exception.Message)" 'Muted')); return }
+# ports en écoute (hors boucle locale) : lignes « Port 445 : System · partage de fichiers (SMB) », non standard signalés
+function Get-NetPortLine {
+    $ls = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalAddress -notin '127.0.0.1', '::1' -and $_.LocalAddress -notlike '127.*' })
     $byPort = $ls | Group-Object LocalPort | Sort-Object { [int]$_.Name }
     $sys = @($byPort | Where-Object { [int]$_.Name -ge 49664 -and [int]$_.Name -le 49680 -and (Get-ProcName $_.Group[0].OwningProcess) -in 'lsass', 'wininit', 'services', 'svchost', 'spoolsv' })
-    foreach ($g in $byPort) {
-        $port = [int]$g.Name
-        if ($sys -contains $g) { continue }
-        $pn = Get-ProcName $g.Group[0].OwningProcess
-        $known = $KnownPorts[$port]
-        $v = Add-KV $b "Port $port" ('{0}{1}' -f $pn, $(if ($known) { '  ·  ' + $known } else { '' })) $(if ($known) { '' } else { 'WarnFgBrush' })
-        $v.ToolTip = 'Adresses : ' + ((@($g.Group | ForEach-Object { $_.LocalAddress }) | Select-Object -Unique) -join ', ') + $(if (-not $known) { "`nPort non standard de Windows : vérifier que ce programme doit être joignable depuis le réseau." } else { '' })
-    }
-    if ($sys.Count) { $t = New-Text ('+ {0} ports système de Windows (RPC dynamiques)' -f $sys.Count) 'Muted'; $t.Margin = New-Thickness 46 2 18 0; [void]$b.Children.Add($t) }
-    if (-not $byPort) { $t = New-Text 'Aucun port ouvert sur le réseau.' 'Muted'; $t.Margin = New-Thickness 46 2 18 0; [void]$b.Children.Add($t) }
+    $out = @(foreach ($g in $byPort) {
+            if ($sys -contains $g) { continue }
+            $port = [int]$g.Name; $known = $KnownPorts[$port]
+            'Port {0,-6} {1}{2}' -f $port, (Get-ProcName $g.Group[0].OwningProcess), $(if ($known) { '  ·  ' + $known } else { '  ·  port non standard : vérifier que ce programme doit être joignable' })
+        })
+    if ($sys.Count) { $out += '+ {0} ports système de Windows (RPC dynamiques)' -f $sys.Count }
+    if (-not $out.Count) { $out = @('aucun') }
+    $out
 }
 function Show-NetConnection {
-    try { $cn = @(Get-NetTCPConnection -State Established -ErrorAction Stop | Where-Object { $_.RemoteAddress -notin '127.0.0.1', '::1' }) }
-    catch { Show-Info "Lecture impossible : $($_.Exception.Message)" 'Error'; return }
+    try {
+        $ports = @(Get-NetPortLine)
+        $cn = @(Get-NetTCPConnection -State Established -ErrorAction Stop | Where-Object { $_.RemoteAddress -notin '127.0.0.1', '::1' })
+    } catch { Show-Info "Lecture impossible : $($_.Exception.Message)" 'Error'; return }
     $lines = @($cn | ForEach-Object { '{0}  >  {1} : {2}' -f (Get-ProcName $_.OwningProcess), $_.RemoteAddress, $_.RemotePort } | Sort-Object)
-    [void](Show-Dialog ('{0} {1} vers Internet ou le réseau local (programme  >  adresse distante : port).' -f $lines.Count, (Get-Plural $lines.Count 'connexion active' 'connexions actives')) 'Info' $null $(if ($lines.Count) { $lines } else { @('aucune') }))
+    $all = @('PORTS OUVERTS SUR LE RÉSEAU') + $ports + @('', ('CONNEXIONS ACTIVES ({0})  ·  programme  >  adresse distante : port' -f $lines.Count)) + $(if ($lines.Count) { $lines } else { @('aucune') })
+    [void](Show-Dialog 'Ports ouverts et connexions actives' 'Info' $null $all)
 }
 
 New-InstallCard

@@ -59,7 +59,10 @@ function Update-DiagAge {
 }
 function Show-DiagResult($D) {
     $InfoUI.DiagPanel.Children.Clear()
-    foreach ($it in $D.Items) {
+    # historique Windows Update (dernière installée / en échec) : affiché dans la carte Mises à jour Windows
+    $InfoUI.WuHist = @($D.Items | Where-Object { "$($_.K)" -like 'Dernière mise à jour*' })
+    try { if ($InfoUI.WuPanel) { Show-WuPending } } catch { Write-Ignored 'Carte Mises à jour Windows' $_ }
+    foreach ($it in @($D.Items | Where-Object { "$($_.K)" -notlike 'Dernière mise à jour*' })) {
         if ($it.K -eq 'Clé de récupération' -and $it.V -match '^\d{6}(-\d{6}){7}$') { Add-RecoveryKeyRow $it.V }
         else {
             $v = Add-KV $InfoUI.DiagPanel $it.K $it.V $it.B; if ($it.T) { $v.ToolTip = $it.T }

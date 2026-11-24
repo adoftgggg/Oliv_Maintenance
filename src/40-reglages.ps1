@@ -347,7 +347,10 @@ function Add-TweakCard([string]$Page, $LeftPanel, $RightPanel, [string[]]$RightG
         foreach ($tw in $list) {
             $ok   = $Build -ge $tw.MinBuild
             $desc = if ($ok) { '' } else { "Non disponible sur cette version de Windows (build $Build)" }
-            $r = New-SettingRow $tw.Label $desc ("{0}`n`n{1}" -f $tw.Desc, $tw.Tip) $tw.Effect
+            # précision entre parenthèses du libellé (« LLMNR (résolution de noms locale) ») : dans l'aide « ? », libellé court
+            $lbl = "$($tw.Label)"; $pre = ''
+            if ($lbl -match '^(.+?)\s*\(([^()]+)\)$') { $lbl = $Matches[1]; $pre = $Matches[2].Substring(0, 1).ToUpper() + $Matches[2].Substring(1) + '.' + "`n`n" }
+            $r = New-SettingRow $lbl $desc ("{0}{1}`n`n{2}" -f $pre, $tw.Desc, $tw.Tip) $tw.Effect
             $r.Tweak = $tw; $r.Enabled = $ok
             try { $r.Orig = Get-TweakValue $tw } catch { $r.Orig = $null }
             $r.Current = $r.Orig; $r.Staged = $null
@@ -629,7 +632,7 @@ function Set-PowerPlan([string]$Key) {
 # ---------- DNS des cartes réseau actives (physiques, connectées) : fournisseurs connus et modèles DNS over HTTPS
 $DnsProviders = [ordered]@{
     Cloudflare = @{ V4 = @('1.1.1.1', '1.0.0.1'); V6 = @('2606:4700:4700::1111', '2606:4700:4700::1001'); Doh = 'https://cloudflare-dns.com/dns-query' }
-    Quad9      = @{ V4 = @('9.9.9.9', '149.112.112.112'); V6 = @('2620:fe::fe', '2620:fe::9'); Doh = 'https://dns.quad9.net/dns-query' }
+    # Quad9 retiré : service arrêté en France depuis le 24/11/2026 (avis opérateur)
     Google     = @{ V4 = @('8.8.8.8', '8.8.4.4'); V6 = @('2001:4860:4860::8888', '2001:4860:4860::8844'); Doh = 'https://dns.google/dns-query' }
     AdGuard    = @{ V4 = @('94.140.14.14', '94.140.15.15'); V6 = @('2a10:50c0::ad1:ff', '2a10:50c0::ad2:ff'); Doh = 'https://dns.adguard-dns.com/dns-query' }
 }

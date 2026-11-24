@@ -137,7 +137,11 @@ function Show-Dialog([string]$Message, [string]$Kind = 'Info', [object[]]$Button
     $ft = $dlg.FindName('Foot'); if ($Foot) { $ft.Text = $Foot } else { $ft.Visibility = 'Collapsed' }
     $lst = $dlg.FindName('List')
     if ($List) {
-        foreach ($l in $List) { $t = New-Text $l; $t.TextWrapping = 'Wrap'; $t.Margin = New-Thickness 0 2 0 2; [void]$lst.Children.Add($t) }
+        # liste dans une zone de texte en lecture seule : lignes sélectionnables et copiables (Ctrl+C, clic droit)
+        $tb = [Windows.Controls.TextBox]::new(); $tb.IsReadOnly = $true; $tb.TextWrapping = 'Wrap'; $tb.BorderThickness = New-Thickness 0 0 0 0
+        $tb.Background = [Windows.Media.Brushes]::Transparent; $tb.FontSize = 13; $tb.Padding = New-Thickness 0 0 0 0
+        $tb.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, 'FgBrush'); $tb.SetResourceReference([Windows.Controls.Primitives.TextBoxBase]::CaretBrushProperty, 'FgBrush')
+        $tb.Text = (@($List) -join "`r`n"); [void]$lst.Children.Add($tb)
     }
     else { $dlg.FindName('ListBox').Visibility = 'Collapsed' }
     $ex = $dlg.FindName('Extra'); if ($Extra) { $ex.Content = $Extra } else { $ex.Visibility = 'Collapsed' }

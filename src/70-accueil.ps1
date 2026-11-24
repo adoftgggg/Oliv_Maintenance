@@ -258,31 +258,32 @@ function Initialize-InfoPage {
     try { Initialize-Activity } catch { Write-UiLog "Moniteur d'activité : $($_.Exception.Message)" 'WARN' }
     foreach ($col in $Ui.InfoLeft, $Ui.InfoMid, $Ui.InfoRight, $Ui.SettingsPanel) { [Windows.Controls.Grid]::SetIsSharedSizeScope($col, $true) }
     $f = @{}
+    # Système : Windows, démarrage et session regroupés (une seule carte au lieu de Système + Session). Champs de données
+    # masqués (Édition, Version, Dernier démarrage, Allumé depuis, Domaine) gardés pour le rapport d'intervention et
+    # recomposés en lignes lisibles par Update-InfoMerged.
     $c = New-Card 'Système' '' ([string][char]0xE770)
-    foreach ($k in 'Édition', 'Version', 'Installé le', 'Dernier démarrage', 'Allumé depuis', 'Redémarrage en attente') { $f[$k] = Add-KV $c.Body $k '' }
-    Add-InfoCard $c $Ui.InfoLeft
-
-    $c = New-Card 'Matériel' '' ([string][char]0xE7F4)
-    foreach ($k in 'Fabricant', 'Modèle', 'N° de série', 'BIOS / UEFI', 'Processeur', 'Carte graphique', 'Mémoire', 'Batterie') {
-        $f[$k] = Add-KV $c.Body $k ''
-    }
-    $f['Carte graphique'].Parent.Parent.Visibility = 'Collapsed'
-    $f['Batterie'].Parent.Parent.Visibility = 'Collapsed'
-    Add-InfoCard $c $Ui.InfoLeft
-
-    $c = New-Card 'Session' '' ([string][char]0xE77B)
-    [void](Add-KV $c.Body 'Poste' $env:COMPUTERNAME)
-    $f['Domaine'] = Add-KV $c.Body 'Domaine' ''
-    [void](Add-KV $c.Body 'Compte admin (UAC)' "$env:USERDOMAIN\$env:USERNAME")
-    $tu = Add-KV $c.Body 'Utilisateur ciblé' $UserName; $tu.ToolTip = 'Réglages utilisateur appliqués à ce compte'
-    [void](Add-KV $c.Body 'SID ciblé' $UserSid)
+    foreach ($k in 'Poste', 'Windows', 'Installé le', 'Démarré le', 'Redémarrage en attente', 'Compte') { $f[$k] = Add-KV $c.Body $k '' }
+    foreach ($k in 'Édition', 'Version', 'Dernier démarrage', 'Allumé depuis', 'Domaine') { $f[$k] = Add-KV $c.Body $k ''; $f[$k].Parent.Parent.Visibility = 'Collapsed'; $f[$k].Tag = 'data' }
+    $f['Poste'].Text = $env:COMPUTERNAME
+    $f['Compte'].Text = $(if ("$env:USERNAME" -ieq ("$UserName" -replace '^.*\\', '')) { $UserName } else { '{0}  (élévation : {1}\{2})' -f $UserName, $env:USERDOMAIN, $env:USERNAME })
+    $f['Compte'].ToolTip = "Réglages utilisateur appliqués à ce compte`nSID : $UserSid`nCompte d'élévation (UAC) : $env:USERDOMAIN\$env:USERNAME"
     $lj = Add-KV $c.Body 'Journaux' $LogDir 'AccentBrush'
     $lj.FontWeight = [Windows.FontWeights]::Normal; $lj.TextDecorations = [Windows.TextDecorations]::Underline
     $lj.Cursor = [Windows.Input.Cursors]::Hand; $lj.Focusable = $false; $lj.ToolTip = 'Ouvrir le dossier des journaux'
     $lj.Add_PreviewMouseLeftButtonUp({ Start-Process explorer.exe -ArgumentList ('"{0}"' -f $LogDir) })
     Add-InfoCard $c $Ui.InfoLeft
 
-    $c = New-Card 'Diagnostic rapide' '' ([string][char]0xE9D9)
+    # Matériel : fabricant et modèle sur une ligne (Fabricant gardé en donnée masquée pour le rapport)
+    $c = New-Card 'Matériel' '' ([string][char]0xE7F4)
+    foreach ($k in 'Modèle', 'N° de série', 'BIOS / UEFI', 'Processeur', 'Carte graphique', 'Mémoire', 'Batterie', 'Fabricant') {
+        $f[$k] = Add-KV $c.Body $k ''
+    }
+    $f['Fabricant'].Parent.Parent.Visibility = 'Collapsed'; $f['Fabricant'].Tag = 'data'
+    $f['Carte graphique'].Parent.Parent.Visibility = 'Collapsed'
+    $f['Batterie'].Parent.Parent.Visibility = 'Collapsed'
+    Add-InfoCard $c $Ui.InfoLeft
+
+    $c = New-Card 'Sécurité et stabilité' '' ([string][char]0xE9D9)
     $InfoUI.DiagPanel = [Windows.Controls.StackPanel]::new(); [void]$c.Body.Children.Add($InfoUI.DiagPanel)
     [void](Add-KV $InfoUI.DiagPanel 'État' 'analyse en cours...')
     $InfoUI.DiagTitle = $c.Title
@@ -423,7 +424,7 @@ function Set-InfoStatic {
         elseif ($bbMan -and $bbMan -notmatch $SmbJunk) { "$bbMan  (carte mère, PC assemblé)" }
         else { 'non renseigné par le fabricant' }
     )
-    $f['Modèle'].Text = $(
+    $InfoUI.ModelRaw = $(
         if ($mod -and $mod -notmatch $SmbJunk) { $mod + $(if ($bios.SystemVersion -and $bios.SystemVersion -ne $bios.SystemProductName -and "$($bios.SystemVersion)".Trim() -notmatch $SmbJunk) { "  ($($bios.SystemVersion))" } else { '' }) }
         elseif ($bbMod -and $bbMod -notmatch $SmbJunk) { "$bbMod  (carte mère)" }
         else { 'non renseigné par le fabricant' }
@@ -444,7 +445,7 @@ function Set-InfoStatic {
     $f['Mémoire'].Text = '...' + $(if ($InfoUI.RamUse) { '  ' + [char]0x00B7 + '  ' + $InfoUI.RamUse } else { '' })
     $dom = "$((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -ErrorAction SilentlyContinue).Domain)"
     if ($dom) { $f['Domaine'].Text = $dom }
-    Update-Uptime
+    Update-Uptime; Update-InfoMerged
 }
 
 function Get-NetFast {
@@ -471,7 +472,8 @@ function Get-NetFast {
 function Update-InfoFast([switch]$Force) {
     $f = $InfoUI.F
     if ($Force) { $InfoUI.RebootSig = $null; $InfoUI.VolFastSig = $null }
-    $rs = Get-RebootState -Force:$Force
+    # lecture protégée : une erreur ne doit pas laisser la ligne vide (elle restait sans valeur)
+    $rs = try { Get-RebootState -Force:$Force } catch { if (-not $InfoUI.RebootErr) { $InfoUI.RebootErr = $true; Write-UiLog "Redémarrage en attente : lecture impossible - $($_.Exception.Message)" 'WARN' }; @{ Why = @(); WuAt = $null } }
     $pending = [bool]@($rs.Why).Count
     # programmé : par l'outil (shutdown /r /t) ou par Windows Update (Paramètres > Planifier le redémarrage)
     $at = $(if ($Sync.RebootAt -and $Sync.RebootAt -gt [DateTime]::Now) { $Sync.RebootAt } elseif ($rs.WuAt) { $rs.WuAt } else { $null })
@@ -746,12 +748,29 @@ function Show-InfoSlow($S) {
     if ($null -ne $S.Disks) { Update-StorageLayout; try { Update-InfoFast -Force } catch { Write-Ignored 'Accueil' $_ } }
 }
 
+# lignes recomposées de l'Accueil à partir des champs de données masqués (signature : réécriture seulement si changement)
+function Update-InfoMerged {
+    $f = $InfoUI.F; if (-not $f -or -not $f['Windows']) { return }
+    # forme courte : « W11 Pro · 64 bits · 26H2 (build 26300.9974) » (texte complet en infobulle)
+    $ed = "$($f['Édition'].Text)" -replace '^Microsoft\s+', '' -replace '^Windows\s+(\d+)', 'W$1' -replace 'Professionnel(le)?\s+pour les stations de travail', 'Pro Workstation' -replace 'Professionnel(le)?|Professional', 'Pro' -replace 'Famille|Home', 'Famille' -replace 'Entreprise|Enterprise', 'Entreprise'
+    $ver = "$($f['Version'].Text)" -replace '\s{2,}', ' '
+    $w = ($ed -replace '\s{2,}', ' ') + ' ' + [char]0x00B7 + ' ' + $ver
+    if ($f['Windows'].ToolTip -ne "$($f['Édition'].Text) $ver") { $f['Windows'].ToolTip = "$($f['Édition'].Text) $ver" }
+    if ($f['Windows'].Text -ne $w) { $f['Windows'].Text = $w }
+    $d = "$($f['Dernier démarrage'].Text)" + $(if ($f['Allumé depuis'].Text) { '  ' + [char]0x00B7 + '  allumé depuis ' + $f['Allumé depuis'].Text } else { '' })
+    if ($f['Démarré le'].Text -ne $d) { $f['Démarré le'].Text = $d; $f['Démarré le'].Foreground = $f['Allumé depuis'].Foreground }
+    $p = $env:COMPUTERNAME + $(if ("$($f['Domaine'].Text)".Trim()) { '  ' + [char]0x00B7 + '  domaine ' + $f['Domaine'].Text } else { '' })
+    if ($f['Poste'].Text -ne $p) { $f['Poste'].Text = $p }
+    $fab = "$($f['Fabricant'].Text)"; $mo = "$($InfoUI.ModelRaw)"
+    if ($mo) { $m = $(if ($fab -and $fab -notmatch '^non renseign' -and $mo -notmatch ('^' + [regex]::Escape($fab))) { "$fab $mo" } else { $mo }); if ($f['Modèle'].Text -ne $m) { $f['Modèle'].Text = $m } }
+}
 function Update-Uptime {
     if (-not $InfoUI.F -or -not $BootTime -or $BootTime -eq [DateTime]::MinValue) { return }
     $up = [DateTime]::Now - $BootTime
     $fld = $InfoUI.F['Allumé depuis']
     $fld.Text = '{0} j {1:00} h {2:00} min {3:00} s' -f $up.Days, $up.Hours, $up.Minutes, $up.Seconds
     $fld.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, $(if ($up.Days -ge 14) { 'WarnFgBrush' } else { 'FgBrush' }))
+    try { Update-InfoMerged } catch { Write-Ignored 'Accueil (lignes regroupées)' $_ }
 }
 
 # Copie texte : clé sur 34 colonnes puis « : valeur » ; lignes suivantes d'une valeur multiligne alignées sous la valeur

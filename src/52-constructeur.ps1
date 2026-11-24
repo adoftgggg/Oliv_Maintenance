@@ -503,7 +503,7 @@ function Show-OemResult {
     if (-not $InfoUI.OemSel) { $InfoUI.OemSel = @{} }
     $p = $InfoUI.OemPanel; $p.Children.Clear()
     $bios = Get-ItemProperty 'HKLM:\HARDWARE\DESCRIPTION\System\BIOS' -ErrorAction SilentlyContinue
-    [void](Add-KV $p 'Constructeur' (Get-OemIdentity $bios))
+    # constructeur, modèle et n° de série : déjà dans la carte Matériel, non répétés ici
     $r = $Sync.OemResult
     $InfoUI.OemAge.Text = ''
     $InfoUI.OemRunShown = [bool]($Sync.OemRunning -or $Sync.OemInstalling)
