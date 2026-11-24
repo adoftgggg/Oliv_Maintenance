@@ -49,3 +49,26 @@ $Ui.AutoReboot.Add_Click({ param($s, $e)
     if ($InfoUI.OemPanel) { try { Show-OemResult } catch { Write-Ignored 'Carte constructeur' $_ } }
     Write-UiLog $(if ($Sync.AutoReboot) { 'Redémarrage automatique en fin de tâche activé (si un redémarrage est nécessaire).' } else { 'Redémarrage automatique en fin de tâche désactivé.' }) 'APP'
 })
+# Alertes du poste en notification Windows (application réduite ou dans la zone de notification) : redémarrage en
+# attente, mises à jour Windows, mises à jour de logiciels, disque presque plein. Une notification par alerte nouvelle
+# (rien de répété tant que l'alerte reste la même), contrôle toutes les 60 s. Réglage : Paramètres > Démarrage et fermeture.
+$AlertSeen = @{}
+function Get-AlertOn { $v = Get-RegValue $CardRegKey 'AlertesPoste'; $null -eq $v -or [int]$v -eq 1 }
+function Watch-PcAlert {
+    if ($SelfTest -or -not (Get-AlertOn)) { return }
+    $al = [ordered]@{}
+    try { $rs = Get-RebootState; if ($rs -and @($rs.Why).Count) { $al['reboot|' + (@($rs.Why) -join ';')] = @('Redémarrage en attente', (@($rs.Why) -join ' ; '), 'Warning') } } catch { $null = $_ }
+    try { $n = @($Sync.WuPending.Items | Where-Object { $_ }).Count; if ($n) { $al["wu|$n"] = @('Mises à jour Windows', ('{0} {1} : Accueil > Mises à jour Windows.' -f $n, (Get-Plural $n 'mise à jour disponible' 'mises à jour disponibles')), 'Info') } } catch { $null = $_ }
+    try { $n = @(Get-SoftUpdate | Where-Object { -not $SoftExcl[(Get-SoftKey $_)] }).Count; if ($n) { $al["soft|$n"] = @('Mises à jour de logiciels', ('{0} {1} : Applications > Mettre à jour.' -f $n, (Get-Plural $n 'logiciel à mettre à jour' 'logiciels à mettre à jour')), 'Info') } } catch { $null = $_ }
+    try {
+        foreach ($v in @($Sync.Vols)) {
+            if (-not $v -or -not $v.Total) { continue }
+            if ($v.Free / $v.Total -lt 0.1) { $al["disk|$($v.Name)"] = @('Disque presque plein', ('{0} : {1:N1} Go libres sur {2:N0} Go. Maintenance > Nettoyage.' -f $v.Name.TrimEnd('\'), ($v.Free / 1GB), ($v.Total / 1GB)), 'Warning') }
+        }
+    } catch { $null = $_ }
+    foreach ($k in $al.Keys) {
+        if ($AlertSeen.ContainsKey($k)) { continue }
+        $AlertSeen[$k] = 1; $a = $al[$k]
+        Send-AppNotification $a[0] $a[1] $a[2]
+    }
+}

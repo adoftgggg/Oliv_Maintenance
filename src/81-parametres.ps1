@@ -89,6 +89,11 @@ function New-SettingsPage {
     & $setCell $c 0 0
 
     $c = New-Card 'Démarrage' '' ([string][char]0xE7E8)
+    $SetUI.AlertOn = Add-SettingsChoice $c.Body 'Alertes du poste en notification' 'Quand l''application est réduite ou dans la zone de notification : redémarrage en attente, mises à jour Windows et logiciels disponibles, disque presque plein (une seule fois par alerte).' ([ordered]@{ On = 'Activées'; Off = 'Désactivées' }) $(if (Get-AlertOn) { 'On' } else { 'Off' }) {
+        param($s, $e) $on = "$($s.DataContext)" -eq 'On'
+        try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue('AlertesPoste', [int]$on, [Microsoft.Win32.RegistryValueKind]::DWord) } finally { $k.Close() } } catch { Write-Ignored 'Alertes du poste' $_ }
+        foreach ($x in $SetUI.AlertOn) { $x.Tag = $(if ($x.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
+        Write-UiLog ('Alertes du poste en notification : {0}.' -f $(if ($on) { 'activées' } else { 'désactivées' })) 'APP' }
     $cur = 'Info'
     try {
         if (Test-Path -LiteralPath $StartFile) { $cur = [IO.File]::ReadAllText($StartFile).Trim() }

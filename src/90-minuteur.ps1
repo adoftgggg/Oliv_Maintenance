@@ -102,6 +102,8 @@ function Update-Periodic {
     if ($t % 4 -eq 1 -and $GpRows.Count) { Invoke-TickStep 'stratégies de groupe' { Update-GpRow } }
     if ($t % 4 -eq 0 -and -not $min) { Invoke-TickStep 'points de restauration' { Update-RestoreLast } }
     if ($t % 4 -eq 0) { Invoke-TickStep 'logiciels' { Update-SoftCard } }
+    # alertes du poste en notification (toutes les 60 s ; minuteur à 250 ms)
+    if ($t % 240 -eq 120) { Invoke-TickStep 'alertes' { Watch-PcAlert } }
     # fenêtre Logiciels pendant une mise à jour : avancement et état de chaque logiciel 2 fois par seconde
     if ($SoftUI.Win -and $t % 2 -eq 0 -and (Test-SoftUpgrading)) { Invoke-TickStep 'mise à jour des logiciels' {
         Update-SoftStatus
