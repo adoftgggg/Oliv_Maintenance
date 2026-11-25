@@ -32,6 +32,13 @@ function Restore-ToPoint($P) {
 # Get / Set-WinUserLanguageList (compte qui exécute l'application) ; nom des claviers : Keyboard Layouts\<KLID>\Layout Text.
 # La 1re langue (langue d'affichage préférée) et le dernier clavier restant ne peuvent pas être retirés.
 $LangUI = @{}
+# Set-WinUserLanguageList agit sur le compte qui exécute l'application : élevée avec un autre compte administrateur que celui
+# de la session, la modification partait sur ce compte-là sans le dire ; refusée dans ce cas
+function Test-LangSameUser {
+    if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq $UserSid) { return $true }
+    Show-Info ("Langues et claviers : modification impossible pour $UserName.`n`nL'application tourne sous le compte administrateur $env:USERDOMAIN\$env:USERNAME, et Windows n'applique ce réglage qu'au compte qui le fait. À changer depuis la session de $UserName, dans Paramètres > Heure et langue.") 'Warn'
+    $false
+}
 function Get-KeyboardName([string]$Tip) {
     $klid = ($Tip -split ':')[-1]
     if ($klid -match '^\{') { return 'méthode de saisie' }
@@ -226,6 +233,7 @@ $BgJobDone['OffLang'] = {
 }
 # Tip absent : toute la langue retirée ; sinon un clavier (langue retirée avec son dernier clavier)
 function Remove-UserLanguage([string]$Tag, $Tip) {
+    if (-not (Test-LangSameUser)) { return }
     try {
         $list = Get-WinUserLanguageList -ErrorAction Stop
         $l = @($list | Where-Object { $_.LanguageTag -eq $Tag })[0]; if (-not $l) { return }
@@ -276,6 +284,7 @@ function Show-AddKeyboardMenu($Btn) {
     $cm.PlacementTarget = $Btn; $cm.Placement = 'Bottom'; $cm.MaxHeight = 560; $cm.IsOpen = $true
 }
 function Add-UserKeyboard($E) {
+    if (-not (Test-LangSameUser)) { return }
     try {
         $list = Get-WinUserLanguageList -ErrorAction Stop
         $l = @($list | Where-Object { $_.LanguageTag -eq $E.Tag })[0]

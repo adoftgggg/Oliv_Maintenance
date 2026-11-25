@@ -8,7 +8,9 @@ $SvcStateFile = Join-Path (Get-LogPath 'Etat') 'services-desactives.json'
 # services indispensables à Windows ou à l'application : ni arrêt ni désactivation proposés
 $SvcCritical = @('RpcSs', 'RpcEptMapper', 'DcomLaunch', 'LSM', 'SamSs', 'EventLog', 'EventSystem', 'PlugPlay', 'Power', 'BrokerInfrastructure',
     'CoreMessagingRegistrar', 'SystemEventsBroker', 'Schedule', 'ProfSvc', 'gpsvc', 'Winmgmt', 'UserManager', 'StateRepository', 'TimeBrokerSvc',
-    'Dhcp', 'Dnscache', 'nsi', 'BFE', 'mpssvc', 'WinDefend', 'WdNisSvc', 'SecurityHealthService', 'Sense', 'TrustedInstaller', 'CryptSvc', 'KeyIso', 'AppXSvc', 'ClipSVC')
+    'Dhcp', 'Dnscache', 'nsi', 'BFE', 'mpssvc', 'WinDefend', 'WdNisSvc', 'SecurityHealthService', 'Sense', 'TrustedInstaller', 'CryptSvc', 'KeyIso', 'AppXSvc', 'ClipSVC',
+    # élévation (UAC : l'application elle-même ne pourrait plus se relancer en administrateur), réseau, son, coffre des identifiants, installeur
+    'Appinfo', 'Wcmsvc', 'netprofm', 'NlaSvc', 'LanmanWorkstation', 'WlanSvc', 'Netman', 'Audiosrv', 'AudioEndpointBuilder', 'VaultSvc', 'msiserver', 'wscsvc')
 # importance affichée à côté du nom : Critique (arrêt et désactivation bloqués), Désactivable si... (service de Windows
 # inutile dans un cas précis), Windows (à laisser par défaut), Logiciel (installé par un logiciel : utile tant qu'il sert)
 $SvcOptional = @{

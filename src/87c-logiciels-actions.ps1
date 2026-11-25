@@ -4,6 +4,20 @@
 # mais aussi tout processus qui a chargé une de ses DLL (superposition Discord injectée dans les jeux, extension de
 # l'Explorateur...). Repérés avant la confirmation : exécutable portant le nom du logiciel, exécutable ou DLL chargée
 # dans son dossier d'installation (clé de désinstallation : InstallLocation, sinon dossier du désinstalleur).
+# dossier propre à un logiciel : jamais Windows (ni dessous), jamais une racine commune (Program Files, Common Files,
+# ProgramData, Utilisateurs, profil, AppData et ses sous-dossiers Local / Roaming / LocalLow / Programs) ni un de leurs parents
+function Test-SoftDirSpecific([string]$Dir) {
+    $d = "$Dir".Trim().TrimEnd('\'); if ($d.Length -lt 4 -or $d -notmatch '^[A-Za-z]:\\') { return $false }
+    try { $d = [IO.Path]::GetFullPath($d).TrimEnd('\') } catch { return $false }
+    $win = "$env:windir".TrimEnd('\')
+    if ($d -ieq $win -or $d.StartsWith($win + '\', [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    $prof = "$UserProfilePath".TrimEnd('\')
+    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432, $env:CommonProgramFiles, ${env:CommonProgramFiles(x86)}, $env:ProgramData,
+        (Split-Path $prof -Parent), $prof, "$prof\AppData", "$prof\AppData\Local", "$prof\AppData\Roaming", "$prof\AppData\LocalLow", "$prof\AppData\Local\Programs",
+        "$prof\AppData\Local\Microsoft", "$prof\AppData\Roaming\Microsoft", "$prof\Documents", "$prof\Desktop", "$prof\Downloads") | Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\') }
+    foreach ($r in $roots) { if ($d -ieq $r -or $r.StartsWith($d + '\', [StringComparison]::OrdinalIgnoreCase)) { return $false } }
+    $true
+}
 function Get-SoftInstallDir($App) {
     $dirs = [Collections.Generic.List[string]]::new()
     foreach ($root in 'HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall') {
@@ -16,8 +30,9 @@ function Get-SoftInstallDir($App) {
                     $d = "$($sk.GetValue('InstallLocation'))".Trim().Trim('"')
                     if (-not $d) { $us = "$($sk.GetValue('UninstallString'))"; if ($us -match '^\s*"([^"]+\.exe)"' -or $us -match '^\s*(\S+\.exe)') { $d = Split-Path $Matches[1] } }
                     $d = [Environment]::ExpandEnvironmentVariables($d).TrimEnd('\')
-                    # dossiers trop généraux (racine, Program Files, Windows) écartés
-                    if ($d.Length -gt 12 -and $d -notmatch '(?i)^[a-z]:\\(program files( \(x86\))?|windows|programdata)?$' -and (Test-Path -LiteralPath $d)) { $dirs.Add($d + '\') }
+                    # dossiers trop généraux écartés : sinon tout programme lancé depuis ce dossier est fermé de force avant
+                    # l'installeur (entrée de désinstallation mal renseignée pointant sur System32 ou AppData\Local...)
+                    if ((Test-SoftDirSpecific $d) -and (Test-Path -LiteralPath $d)) { $dirs.Add($d + '\') }
                 } finally { $sk.Close() }
             }
         } finally { $k.Close() }
@@ -83,10 +98,13 @@ function Remove-SoftOrphan($Items) {
     foreach ($a in $sel) {
         $file = Join-Path $dir ('{0:yyyyMMdd-HHmmss}_{1}.reg' -f (Get-Date), (("$($a.Name)" -replace '[^\w\-]+', '_').Trim('_')))
         try {
-            $out = & "$env:windir\System32\reg.exe" export $a.RegKey $file /y 2>&1
+            # HKCU = ruche de l'utilisateur ciblé (HKU\<SID>) et non celle du compte administrateur qui a élevé l'application :
+            # avant, export et suppression visaient le mauvais compte (rien supprimé, mais « retirée » affiché)
+            $rk = $(if ($a.RegKey -like 'HKCU\*' -and $HkuSidOk) { "HKU\$UserSid\" + $a.RegKey.Substring(5) } else { $a.RegKey })
+            $out = & "$env:windir\System32\reg.exe" export $rk $file /y 2>&1
             if ($LASTEXITCODE -ne 0) { throw "sauvegarde impossible : $((@($out) -join ' ').Trim())" }
-            $root = $(if ($a.RegKey -like 'HKCU\*') { [Microsoft.Win32.Registry]::CurrentUser } else { [Microsoft.Win32.Registry]::LocalMachine })
-            $root.DeleteSubKeyTree($a.RegKey.Substring(5), $false)
+            Remove-RegKey $(if ($rk -like 'HKU\*') { $rk } else { $a.RegKey })
+            if (Test-RegKey $(if ($rk -like 'HKU\*') { $rk } else { $a.RegKey })) { throw 'clé toujours présente après suppression (droits ?)' }
             $done.Add("$($a.Id)")
             Write-UiLog ('Entrée orpheline retirée : {0} ({1}), sauvegarde {2}' -f $a.Name, $a.RegKey, $file) 'OK'
             Add-SessionEvent 'Logiciels' $a.Name 'entrée orpheline retirée' 'ok'

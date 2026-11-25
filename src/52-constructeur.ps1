@@ -296,6 +296,14 @@ if ($oemIds.Count) {
             Set-OemItem $k @{ State = 'run'; Phase = 'téléchargement et installation'; Pct = -1 }; Set-OemPct 0
             Write-TaskLog ('Installation {0} (version {1}, {2})' -f $Sync.OemInstStatus, $x.Version, $x.PackageID)
             try {
+                # BIOS / UEFI / firmware : BitLocker suspendu jusqu'au prochain redémarrage (reprise automatique ensuite), sinon
+                # la mise à jour du micrologiciel change les mesures du TPM et le poste demande la clé de récupération au démarrage
+                if ("$($x.Title) $($x.Category)" -match '(?i)bios|uefi|firmware|micrologiciel|\bME\b|management engine|thunderbolt|tpm' -and (Get-Command Get-BitLockerVolume -ErrorAction SilentlyContinue)) {
+                    try {
+                        $bl = Get-BitLockerVolume -MountPoint $env:SystemDrive -ErrorAction Stop
+                        if ("$($bl.ProtectionStatus)" -eq 'On') { Suspend-BitLocker -MountPoint $env:SystemDrive -RebootCount 1 -ErrorAction Stop | Out-Null; Write-TaskLog ('BitLocker suspendu jusqu''au prochain redémarrage ({0}) : mise à jour du micrologiciel.' -f $env:SystemDrive) 'WARN' }
+                    } catch { Write-TaskLog ('BitLocker : suspension impossible avant {0} ({1}) - mise à jour non lancée, la clé de récupération serait demandée au démarrage.' -f $x.Title, $_.Exception.Message) 'ERROR'; Set-OemItem $k @{ State = 'fail'; Phase = 'BitLocker non suspendu' }; $Sync.OemRun.Done++; continue }
+                }
                 $r = Install-LnvUpdate -Package $x -SaveBIOSUpdateInfoToRegistry -ErrorAction Stop
                 Write-TaskLog ('{0} : {1} (code {2}, action {3}){4}' -f $x.Title, $(if ($r.Success) { 'installé' } else { 'échec' }), $r.ExitCode, $r.PendingAction, $(if ($r.FailureReason) { " - $($r.FailureReason)" } else { '' })) $(if ($r.Success) { 'OK' } else { 'ERROR' })
                 if ($r.Success) {

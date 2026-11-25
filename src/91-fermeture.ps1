@@ -7,7 +7,9 @@ function Get-RestNote {
 # Réinitialisation de l'outil : refus si un traitement tourne ; sinon confirmation, fermeture (tâches de fond arrêtées),
 # suppression de tout le dossier de l'outil (paramètres, journaux, rapports, instantanés, sauvegardes, résultats) sauf le suivi
 # des modifications en attente de redémarrage, puis relance. Aucun réglage Windows n'est annulé.
-$ResetKeep = @($PendingFile, $VersionFile)
+# conservés aussi : ce qui sert à ANNULER un changement fait au poste (sinon impossible à défaire après réinitialisation) -
+# copie d'origine du fichier hosts, liste des services désactivés par l'outil, redémarrage programmé
+$ResetKeep = @($PendingFile, $VersionFile, $HostsBackup, $SvcStateFile, $RebootFile)
 # Traitements en cours, nommés (réinitialisation, fermeture)
 function Get-RunningTask {
     if (-not $Sync.Running) { return $null }

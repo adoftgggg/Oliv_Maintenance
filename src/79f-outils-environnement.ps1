@@ -11,7 +11,21 @@ function Get-EnvVar([string]$Path) {
     try { @($k.GetValueNames() | Where-Object { $_ } | Sort-Object | ForEach-Object { [pscustomobject]@{ Name = $_; Value = "$($k.GetValue($_, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))"; Kind = "$($k.GetValueKind($_))" } }) } finally { $k.Close() }
 }
 function Test-EnvList($V) { $V.Value -like '*;*' -or $V.Name -in 'Path', 'PSModulePath', 'PATHEXT' }
-function Test-EnvDir([string]$P) { $x = [Environment]::ExpandEnvironmentVariables($P); if ($x -notmatch '^[A-Za-z]:\\|^\\\\') { return $true }; Test-Path -LiteralPath $x }
+# dossier introuvable = seulement si on peut l'affirmer : variables du profil remplacées par celles du compte ciblé (et non du
+# compte administrateur qui a élevé l'application), lecteur absent pour ce processus (lecteur réseau de l'utilisateur, clé
+# débranchée) ou chemin réseau (\\serveur, lent ou injoignable en administrateur) = considéré présent, jamais proposé au retrait
+function Test-EnvDir([string]$P) {
+    $x = "$P"
+    if ($UserProfilePath) {
+        foreach ($m in @(@('%USERPROFILE%', $UserProfilePath), @('%LOCALAPPDATA%', "$UserProfilePath\AppData\Local"), @('%APPDATA%', "$UserProfilePath\AppData\Roaming"), @('%HOMEPATH%', ($UserProfilePath -replace '^[A-Za-z]:', '')), @('%TEMP%', "$UserProfilePath\AppData\Local\Temp"), @('%TMP%', "$UserProfilePath\AppData\Local\Temp"))) {
+            $x = [regex]::Replace($x, [regex]::Escape($m[0]), $m[1].Replace('$', '$$'), 'IgnoreCase')
+        }
+    }
+    $x = [Environment]::ExpandEnvironmentVariables($x)
+    if ($x -notmatch '^[A-Za-z]:\\') { return $true }
+    if (-not [IO.Directory]::Exists($x.Substring(0, 3))) { return $true }
+    Test-Path -LiteralPath $x
+}
 function Update-EnvCard {
     $b = $ToolsUI.EnvBody; if (-not $b) { return }; $b.Children.Clear()
     $u = @(Get-EnvVar $EnvUsr); $s = @(Get-EnvVar $EnvSys)

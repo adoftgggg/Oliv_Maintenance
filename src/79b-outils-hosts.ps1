@@ -136,10 +136,11 @@ try {
     $P.Step = 'parse'; $P.Pct = 70.0
     $lines = $t.Split([char]10); $P.Of = $lines.Length
     $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $l = [Collections.Generic.List[string]]::new()
+    # domaines retenus : nom valide avec un point, jamais localhost ni réseau local (liste altérée = blocage de domaines publics seulement)
     $re = [regex]'^0\.0\.0\.0\s+([^\s#]+)'
     for ($i = 0; $i -lt $lines.Length; $i++) {
         $m = $re.Match($lines[$i])
-        if ($m.Success) { $d = $m.Groups[1].Value; if ($d -ne '0.0.0.0' -and $set.Add($d)) { $l.Add($d) } }
+        if ($m.Success) { $d = $m.Groups[1].Value; if ($d -match '^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$' -and $d -notmatch '(?i)^(localhost(\..*)?|.*\.local|.*\.localdomain|broadcasthost)$' -and $set.Add($d)) { $l.Add($d) } }
         if (($i -band 4095) -eq 0) { $P.N = $i; $P.Pct = 70.0 + 20.0 * $i / $lines.Length }
     }
     if ($l.Count -lt 1000) { throw "liste inattendue ($($l.Count) entrées)" }
@@ -198,7 +199,7 @@ try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $t = (New-Object Net.WebClient).DownloadString($url)
     $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $l = [Collections.Generic.List[string]]::new(); $re = [regex]'^0\.0\.0\.0\s+([^\s#]+)'
-    foreach ($x in $t.Split([char]10)) { $m = $re.Match($x); if ($m.Success) { $d = $m.Groups[1].Value; if ($d -ne '0.0.0.0' -and $set.Add($d)) { $l.Add($d) } } }
+    foreach ($x in $t.Split([char]10)) { $m = $re.Match($x); if ($m.Success) { $d = $m.Groups[1].Value; if ($d -match '^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$' -and $d -notmatch '(?i)^(localhost(\..*)?|.*\.local|.*\.localdomain|broadcasthost)$' -and $set.Add($d)) { $l.Add($d) } } }
     if ($l.Count -lt 1000) { throw "liste inattendue ($($l.Count) entrées)" }
     $own = [Collections.Generic.List[string]]::new(); $in = $false
     foreach ($x in ($txt -split "`r?`n")) { if ($x.StartsWith($A)) { $in = $true; continue }; if ($in) { if ($x.StartsWith($B)) { $in = $false }; continue }; [void]$own.Add($x) }

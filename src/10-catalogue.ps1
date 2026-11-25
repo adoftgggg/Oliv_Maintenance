@@ -475,9 +475,13 @@ $Tweaks = @(
     [pscustomobject]@{ Id='LsaPpl'; Page='Secu'; Group='Sécurité'; MinBuild=0; Effect='R'
         Label='Protection LSA'
         Desc='Empêche les programmes de lire les secrets d''ouverture de session (outils du type Mimikatz). Recommandé : activé. Peut bloquer d''anciens pilotes de lecteurs de cartes ou de sécurité.'
-        Tip='HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RunAsPPL : 1 activé (2 = activé sans verrou UEFI), 0 / absent désactivé.'
+        Tip='HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RunAsPPL : 2 activé sans verrou UEFI (Windows 11 22H2+, posé par l''outil), 1 activé avec verrou UEFI (Windows 10), 0 / absent désactivé.'
         Get={ [int](Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa' 'RunAsPPL') -in 1, 2 }
-        Set={ param($on) Set-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa' 'RunAsPPL' $(if ($on) { 1 } else { 0 }) }
+        # activé en 2 (sans verrou UEFI, Windows 11 22H2 et suivants) : en 1, la protection est aussi gravée dans une variable
+        # UEFI et la désactiver ensuite par le registre ne suffit plus (outil de désactivation Microsoft requis)
+        Set={ param($on) $lp = 'HKLM\SYSTEM\CurrentControlSet\Control\Lsa'; $was = Get-RegValue $lp 'RunAsPPL'
+              Set-RegValue $lp 'RunAsPPL' $(if ($on) { if ($Build -ge 22621) { 2 } else { 1 } } else { 0 })
+              if (-not $on -and [int]$was -eq 1) { Write-UiLog 'Protection LSA : elle avait été activée avec verrou UEFI (RunAsPPL = 1) ; si elle reste active après redémarrage, la désactivation demande l''outil LSA Protected Process Opt-out de Microsoft.' 'WARN' } }
         DefGet={ $false } }
     [pscustomobject]@{ Id='Rdp'; Need='NotHome'; Def=$false; Page='Secu'; Group='Sécurité'; MinBuild=0; Effect='I'
         Label='Bureau à distance (connexions entrantes)'

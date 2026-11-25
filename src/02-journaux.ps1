@@ -93,7 +93,8 @@ function Move-OldLog {
 }
 function Get-LogFile([int]$Days = 0) {
     $limit = [DateTime]::Now.AddDays(-$Days)
-    foreach ($c in @($LogCats.Keys | Where-Object { $_ -ne 'Etat' })) {
+    # Demarrage exclu : sauvegardes (.reg, raccourcis) des entrées retirées du démarrage, seules à permettre de les remettre
+    foreach ($c in @($LogCats.Keys | Where-Object { $_ -notin 'Etat', 'Demarrage' })) {
         $dp = Get-LogPath $c; if (-not (Test-Path -LiteralPath $dp)) { continue }
         foreach ($f in [IO.DirectoryInfo]::new($dp).GetFiles()) {
             if ($Days -gt 0 -and $f.LastWriteTime -ge $limit) { continue }

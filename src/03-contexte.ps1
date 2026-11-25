@@ -21,9 +21,10 @@ if (-not $owned) {
     [void]$AppQuitEvent.Set()
     $owned = Get-MutexOwned 30000
     if (-not $owned -and -not $ov) {
-        # version antérieure sans fermeture à distance : arrêt de ses processus PowerShell (lignes de commande de l'application)
+        # version antérieure sans fermeture à distance : arrêt de ses processus PowerShell, reconnus à la variable propre au
+        # lanceur (avant : tout powershell dont la ligne de commande contenait « Oliv_Maintenance », scripts du dossier compris)
         try {
-            Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID -and "$($_.CommandLine)" -like '*Oliv_Maintenance*' } |
+            Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID -and "$($_.CommandLine)" -match '_OlivMScriptPath|_OLIVM_SELF' } |
                 ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         } catch { $null = $_ }
         $owned = Get-MutexOwned 10000

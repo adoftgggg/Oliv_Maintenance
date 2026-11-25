@@ -32,7 +32,7 @@ function New-InstallCard {
 # moment de l'usage et lancé tel quel (-GetUrl) : Microsoft change régulièrement l'accès à ses ISO, Fido suit ces
 # changements. Signature Authenticode vérifiée si le script est signé ; signature invalide = refus.
 $UsbUI = @{}
-function Get-UsbDisk { @(Get-Disk -ErrorAction Stop | Where-Object { "$($_.BusType)" -eq 'USB' -and $_.Size -ge 7GB } | Sort-Object Number) }
+function Get-UsbDisk { @(Get-Disk -ErrorAction Stop | Where-Object { "$($_.BusType)" -eq 'USB' -and $_.Size -ge 7GB -and -not $_.IsSystem -and -not $_.IsBoot } | Sort-Object Number) }
 function Show-UsbDialog {
     if ($BgJobs.ContainsKey('Usb')) { if ($UsbUI.Win) { $UsbUI.Win.Activate() }; return }
     $x = [xml]@'
@@ -163,16 +163,19 @@ $img = $null
 try {
     $iso = $p.Iso
     if (-not $iso) {
-        # 1. lien officiel : Fido (dépôt GitHub de Pete Batard), signature vérifiée s'il est signé
+        # 1. lien officiel : Fido (dépôt GitHub de Pete Batard), signature Akeo Consulting exigée
         Set-UsbState 'Recherche du lien de téléchargement chez Microsoft' -1 'Script Fido (github.com/pbatard/Fido)'
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         [void][IO.Directory]::CreateDirectory($p.Tools)
         $fido = Join-Path $p.Tools 'Fido.ps1'
         (New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/pbatard/Fido/master/Fido.ps1', $fido)
         $sig = Get-AuthenticodeSignature -FilePath $fido
-        if ("$($sig.Status)" -notin 'Valid', 'NotSigned') { throw "signature du script Fido invalide ($($sig.Status)) : téléchargement refusé." }
+        # script exécuté en administrateur : signature Authenticode valide d'Akeo Consulting (éditeur de Fido et Rufus) exigée ;
+        # avant, un script non signé était aussi accepté (dépôt compromis = code exécuté en administrateur)
+        if ("$($sig.Status)" -ne 'Valid' -or "$($sig.SignerCertificate.Subject)" -notmatch '(?i)O=Akeo Consulting') { throw "signature du script Fido absente ou d'un autre éditeur ($($sig.Status), $($sig.SignerCertificate.Subject)) : script refusé." }
         $out = & "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File $fido -Win $p.Win -Rel Latest -Ed Pro -Arch x64 -GetUrl 2>&1 | Out-String
         $url = @([regex]::Matches($out, 'https://\S+\.iso\S*') | ForEach-Object { $_.Value })[0]
+        if ($url -and ([uri]$url).Host -notmatch '(?i)(^|\.)microsoft\.com$') { throw "lien hors des serveurs Microsoft refusé : $(([uri]$url).Host)" }
         if (-not $url) { throw ('Microsoft n''a pas donné de lien (blocage possible : VPN, réseau d''entreprise, trop de demandes). Réponse : ' + ($out.Trim() -replace '\s+', ' ')) }
         Test-UsbCancel
         # 2. téléchargement de l'ISO dans Téléchargements (réutilisable), avancement réel
@@ -351,54 +354,9 @@ function New-UnattendXml([string]$User, [string]$Pass, [bool]$Bypass) {
 "@
 }
 
-# ---- configuration sauvegardée : réglages + applications du catalogue
-function Get-ConfigApp {
-    $ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    if ($AppsUI.Installed) { foreach ($i in $AppsUI.Installed) { [void]$ids.Add($i) } }
-    elseif ($Sync.WgResult) { foreach ($x in @($Sync.WgResult.Apps)) { [void]$ids.Add("$($x.Id)") } }
-    @(foreach ($c in $AppCatalog.Keys) { foreach ($a in $AppCatalog[$c].A) { if ($ids.Contains("$($a[1])")) { "$($a[1])" } } })
-}
-function Save-AppConfig {
-    if (-not $Lazy.Done) { $Window.Cursor = [Windows.Input.Cursors]::Wait; try { New-DeferredPage } finally { $Window.Cursor = $null } }
-    $vals = [ordered]@{}; foreach ($r in $TweakRows) { if ($r.Tweak -and $r.Enabled -and $null -ne $r.Current) { $vals[$r.Tweak.Id] = $r.Current } }
-    $apps = @(Get-ConfigApp)
-    $dlg = [Microsoft.Win32.SaveFileDialog]::new(); $dlg.Title = 'Sauvegarder ma configuration'; $dlg.Filter = 'Configuration Oliv_Maintenance (*.json)|*.json'
-    $dlg.FileName = 'configuration-{0}-{1:yyyy-MM-dd}.json' -f $env:COMPUTERNAME, (Get-Date); $dlg.InitialDirectory = [Environment]::GetFolderPath('Desktop')
-    if (-not $dlg.ShowDialog($Window)) { return }
-    try {
-        $o = [ordered]@{ Type = 'Oliv_Maintenance.Configuration'; Version = $AppVersion; Date = (Get-Date).ToString('o'); Poste = $env:COMPUTERNAME; Values = $vals; Apps = $apps }
-        [IO.File]::WriteAllText($dlg.FileName, (ConvertTo-Json -InputObject $o -Depth 4), [Text.UTF8Encoding]::new($false))
-        Write-UiLog ('Configuration sauvegardée : {0} ({1} réglages, {2} applications).' -f $dlg.FileName, $vals.Count, $apps.Count) 'OK'
-        Show-Info ('Configuration sauvegardée : {0} réglages et {1} {2}{3}.' -f $vals.Count, $apps.Count, (Get-Plural $apps.Count 'application' 'applications'), $(if (-not $apps.Count -and -not $AppsUI.Installed -and -not $Sync.WgResult) { ' (applications non relevées : ouvrir l''onglet Applications une fois avant d''exporter)' } else { '' })) 'Ok'
-    } catch { Write-UiLog "Sauvegarde de la configuration : $($_.Exception.Message)" 'ERROR'; Show-Info "Enregistrement impossible : $($_.Exception.Message)" 'Error' }
-}
-function Restore-AppConfig {
-    if ($Sync.Running) { Show-Info 'Une tâche est en cours : restaurer la configuration une fois terminée.'; return }
-    $dlg = [Microsoft.Win32.OpenFileDialog]::new(); $dlg.Title = 'Restaurer une configuration'; $dlg.Filter = 'Configuration Oliv_Maintenance (*.json)|*.json'
-    $dlg.InitialDirectory = [Environment]::GetFolderPath('Desktop')
-    if (-not $dlg.ShowDialog($Window)) { return }
-    try { $j = Get-Content -LiteralPath $dlg.FileName -Raw -Encoding UTF8 | ConvertFrom-Json } catch { Show-Info "Fichier illisible : $($_.Exception.Message)" 'Error'; return }
-    if ("$($j.Type)" -notin 'Oliv_Maintenance.Configuration', 'Oliv_Maintenance.Recette') { Show-Info 'Ce fichier n''est pas une configuration sauvegardée par Oliv_Maintenance.' 'Error'; return }
-    $diff = @(Get-SnapshotDiff ([pscustomobject]@{ Values = $j.Values }))
-    if (-not $AppsUI.Built) { New-AppsPage }
-    $todo = @(@($j.Apps) | Where-Object { $AppsUI.Tiles.ContainsKey("$_") -and -not ($AppsUI.Installed -and $AppsUI.Installed.Contains("$_")) })
-    if (-not $diff.Count -and -not $todo.Count) { Show-Info 'Ce PC a déjà cette configuration : réglages identiques, applications présentes.' 'Ok'; return }
-    $lines = @($diff | ForEach-Object { $_.Line }) + @($todo | ForEach-Object { 'Installer : ' + $AppsUI.Tiles["$_"].A[0] })
-    $head = 'Restaurer la configuration de {0} ? {1} {2}, {3} {4} à installer :' -f $j.Poste, $diff.Count, (Get-Plural $diff.Count 'réglage modifié' 'réglages modifiés'), $todo.Count, (Get-Plural $todo.Count 'application' 'applications')
-    if (-not (Confirm-List $head $lines 'Un instantané des réglages actuels est enregistré avant (Paramètres > Restauration des réglages). Les applications s''installent ensuite, une après l''autre.' 'Restaurer')) { return }
-    if ($diff.Count) {
-        Save-TweakSnapshot "Avant la configuration de $($j.Poste)" @($diff | ForEach-Object { $_.Line })
-        foreach ($d in $diff) { Invoke-TweakChange $d.R $d.V }
-        Update-ApplyButton
-    }
-    Write-UiLog ('Configuration de {0} restaurée : {1} réglages{2}.' -f $j.Poste, $diff.Count, $(if ($todo.Count) { ", installation de $($todo.Count) applications" } else { '' })) 'OK'
-    if ($todo.Count) {
-        $AppsUI.Sel.Clear(); foreach ($i in $todo) { [void]$AppsUI.Sel.Add("$i") }
-        foreach ($o in $AppsUI.Tiles.Values) { Set-AppTileLook $o }
-        Set-AppsMode 'Inst'; Show-Page 'Apps'
-        Invoke-AppsInstall -NoConfirm
-    }
-}
+# ---- configuration sauvegardée : même exportation et même importation que Paramètres (81-parametres.ps1), un seul format
+function Save-AppConfig { Export-PcConfig }
+function Restore-AppConfig { Import-PcConfig }
 
 # ---------- Ports ouverts et connexions (onglet Sécurité) : écoutes TCP accessibles depuis le réseau (hors boucle locale)
 # avec le programme qui écoute ; ports connus de Windows nommés et en gris, les autres en orange (à vérifier).

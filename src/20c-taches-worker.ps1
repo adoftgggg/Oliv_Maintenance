@@ -260,7 +260,10 @@ function Find-SoftLocker($Lock) {
 # processus du logiciel fermés avant son installeur : fermeture normale demandée (fenêtre), puis forcée au bout de 8 s
 function Close-SoftProc($List) {
     $Sync.SoftRun.Items["$($Sync.SoftRun.Cur)"].Phase = 'fermeture du logiciel'
-    $live = @(foreach ($c in $List) { if ($c) { Get-Process -Id $c.Pid -ErrorAction SilentlyContinue } })
+    # jamais de processus du système ou de la session Windows (fermés de force = déconnexion, écran noir ou arrêt du poste),
+    # ni hors de la session de l'utilisateur
+    $crit = 'System', 'Idle', 'Registry', 'smss', 'csrss', 'wininit', 'winlogon', 'services', 'lsass', 'lsaiso', 'svchost', 'dwm', 'explorer', 'sihost', 'fontdrvhost', 'ctfmon', 'taskhostw', 'RuntimeBroker', 'StartMenuExperienceHost', 'ShellExperienceHost', 'SearchHost', 'TextInputHost', 'MsMpEng', 'NisSrv', 'SecurityHealthService', 'audiodg', 'spoolsv', 'conhost', 'powershell'
+    $live = @(foreach ($c in $List) { if ($c) { Get-Process -Id $c.Pid -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID -and $crit -notcontains $_.ProcessName -and $_.SessionId -eq $Sync.UserSession } } })
     if (-not $live.Count) { return }
     foreach ($p in $live) { try { [void]$p.CloseMainWindow() } catch { Write-Ignored 'Fermeture du logiciel' $_ } }
     $t0 = [DateTime]::Now
@@ -420,6 +423,10 @@ function Invoke-Task_SoftUpgrade {
             Write-TaskLog 'Windows App Runtime : installeur en échec (0x8A150006, composant utilisé par des applications ouvertes) : nouvel essai en forçant la fermeture de ces applications (--quiet --force).' 'WARN'
             $rc = Invoke-SoftWinget $x $wg @('install', '-e', '--id', $x.Id, '--force', '--override', '--quiet --force', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') $onLine
         }
+        # codes winget de réussite à redémarrage (0x8A150109 : redémarrer pour terminer, 0x8A15010B : redémarrage lancé par
+        # l'installeur) et d'application déjà installée (0x8A150061, installation depuis le catalogue) : comptés en échec avant
+        if ($rc -in -1978334967, -1978334965) { $reboot = $true; Write-TaskLog ('Installé : redémarrage du poste nécessaire pour terminer (code winget 0x{0:X8}).' -f $rc) 'WARN'; $rc = 0 }
+        elseif ($rc -eq -1978335135 -and $x.Install) { Write-TaskLog 'Déjà installé sur ce poste (0x8A150061) : rien à faire.' 'OK'; $rc = 0 }
         $good = $rc -eq 0
         # installeur terminé sans erreur : version réellement installée relue (certains logiciels, Discord, EA app...,
         # ne changent de version qu'au prochain lancement, ou s'installent pour un autre compte que celui de l'utilisateur)

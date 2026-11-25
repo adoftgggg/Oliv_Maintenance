@@ -147,7 +147,8 @@ foreach ($a in $p.Items) {
         if ((Test-Path -LiteralPath $dir) -and (Get-Item -LiteralPath $dir).LastWriteTime -gt (Get-Date).AddDays(-30)) { $exe = & $find }
         if (-not $exe) {
             if (-not $wg) { throw 'winget introuvable' }
-            if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction Stop }
+            # dossier du profil de l'utilisateur (modifiable par lui) : suppression .NET, qui retire un lien ou une jonction sans le traverser
+            if (Test-Path -LiteralPath $dir) { [IO.Directory]::Delete($dir, $true) }
             [void][IO.Directory]::CreateDirectory($dir)
             $st.Phase = 'téléchargement'
             # programme portable, sinon archive zip (exécutable portable à l'intérieur)

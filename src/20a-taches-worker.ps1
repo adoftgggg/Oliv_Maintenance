@@ -203,7 +203,10 @@ function Start-CleanMgr {
     $Sync.ChildPid = $p.Id; $Sync.ChildName = 'CLEANMGR'; $Sync.TaskPct = -1
     $p.WaitForExit()
     $Sync.ChildPid = $null; $Sync.ChildName = $null
-    while (Get-Process -Name cleanmgr -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 2 }
+    # cleanmgr relance un processus enfant : attente des seuls processus apparus après le lancement (avant : tout cleanmgr,
+    # y compris un Nettoyage de disque ouvert par l'utilisateur, bloquait la tâche sans fin), 2 h au plus, interruption possible
+    $t0 = $p.StartTime; $lim = [DateTime]::Now.AddHours(2)
+    while (-not $Sync.Aborted -and [DateTime]::Now -lt $lim -and @(Get-Process -Name cleanmgr -ErrorAction SilentlyContinue | Where-Object { try { $_.StartTime -ge $t0 } catch { $false } }).Count) { Start-Sleep -Seconds 2 }
     Write-TaskLog "cleanmgr terminé (code $($p.ExitCode))."
 }
 function Invoke-SfcRun {

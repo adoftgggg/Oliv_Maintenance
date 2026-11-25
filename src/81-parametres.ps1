@@ -375,6 +375,10 @@ function Get-SnapshotDiff($Snap) {
     $diff = @()
     foreach ($pr in $Snap.Values.PSObject.Properties) {
         $r = $TweakRows | Where-Object { $_.Tweak.Id -eq $pr.Name } | Select-Object -First 1
+        # valeur applicable sur ce poste seulement : option proposée (ni « Autre plan », ni « Réglage personnalisé », ni version
+        # de Windows d'un autre PC), ou vrai / faux pour un interrupteur ; sinon la ligne restait bloquée « en cours » (DNS)
+        if ($r -and $r.Tweak.Kind -eq 'Choice' -and -not @($r.Tweak.Options | Where-Object { -not $_.H -and "$($_.V)" -eq "$($pr.Value)" }).Count) { continue }
+        if ($r -and $r.Tweak.Kind -ne 'Choice' -and $pr.Value -isnot [bool]) { continue }
         if ($r -and $r.Enabled -and "$($r.Current)" -ne "$($pr.Value)") {
             $diff += @{ R = $r; V = $pr.Value; Line = '{0} : {1} > {2}' -f $r.Tweak.Label, (Format-TweakValue $r.Tweak $r.Current), (Format-TweakValue $r.Tweak $pr.Value) }
         }
@@ -507,38 +511,55 @@ function Export-PcConfig {
     New-DeferredPage
     $tw = [ordered]@{}; foreach ($r in @($TweakRows)) { if ($r.Tweak -and $r.Enabled -and $null -ne $r.Current) { $tw["$($r.Tweak.Id)"] = $r.Current } }
     $inst = @(); if (-not $AppsUI.Built) { try { New-AppsPage } catch { Write-Ignored 'Catalogue Applications' $_ } }
+    # applications installées : badges du catalogue, sinon dernier inventaire des logiciels (repris de l'ancienne sauvegarde)
     if ($AppsUI.Installed) { $inst = @($AppsUI.Tiles.Keys | Where-Object { $AppsUI.Installed.Contains("$_") }) }
+    elseif ($Sync.WgResult) { $ids = @($Sync.WgResult.Apps | ForEach-Object { "$($_.Id)" }); $inst = @($AppsUI.Tiles.Keys | Where-Object { $ids -contains "$_" }) }
     $o = [ordered]@{ Application = 'Oliv_Maintenance'; Version = $AppVersion; Date = (Get-Date).ToString('o'); Poste = $env:COMPUTERNAME; Reglages = $tw; Applications = @($inst); OngletsMasques = @($HiddenTabs); CartesMasquees = @($HiddenCards) }
-    $dlg = [Microsoft.Win32.SaveFileDialog]::new(); $dlg.Filter = 'Configuration Oliv_Maintenance (*.json)|*.json'; $dlg.FileName = '{0}_configuration_{1:yyyyMMdd}.json' -f $env:COMPUTERNAME, (Get-Date)
+    $dlg = [Microsoft.Win32.SaveFileDialog]::new(); $dlg.Title = 'Exporter la configuration'; $dlg.InitialDirectory = [Environment]::GetFolderPath('Desktop'); $dlg.Filter = 'Configuration Oliv_Maintenance (*.json)|*.json'; $dlg.FileName = '{0}_configuration_{1:yyyyMMdd}.json' -f $env:COMPUTERNAME, (Get-Date)
     if (-not $dlg.ShowDialog($Window)) { return }
     [IO.File]::WriteAllText($dlg.FileName, (ConvertTo-Json -InputObject $o -Depth 4), [Text.UTF8Encoding]::new($false))
     Write-UiLog ('Configuration exportée : {0} réglages, {1} applications > {2}' -f $tw.Count, $inst.Count, $dlg.FileName) 'OK'
     Add-SessionEvent 'Configuration' 'Exportation de la configuration' ('{0} réglages, {1} applications' -f $tw.Count, $inst.Count) 'ok'
     Show-Info ("Configuration exportée.`n`n{0} réglages, {1} applications du catalogue.`n`n{2}" -f $tw.Count, $inst.Count, $dlg.FileName) 'Ok'
 }
+# Importation unique (Paramètres > Exporter / Importer et Système > Restaurer une configuration) : lit le format actuel
+# (Application, Reglages, Applications, OngletsMasques, CartesMasquees) et l'ancien format de la sauvegarde de l'onglet Système
+# (Type, Values, Apps). Récapitulatif, instantané des réglages actuels, application des réglages, puis installation des
+# applications ; seules les valeurs applicables sur ce poste sont reprises.
 function Import-PcConfig {
-    $dlg = [Microsoft.Win32.OpenFileDialog]::new(); $dlg.Filter = 'Configuration Oliv_Maintenance (*.json)|*.json'
+    if ($Sync.Running) { Show-Info 'Une tâche est en cours : importer la configuration une fois terminée.'; return }
+    $dlg = [Microsoft.Win32.OpenFileDialog]::new(); $dlg.Title = 'Importer une configuration'; $dlg.Filter = 'Configuration Oliv_Maintenance (*.json)|*.json'
+    $dlg.InitialDirectory = [Environment]::GetFolderPath('Desktop')
     if (-not $dlg.ShowDialog($Window)) { return }
-    $o = Get-Content -LiteralPath $dlg.FileName -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ("$($o.Application)" -ne 'Oliv_Maintenance') { Show-Info 'Ce fichier n''est pas une configuration Oliv_Maintenance.' 'Warn'; return }
-    New-DeferredPage
-    $want = @{}; foreach ($p in @($o.Reglages.PSObject.Properties)) { $want[$p.Name] = $p.Value }
-    $chg = [Collections.Generic.List[string]]::new()
-    foreach ($r in @($TweakRows)) {
-        $id = "$($r.Tweak.Id)"; if (-not $want.ContainsKey($id) -or -not $r.Enabled) { continue }
-        $v = $want[$id]; if ("$v" -eq "$($r.Current)") { continue }
-        Set-RowDisplay $r $v; Set-Staged $r $v
-        $chg.Add('{0} : {1} > {2}' -f $r.Tweak.Label, (Format-TweakValue $r.Tweak $r.Current), (Format-TweakValue $r.Tweak $v))
-    }
+    $o = try { Get-Content -LiteralPath $dlg.FileName -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { Show-Info "Fichier illisible.`n`n$($_.Exception.Message)" 'Error'; return }
+    $new = "$($o.Application)" -eq 'Oliv_Maintenance'; $old = "$($o.Type)" -in 'Oliv_Maintenance.Configuration', 'Oliv_Maintenance.Recette'
+    if (-not $new -and -not $old) { Show-Info 'Ce fichier n''est pas une configuration Oliv_Maintenance.' 'Error'; return }
+    $vals = $(if ($new) { $o.Reglages } else { $o.Values }); if (-not $vals) { $vals = [pscustomobject]@{} }
+    $diff = @(Get-SnapshotDiff ([pscustomobject]@{ Values = $vals }))
     if (-not $AppsUI.Built) { try { New-AppsPage } catch { Write-Ignored 'Catalogue Applications' $_ } }
-    $apps = [Collections.Generic.List[string]]::new()
-    foreach ($id in @($o.Applications)) { if ($AppsUI.Tiles["$id"] -and -not ($AppsUI.Installed -and $AppsUI.Installed.Contains("$id"))) { [void]$AppsUI.Sel.Add("$id"); $apps.Add($AppsUI.Tiles["$id"].A[0]); Set-AppTileLook $AppsUI.Tiles["$id"] } }
-    Update-AppsSelection
-    foreach ($x in @($o.OngletsMasques)) { if ($x) { [void]$HiddenTabs.Add("$x") } }; Save-HiddenTab; Update-TabVisibility
-    $lines = @($chg) + $(if ($apps.Count) { @('', 'Applications à installer (Applications > Installer) :') + @($apps | ForEach-Object { '  ' + $_ }) } else { @() })
-    Write-UiLog ('Configuration importée ({0}) : {1} réglages préparés, {2} applications sélectionnées.' -f [IO.Path]::GetFileName($dlg.FileName), $chg.Count, $apps.Count) 'APP'
-    Add-SessionEvent 'Configuration' 'Importation de la configuration' ('{0} réglages, {1} applications' -f $chg.Count, $apps.Count) 'ok'
-    [void](Show-Dialog ("Configuration de {0} importée.`n`n{1} réglage(s) préparé(s) : cliquer sur Appliquer dans le bandeau du bas pour les appliquer. {2} application(s) sélectionnée(s) : Applications > Installer." -f $o.Poste, $chg.Count, $apps.Count) 'Info' $null $(if ($lines.Count) { $lines } else { @('Ce poste est déjà configuré comme le fichier.') }))
+    $todo = @(@($(if ($new) { $o.Applications } else { $o.Apps })) | Where-Object { $_ -and $AppsUI.Tiles.ContainsKey("$_") -and -not ($AppsUI.Installed -and $AppsUI.Installed.Contains("$_")) } | ForEach-Object { "$_" } | Select-Object -Unique)
+    $tabs = @(@($o.OngletsMasques) | Where-Object { $_ -and -not $HiddenTabs.Contains("$_") } | ForEach-Object { "$_" })
+    $cards = @(@($o.CartesMasquees) | Where-Object { $_ -and -not $HiddenCards.Contains("$_") } | ForEach-Object { "$_" })
+    if (-not $diff.Count -and -not $todo.Count -and -not $tabs.Count -and -not $cards.Count) { Show-Info 'Ce PC a déjà cette configuration : réglages identiques, applications présentes.' 'Ok'; return }
+    $lines = @($diff | ForEach-Object { $_.Line }) + @($todo | ForEach-Object { 'Installer : ' + $AppsUI.Tiles["$_"].A[0] }) +
+             @($tabs | ForEach-Object { 'Onglet masqué : ' + $(if ($TabLabels -and $TabLabels[$_]) { $TabLabels[$_] } else { $_ }) }) + $(if ($cards.Count) { @("Cartes masquées : $($cards.Count)") } else { @() })
+    $head = 'Importer la configuration de {0} ? {1} {2}, {3} {4} à installer :' -f $o.Poste, $diff.Count, (Get-Plural $diff.Count 'réglage modifié' 'réglages modifiés'), $todo.Count, (Get-Plural $todo.Count 'application' 'applications')
+    if (-not (Confirm-List $head $lines 'Un instantané des réglages actuels est enregistré avant (Paramètres > Restauration des réglages). Les applications s''installent ensuite, une après l''autre.' 'Importer')) { return }
+    if ($diff.Count) {
+        Save-TweakSnapshot "Avant la configuration de $($o.Poste)" @($diff | ForEach-Object { $_.Line })
+        foreach ($d in $diff) { Invoke-TweakChange $d.R $d.V }
+        Update-ApplyButton
+    }
+    if ($tabs.Count) { foreach ($x in $tabs) { [void]$HiddenTabs.Add($x) }; Save-HiddenTab; Update-TabVisibility }
+    if ($cards.Count) { foreach ($x in $cards) { [void]$HiddenCards.Add($x) }; Save-HiddenCard }
+    Write-UiLog ('Configuration de {0} importée ({1}) : {2} réglages, {3} onglets et {4} cartes masqués{5}.' -f $o.Poste, [IO.Path]::GetFileName($dlg.FileName), $diff.Count, $tabs.Count, $cards.Count, $(if ($todo.Count) { ", installation de $($todo.Count) applications" } else { '' })) 'OK'
+    Add-SessionEvent 'Configuration' 'Importation de la configuration' ('{0} réglages, {1} applications' -f $diff.Count, $todo.Count) 'ok'
+    if ($todo.Count) {
+        $AppsUI.Sel.Clear(); foreach ($i in $todo) { [void]$AppsUI.Sel.Add("$i") }
+        foreach ($x in $AppsUI.Tiles.Values) { Set-AppTileLook $x }
+        Set-AppsMode 'Inst'; Show-Page 'Apps'
+        Invoke-AppsInstall -NoConfirm
+    }
 }
 
 # En-tête de Paramètres : logo sur fond blanc, nom, version et date, état de la mise à jour, bouton de recherche

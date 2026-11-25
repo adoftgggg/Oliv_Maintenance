@@ -92,10 +92,11 @@ function Switch-CtxEntry($It) {
 }
 function Restart-Explorer {
     if (-not (Confirm-Action "Redémarrer l'Explorateur Windows ?`n`nLa barre des tâches et les fenêtres de l'Explorateur se ferment quelques secondes ; les autres programmes restent ouverts.")) { return }
-    try { Get-Process -Name explorer -ErrorAction Stop | Stop-Process -Force -ErrorAction Stop } catch { Write-Ignored 'Arrêt de l''Explorateur' $_ }
-    # relancé automatiquement par Windows en principe ; sinon lancé dans la session (lancement par l'interface de l'utilisateur)
-    $t = [Windows.Threading.DispatcherTimer]::new(); $t.Interval = [TimeSpan]::FromSeconds(3)
-    $t.Add_Tick({ param($s, $e) $s.Stop(); if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue)) { Start-Process (Join-Path $env:windir 'explorer.exe') } })
+    try { Get-Process -Name explorer -ErrorAction Stop | Where-Object { $_.SessionId -eq $UserSession } | Stop-Process -Force -ErrorAction Stop } catch { Write-Ignored 'Arrêt de l''Explorateur' $_ }
+    # relancé automatiquement par Windows (AutoRestartShell). Jamais lancé d'ici : un Explorateur démarré par l'application
+    # (administrateur) tournerait élevé, et tout programme ouvert depuis le Bureau aussi
+    $t = [Windows.Threading.DispatcherTimer]::new(); $t.Interval = [TimeSpan]::FromSeconds(6)
+    $t.Add_Tick({ param($s, $e) $s.Stop(); if (-not @(Get-Process -Name explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $UserSession }).Count) { Write-UiLog 'Explorateur non relancé automatiquement : Gestionnaire des tâches > Exécuter une nouvelle tâche > explorer.exe (sans cocher « droits administrateur »).' 'WARN' } })
     $t.Start(); Write-UiLog 'Explorateur Windows redémarré.' 'APP'
 }
 

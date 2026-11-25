@@ -667,7 +667,7 @@ function Get-DnsProvider {
 # se reconfigure ; fait dans l'interface, le retour en automatique figeait la fenêtre sans message). IPv4 et IPv6 appliqués
 # séparément : IPv6 seulement sur les cartes où il est activé, erreur IPv6 sans effet sur IPv4.
 $DnsScript = @'
-$q = $Sync.DnsReq; $r = @{ Done = @(); Warn = @() }
+$q = $Sync.DnsReq; $r = @{ Done = @(); Warn = @(); Prev = @() }
 try {
     $ad = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { "$($_.Status)" -eq 'Up' })
     if (-not $ad.Count) { throw 'aucune carte réseau active.' }
@@ -682,6 +682,8 @@ try {
     }
     foreach ($a in $ad) {
         $Sync.DnsStep = "carte $($a.Name)"
+        # serveurs d'avant notés dans le journal (DNS fixé à la main, Pi-hole, serveur interne : retrouvables pour revenir en arrière)
+        try { $old = @((Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ErrorAction Stop) | ForEach-Object { $_.ServerAddresses } | Where-Object { $_ }); $r.Prev += ('{0} : {1}' -f $a.Name, $(if ($old.Count) { $old -join ', ' } else { 'aucun' })) } catch { $null = $_ }
         $v6 = $false; try { $v6 = [bool](Get-NetAdapterBinding -Name $a.Name -ComponentID ms_tcpip6 -ErrorAction Stop).Enabled } catch { $v6 = $false }
         if ($q.Key -eq 'Auto') {
             Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ResetServerAddresses -ErrorAction Stop
@@ -700,6 +702,10 @@ $Sync.DnsRes = $r
 function Set-DnsProvider([string]$Key) {
     if ($Key -ne 'Auto' -and -not $DnsProviders.Contains($Key)) { return }
     if ($BgJobs.ContainsKey('Dns')) { throw 'changement de DNS déjà en cours.' }
+    # poste du domaine : les contrôleurs de domaine doivent rester ses serveurs DNS (sinon ouverture de session, stratégies
+    # de groupe et partages du domaine tombent en panne)
+    if ($Key -ne 'Auto') { $dom = try { [bool](Get-CimInstance Win32_ComputerSystem -Property PartOfDomain -ErrorAction Stop).PartOfDomain } catch { $false }
+        if ($dom) { throw 'poste joint à un domaine : ses serveurs DNS doivent rester ceux du domaine (DNS public refusé).' } }
     $p = $DnsProviders[$Key]
     $Sync.DnsReq = @{ Key = $Key; V4 = @($p.V4); V6 = @($p.V6); Doh = $(if ($p) { $p.Doh } else { '' }); Build = $Build }; $Sync.DnsRes = $null; $Sync.DnsStep = 'cartes réseau'
     $DnsUI.Key = $Key; $DnsUI.T0 = [DateTime]::Now
@@ -730,6 +736,7 @@ $DnsJobDone = {
     } else {
         Write-UiLog ('DNS : {0} sur {1}.' -f $(if ($key -eq 'Auto') { 'automatique (box / routeur)' } else { "$key ($($p.V4 -join ', '))" + $(if ($Build -ge 22000) { ', chiffré si possible' } else { '' }) }), (@($r.Done) -join ', ')) 'APP'
         foreach ($w in @($r.Warn)) { if ($w) { Write-UiLog "DNS : $w" 'WARN' } }
+        if (@($r.Prev).Count) { Write-UiLog ('DNS : serveurs avant le changement - ' + (@($r.Prev) -join ' ; ')) 'INFO' }
     }
     # ligne du réglage : valeur relue et état final
     if ($DnsUI.Row) { $R = $DnsUI.Row; $DnsUI.Row = $null; $now = try { Get-DnsProvider } catch { $null }; if ($r -and -not $r.Error) { Complete-TweakChange $R $key $now } else { $R.Current = $now; Set-RowDisplay $R $now; Set-Badge $R 'error' }; Update-PendingBar }
