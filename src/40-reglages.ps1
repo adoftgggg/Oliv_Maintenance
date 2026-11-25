@@ -163,7 +163,7 @@ function Complete-TweakChange($R, $Want, $Now) {
         else { $R.Pending = $null; Set-Badge $R 'ok' }
     }
     # nouvelle référence des réglages (comparaison de la prochaine ouverture, 81z-surveillance-reglages.ps1)
-    try { Save-TweakReference } catch { Write-Ignored 'Réglages de référence' $_ }
+    try { Update-TweakReference @("$($tw.Id)") } catch { Write-Ignored 'Réglages de référence' $_ }
 }
 function Invoke-TweakChange($R, $Want) {
     $tw = $R.Tweak

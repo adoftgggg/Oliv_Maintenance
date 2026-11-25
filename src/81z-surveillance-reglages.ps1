@@ -5,13 +5,30 @@
 # une mise à jour, un autre logiciel, une stratégie) est signalé par un bandeau d'activité ; si la version de Windows a changé
 # entre-temps (mise à jour de fonctionnalité), le bandeau le dit et propose de réappliquer la configuration d'avant.
 $TweakRefFile = Join-Path (Get-LogPath 'Etat') 'reglages-reference.json'
+$GameTweakIds = 'PowerPlan', 'Hags', 'MousePrecision', 'GameModeWin'
 $TweakWatch = @{ Row = $null; Diff = @(); Checked = $false }
 function Get-WinVersionTag { '{0}|{1}' -f $Build, $WinDisplayVer }
 function Save-TweakReference {
     if (-not $TweakWatch.Checked) { return }   # rien d'écrit avant la comparaison de l'ouverture (sinon les écarts seraient effacés)
     $vals = [ordered]@{}; foreach ($r in @($TweakRows)) { if ($r.Tweak -and $r.Enabled -and $null -ne $r.Current) { $vals["$($r.Tweak.Id)"] = $r.Current } }
     if (-not $vals.Count) { return }
-    try { [IO.File]::WriteAllText($TweakRefFile, (ConvertTo-Json -InputObject ([ordered]@{ Win = (Get-WinVersionTag); Display = "$WinDisplayVer"; Build = $Build; Date = [DateTime]::Now.ToString('o'); Values = $vals }) -Depth 3), [Text.UTF8Encoding]::new($false)) }
+    try { [IO.File]::WriteAllText($TweakRefFile, (ConvertTo-Json -InputObject ([ordered]@{ Win = (Get-WinVersionTag); Game = [bool](Get-GameModeOn); Display = "$WinDisplayVer"; Build = $Build; Date = [DateTime]::Now.ToString('o'); Values = $vals }) -Depth 3), [Text.UTF8Encoding]::new($false)) }
+    catch { Write-Ignored 'Réglages de référence' $_ }
+}
+# changement fait par l'application (réglage, mode jeu, restauration) : valeurs relues et reportées tout de suite dans la
+# référence, même avant la comparaison de l'ouverture (sinon la volonté de l'utilisateur était signalée comme un écart)
+function Update-TweakReference([string[]]$Ids) {
+    $ref = $null
+    if (Test-Path -LiteralPath $TweakRefFile) { try { $ref = Get-Content -LiteralPath $TweakRefFile -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $ref = $null } }
+    if (-not $ref) { if ($TweakWatch.Checked) { Save-TweakReference }; return }
+    $vals = [ordered]@{}; foreach ($p in $ref.Values.PSObject.Properties) { $vals[$p.Name] = $p.Value }
+    foreach ($id in $Ids) {
+        $tw = @($Tweaks | Where-Object { "$($_.Id)" -eq $id })[0]; if (-not $tw) { continue }
+        try { $v = Get-TweakValue $tw; if ($null -ne $v) { $vals[$id] = $v } } catch { Write-Ignored 'Réglages de référence' $_ }
+    }
+    # écart déjà signalé pour ces réglages : retiré du bandeau
+    if ($TweakWatch.Diff) { $TweakWatch.Diff = @($TweakWatch.Diff | Where-Object { "$($_.R.Tweak.Id)" -notin $Ids }); if (-not $TweakWatch.Diff.Count) { Close-TweakDriftBanner } }
+    try { [IO.File]::WriteAllText($TweakRefFile, (ConvertTo-Json -InputObject ([ordered]@{ Win = "$($ref.Win)"; Game = [bool](Get-GameModeOn); Display = "$($ref.Display)"; Build = $ref.Build; Date = [DateTime]::Now.ToString('o'); Values = $vals }) -Depth 3), [Text.UTF8Encoding]::new($false)) }
     catch { Write-Ignored 'Réglages de référence' $_ }
 }
 function Test-TweakReference {
@@ -24,6 +41,9 @@ function Test-TweakReference {
     # valeurs relues maintenant (la ligne garde la valeur de sa construction) ; seules les valeurs encore applicables sont comparées
     foreach ($r in @($TweakRows)) { if ($r.Tweak -and $r.Enabled -and -not $r.Pending) { try { $now = Get-TweakValue $r.Tweak; if ("$now" -ne "$($r.Current)") { $r.Current = $now; Set-RowDisplay $r $now } } catch { $null = $_ } } }
     $diff = Get-SnapshotDiff ([pscustomobject]@{ Values = $ref.Values })
+    # mode jeu activé ou désactivé depuis (application ou raccourcis du Bureau) : ses réglages ont changé par la volonté de
+    # l'utilisateur, jamais signalés
+    if ($null -ne $ref.Game -and [bool]$ref.Game -ne [bool](Get-GameModeOn)) { $diff = @($diff | Where-Object { "$($_.R.Tweak.Id)" -notin $GameTweakIds }) }
     $TweakWatch.Diff = $diff
     $winChanged = "$($ref.Win)" -and "$($ref.Win)" -ne (Get-WinVersionTag)
     if ($winChanged) { Write-UiLog ('Windows a été mis à jour depuis la dernière ouverture : {0} (build {1}) > {2} (build {3}).' -f $ref.Display, $ref.Build, $WinDisplayVer, $Build) 'APP' }

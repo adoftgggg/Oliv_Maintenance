@@ -114,6 +114,8 @@ function Switch-GameMode {
     foreach ($r in @($TweakRows | Where-Object { $_.Tweak -and $_.Tweak.Id -in 'PowerPlan', 'Hags', 'MousePrecision', 'GameModeWin' })) {
         try { $v = Get-TweakValue $r.Tweak; if ("$v" -ne "$($r.Current)") { Complete-TweakChange $r $v $v } } catch { Write-Ignored 'Mode jeu (lecture des réglages)' $_ }
     }
+    # référence des réglages : changements du mode jeu voulus par l'utilisateur, jamais signalés comme modifiés hors de l'application
+    try { Update-TweakReference $GameTweakIds } catch { Write-Ignored 'Réglages de référence' $_ }
     Update-PendingBar
     Update-GameCard
 }
