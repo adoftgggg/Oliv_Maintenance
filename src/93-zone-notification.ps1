@@ -31,6 +31,8 @@ function Save-TraySetting {
 }
 
 function Show-MainWindow {
+    # ShowActivated toujours vrai : faux avec une fenêtre agrandie, WPF refuse l'affichage (InvalidOperationException)
+    $Window.ShowActivated = $true
     if (-not $Window.IsVisible) { $Window.Show() }
     if ($Window.WindowState -eq 'Minimized') { $Window.WindowState = $Tray.LastState }
     $Tray.Hidden = $false
@@ -166,7 +168,7 @@ function Start-MainWindow {
     # démarrage réduit (Paramètres > Démarrage et fermeture) : fenêtre construite puis aussitôt rangée dans la zone de
     # notification (barre des tâches si l'icône est indisponible), sans bulle d'explication ; jamais au 1er lancement
     if ($Tray.StartMin -and -not $FirstRun) {
-        $Tray.Tip = $true; $Window.ShowActivated = $false; $Window.Show()
+        $Tray.Tip = $true; $Window.Show()
         [void]$Window.Dispatcher.BeginInvoke([Action]{ try { Hide-MainWindow } catch { Write-Ignored 'Démarrage réduit' $_ } }, [Windows.Threading.DispatcherPriority]::Loaded)
     } else { $Window.Show() }
     if ($FirstRun) { [void]$Window.Dispatcher.BeginInvoke([Action]{ try { Show-FirstRun } catch { Write-Ignored 'Premier lancement' $_ } }, [Windows.Threading.DispatcherPriority]::ApplicationIdle) }

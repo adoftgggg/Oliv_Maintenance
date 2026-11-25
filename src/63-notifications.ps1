@@ -23,7 +23,7 @@ function Initialize-AppNotifier {
         $mo = $cm.Items.Add('Ouvrir Oliv_Maintenance'); $mo.Font = [System.Drawing.Font]::new($mo.Font, [System.Drawing.FontStyle]::Bold)
         $mo.Add_Click({ try { Show-MainWindow } catch { Write-Ignored 'Ouverture de la fenêtre' $_ } })
         [void]$cm.Items.Add([System.Windows.Forms.ToolStripSeparator]::new())
-        $mq = $cm.Items.Add('Quitter'); $mq.Add_Click({ Exit-FromTray })
+        $mq = $cm.Items.Add('Quitter'); $mq.Add_Click({ try { Exit-FromTray } catch { Write-Ignored 'Quitter depuis la zone de notification' $_; try { $Tray.Quit = $true; $Window.Close() } catch { [Environment]::Exit(0) } } })
         $ni.ContextMenuStrip = $cm
         $ni.Visible = $true
         $script:Notif = $ni
