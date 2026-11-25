@@ -5,7 +5,7 @@
 $CardPages = [ordered]@{ Info = 'Accueil'; Maint = 'Maintenance'; Perf = 'Système'; Secu = 'Sécurité'; Perso = 'Personnalisation'; Tools = 'Outils' }
 $CardRegKey = 'HKCU\Software\Oliv_Maintenance\Affichage'
 $HiddenCards = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-try { foreach ($x in @(Get-RegValue $CardRegKey 'CartesMasquees')) { if ($x) { [void]$HiddenCards.Add("$x") } } } catch { Write-Ignored 'Cartes masquées' $_ }
+try { foreach ($x in @((Get-RegValue $CardRegKey 'CartesMasquees'))) { if ($x) { [void]$HiddenCards.Add("$x") } } } catch { Write-Ignored 'Cartes masquées' $_ }
 $CardState = @{}
 function Save-HiddenCard {
     try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue('CartesMasquees', [string[]]@($HiddenCards), [Microsoft.Win32.RegistryValueKind]::MultiString) } finally { $k.Close() } }
@@ -194,7 +194,7 @@ function Save-CardOrigin([string]$Page) {
 }
 function Restore-CardOrder([string]$Page) {
     Save-CardOrigin $Page
-    $saved = @(Get-RegValue $CardRegKey "CartesOrdre_$Page" | Where-Object { $_ }); if (-not $saved.Count) { return }
+    $saved = @((Get-RegValue $CardRegKey "CartesOrdre_$Page") | Where-Object { $_ }); if (-not $saved.Count) { return }
     $cards = @(Get-AllPageCard $Page); if (-not $cards.Count) { return }
     $sig = ($cards | ForEach-Object { [Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($_.El) }) -join ','
     if ($CardMove.Applied[$Page] -eq $sig) { return }
@@ -332,7 +332,7 @@ function Update-CardCount { if ($SetUI.CardsCount) { $SetUI.CardsCount.Text = $(
 # conservés d'une version à l'autre. Accueil et Paramètres toujours accessibles ; onglet affiché masqué = retour à l'Accueil.
 $TabLabels = [ordered]@{ Maint = 'Maintenance'; Perf = 'Performances'; Secu = 'Sécurité'; Perso = 'Personnalisation'; Apps = 'Applications'; Svc = 'Services et tâches'; Tools = 'Outils'; Log = 'Journal' }
 $HiddenTabs = [Collections.Generic.HashSet[string]]::new()
-try { foreach ($x in @(Get-RegValue $CardRegKey 'OngletsMasques')) { if ($x) { [void]$HiddenTabs.Add("$x") } } } catch { Write-Ignored 'Onglets masqués' $_ }
+try { foreach ($x in @((Get-RegValue $CardRegKey 'OngletsMasques'))) { if ($x) { [void]$HiddenTabs.Add("$x") } } } catch { Write-Ignored 'Onglets masqués' $_ }
 function Save-HiddenTab {
     try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue('OngletsMasques', [string[]]@($HiddenTabs), [Microsoft.Win32.RegistryValueKind]::MultiString) } finally { $k.Close() } }
     catch { Write-Ignored 'Enregistrement des onglets masqués' $_ }

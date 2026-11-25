@@ -214,7 +214,12 @@ $SoftExclFile = Join-Path (Get-LogPath 'Etat') 'logiciels-exclus.json'
 $SoftExcl = @{}
 try {
     if (Test-Path -LiteralPath $SoftExclFile) {
-        foreach ($k in @(Get-Content -LiteralPath $SoftExclFile -Raw -Encoding UTF8 | ConvertFrom-Json)) { $SoftExcl["$k"] = $true }
+        # parenthèses : sous Windows PowerShell 5.1, ConvertFrom-Json renvoie le tableau en un seul objet ; sans elles, dès 2
+        # logiciels exclus, une seule clé « A B » était lue et plus aucune exclusion ne s'appliquait au lancement suivant.
+        # Clés ainsi fusionnées enregistrées par les versions précédentes : séparées de nouveau (« source|id »)
+        foreach ($k in @((Get-Content -LiteralPath $SoftExclFile -Raw -Encoding UTF8 | ConvertFrom-Json))) {
+            foreach ($x in @("$k" -split '\s+(?=[^\s|]+\|)')) { if ($x) { $SoftExcl[$x] = $true } }
+        }
     }
 } catch {
     Write-Ignored 'Lecture des logiciels exclus' $_

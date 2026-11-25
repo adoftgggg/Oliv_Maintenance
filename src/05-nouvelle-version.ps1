@@ -6,11 +6,14 @@
 # Placé après l'instance unique (03-contexte) : une 2e ouverture ne vide jamais le dossier d'une instance en cours.
 $VersionFile = Join-Path (Get-LogPath 'Etat') 'version.txt'
 $UpgradeNote = $null
+$FirstRun = $false
 try {
     $prev = $(if (Test-Path -LiteralPath $VersionFile) { [IO.File]::ReadAllText($VersionFile).Trim() } else { '' })
     $used = $prev -or @(Get-ChildItem -LiteralPath $LogDir -Recurse -File -Force -ErrorAction SilentlyContinue | Select-Object -First 1).Count -gt 0
     # suivi absent alors que le dossier contient des fichiers : plus d'effacement (il supprimait aussi la copie d'origine du
     # fichier hosts, la liste des services désactivés et les sauvegardes de stratégie dès que version.txt manquait)
+    # 1er lancement sur ce poste (aucun fichier de l'application) : choix du raccourci et du mode de démarrage (93)
+    $FirstRun = -not $prev -and -not $used
     if (-not $prev -and $used) { $UpgradeNote = "Suivi de version recréé ($AppVersion) : paramètres, historique et sauvegardes conservés." }
     elseif ($prev -and $prev -ne $AppVersion) { $UpgradeNote = 'Mise à jour {0} > {1} : paramètres, historique et résultats mémorisés conservés.' -f $prev, $AppVersion }
     [IO.File]::WriteAllText($VersionFile, $AppVersion)

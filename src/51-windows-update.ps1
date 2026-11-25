@@ -245,7 +245,7 @@ function Get-RebootState([switch]$Force) {
     # PendingFileRenameOperations : paires (source, destination) ; destination vide = simple suppression de fichier temporaire
     # au démarrage (restes d'installation Windows Installer *.rbf dans Config.Msi, fichiers temporaires), sans redémarrage
     # nécessaire : seules les substitutions de fichiers (destination renseignée) comptent, avec le programme concerné
-    $pfr = @(Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager' 'PendingFileRenameOperations')
+    $pfr = @((Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager' 'PendingFileRenameOperations'))
     $rep = [Collections.Generic.List[string]]::new()
     for ($i = 0; $i + 1 -lt $pfr.Count; $i += 2) {
         $dst = "$($pfr[$i + 1])" -replace '^!', '' -replace '^\\\?\?\\', ''
@@ -266,7 +266,7 @@ function Get-RebootState([switch]$Force) {
             try { $o = [uint32]0; $r = [uint32]0; if (-not $h.IsInvalid -and [_OlivM.VolDirty]::DeviceIoControl($h, 0x90078, [IntPtr]::Zero, 0, [ref]$o, 4, [ref]$r, [IntPtr]::Zero) -and ($o -band 1)) { $chk.Add($l) } } finally { $h.Dispose() }
         } catch { Write-Ignored "Bit dirty de $l" $_ }
     }
-    foreach ($b in @(Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager' 'BootExecute')) {
+    foreach ($b in @((Get-RegValue 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager' 'BootExecute'))) {
         if ("$b" -match '(?i)autochk' -and "$b".Trim() -notmatch '(?i)^autocheck\s+autochk\s+\*$' -and "$b" -match '([A-Za-z]:)') { if (-not $chk.Contains($Matches[1].ToUpper())) { $chk.Add($Matches[1].ToUpper()) } }
     }
     if ($chk.Count) { $why.Add('vérification du disque (chkdsk) sur ' + ($chk -join ', ')) }

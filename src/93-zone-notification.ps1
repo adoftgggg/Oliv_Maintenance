@@ -6,7 +6,7 @@
 #                             dans Paramètres > Démarrage
 # Fenêtre masquée par Hide() : boucle de messages Dispatcher.Run (99-demarrage), pas ShowDialog.
 $TrayKey = 'HKCU\Software\Oliv_Maintenance\Maintenance'
-$Tray = @{ Min = $false; Close = $false; CloseSet = $false; Quit = $false; Hidden = $false; Tip = $false; LastState = 'Normal' }
+$Tray = @{ StartMin = $false; Min = $false; Close = $false; CloseSet = $false; Quit = $false; Hidden = $false; Tip = $false; LastState = 'Normal' }
 $AutoTaskName = 'Maintenance - ouverture de session ' + ($(if ($HkuSidOk) { $UserName } else { [Security.Principal.WindowsIdentity]::GetCurrent().Name }) -replace '[\\/:*?"<>|]', '_')
 
 function Read-TraySetting {
@@ -14,6 +14,7 @@ function Read-TraySetting {
     if (-not $k) { return }
     try {
         $Tray.Min = [int]$k.GetValue('ReduireZoneNotification', 0) -eq 1
+        $Tray.StartMin = [int]$k.GetValue('DemarrageReduit', 0) -eq 1
         $c = $k.GetValue('FermerReduit', $null)
         $Tray.CloseSet = $null -ne $c; $Tray.Close = $Tray.CloseSet -and [int]$c -eq 1
     } finally { $k.Close() }
@@ -22,6 +23,7 @@ function Save-TraySetting {
     $k = Open-RegKey $TrayKey $true $true
     try {
         $k.SetValue('ReduireZoneNotification', [int]$Tray.Min, [Microsoft.Win32.RegistryValueKind]::DWord)
+        $k.SetValue('DemarrageReduit', [int]$Tray.StartMin, [Microsoft.Win32.RegistryValueKind]::DWord)
         if ($Tray.CloseSet) { $k.SetValue('FermerReduit', [int]$Tray.Close, [Microsoft.Win32.RegistryValueKind]::DWord) }
     } finally { $k.Close() }
     # icône présente dès qu'un des deux réglages est actif (sinon seulement pour les notifications de fin de tâche)
@@ -106,6 +108,43 @@ function Update-AutoStart {
     $t = Get-AutoStartTask; if (-not $t) { return }
     try { $p = "$(@($t.Definition.Actions)[0].Path)"; if ($ok -and $p -ne $StableExe) { Set-AutoStart $true; Write-UiLog 'Lancement à l''ouverture de session : tâche mise à jour.' 'APP' } } catch { Write-Ignored 'Lancement à l''ouverture de session' $_ }
 }
+# Bureau de l'utilisateur ciblé (dossier redirigé vers OneDrive pris en compte)
+function Get-UserDesktop {
+    $dk = "$(Get-RegValue 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' 'Desktop')"
+    [Environment]::ExpandEnvironmentVariables($(if ($dk) { $dk -replace '(?i)%USERPROFILE%', $UserProfilePath } else { Join-Path $UserProfilePath 'Desktop' }))
+}
+function New-DesktopShortcut {
+    if (-not (Sync-StableExe)) { throw 'exe de l''application introuvable (lancement par le fichier .cmd : utiliser l''exe)' }
+    $f = Join-Path (Get-UserDesktop) 'Oliv_Maintenance.lnk'
+    $ws = New-Object -ComObject WScript.Shell; $l = $ws.CreateShortcut($f)
+    $l.TargetPath = $StableExe; $l.WorkingDirectory = Split-Path $StableExe; $l.IconLocation = "$StableExe,0"; $l.Description = 'Oliv_Maintenance : maintenance et réglages de Windows'; $l.Save()
+    [void][Runtime.InteropServices.Marshal]::ReleaseComObject($ws)
+    if (-not (Test-Path -LiteralPath $f)) { throw "raccourci non créé ($f)" }
+    $f
+}
+# 1er lancement sur ce poste : raccourci sur le Bureau et mode de démarrage, modifiables ensuite dans Paramètres >
+# Démarrage et fermeture
+function Show-FirstRun {
+    $sp = [Windows.Controls.StackPanel]::new()
+    $cb = [Windows.Controls.CheckBox]::new(); $cb.Content = 'Créer un raccourci Oliv_Maintenance sur le Bureau'; $cb.IsChecked = $true; $cb.Margin = New-Thickness 0 0 0 12
+    $cb.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, 'FgBrush'); [void]$sp.Children.Add($cb)
+    $t = New-Text 'Au lancement de l''application :'; $t.Margin = New-Thickness 0 0 0 4; [void]$sp.Children.Add($t)
+    $r1 = [Windows.Controls.RadioButton]::new(); $r1.Content = 'Fenêtre affichée'; $r1.GroupName = 'FrStart'; $r1.IsChecked = $true; $r1.Margin = New-Thickness 0 2 0 2
+    $r2 = [Windows.Controls.RadioButton]::new(); $r2.Content = 'Réduite dans la zone de notification (près de l''horloge)'; $r2.GroupName = 'FrStart'; $r2.Margin = New-Thickness 0 2 0 2
+    foreach ($r in $r1, $r2) { $r.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, 'FgBrush'); [void]$sp.Children.Add($r) }
+    $v = Show-Dialog "Bienvenue dans Oliv_Maintenance`n`nDeux choix avant de commencer, modifiables à tout moment dans Paramètres > Démarrage et fermeture." 'Question' @(@{ T = 'Valider'; V = 'ok'; S = 'PrimaryBtn'; D = $true }) $null $null 560 $sp
+    if ($sp.Parent) { $sp.Parent.Content = $null }
+    if ($v -ne 'ok') { return }
+    $msg = @()
+    if ($cb.IsChecked) {
+        try { $f = New-DesktopShortcut; Write-UiLog "Raccourci créé sur le Bureau : $f." 'OK'; $msg += 'raccourci créé sur le Bureau' }
+        catch { Write-UiLog "Raccourci sur le Bureau : $($_.Exception.Message)" 'ERROR'; Show-Info "Raccourci sur le Bureau impossible.`n`n$($_.Exception.Message)" 'Error' }
+    }
+    $Tray.StartMin = [bool]$r2.IsChecked
+    try { Save-TraySetting; $msg += $(if ($Tray.StartMin) { 'démarrage réduit dans la zone de notification' } else { 'démarrage en fenêtre affichée' }) } catch { Write-UiLog "Mode de démarrage : $($_.Exception.Message)" 'ERROR' }
+    foreach ($b in @($SetUI.StartMin)) { if ($b) { $b.Tag = $(if (($b.DataContext -eq 'Tray') -eq $Tray.StartMin) { 'on' } else { '' }) } }
+    if ($msg.Count) { Write-UiLog ('Premier lancement : {0}.' -f ($msg -join ', ')) 'APP'; Show-Toast (($msg -join ', ').Substring(0, 1).ToUpper() + ($msg -join ', ').Substring(1)) }
+}
 function New-StartMenuShortcut {
     if (-not (Sync-StableExe)) { throw 'exe de l''application introuvable (lancement par le fichier .cmd : utiliser l''exe)' }
     [void][IO.Directory]::CreateDirectory((Split-Path $StartLnk))
@@ -123,7 +162,13 @@ function Request-TaskbarPin {
 
 function Start-MainWindow {
     try { Read-TraySetting } catch { Write-Ignored 'Réglages de la zone de notification' $_ }
-    if ($Tray.Min -or $Tray.Close) { [void](Initialize-AppNotifier) }
-    $Window.Show()
+    if ($Tray.Min -or $Tray.Close -or $Tray.StartMin) { [void](Initialize-AppNotifier) }
+    # démarrage réduit (Paramètres > Démarrage et fermeture) : fenêtre construite puis aussitôt rangée dans la zone de
+    # notification (barre des tâches si l'icône est indisponible), sans bulle d'explication ; jamais au 1er lancement
+    if ($Tray.StartMin -and -not $FirstRun) {
+        $Tray.Tip = $true; $Window.ShowActivated = $false; $Window.Show()
+        [void]$Window.Dispatcher.BeginInvoke([Action]{ try { Hide-MainWindow } catch { Write-Ignored 'Démarrage réduit' $_ } }, [Windows.Threading.DispatcherPriority]::Loaded)
+    } else { $Window.Show() }
+    if ($FirstRun) { [void]$Window.Dispatcher.BeginInvoke([Action]{ try { Show-FirstRun } catch { Write-Ignored 'Premier lancement' $_ } }, [Windows.Threading.DispatcherPriority]::ApplicationIdle) }
     [void]$Window.Dispatcher.BeginInvoke([Action]{ try { Update-AutoStart } catch { Write-Ignored 'Lancement à l''ouverture de session' $_ } }, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
 }

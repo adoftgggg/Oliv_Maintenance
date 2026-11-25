@@ -13,6 +13,8 @@ function Get-RegValue([string]$Path, [string]$Name) {
     $k = Open-RegKey $Path
     if (-not $k) { return $null }
     try { $v = $k.GetValue($Name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } finally { $k.Close() }
+    # tableau (REG_MULTI_SZ) renvoyé tel quel : appeler avec @((Get-RegValue ...)) ou passer par une variable, @(Get-RegValue ...)
+    # donnerait un tableau dans un tableau
     if ($v -is [array]) { return ,$v }
     $v
 }

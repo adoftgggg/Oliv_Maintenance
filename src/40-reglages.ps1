@@ -437,7 +437,9 @@ function Read-PendingStore {
     $h = @{}
     if (Test-Path -LiteralPath $PendingFile) {
         try {
-            foreach ($o in @(Get-Content -LiteralPath $PendingFile -Raw -Encoding UTF8 | ConvertFrom-Json)) { if ($o.Key) { $h[$o.Key] = $o } }
+            # parenthèses : sous Windows PowerShell 5.1, ConvertFrom-Json renvoie le tableau en un seul objet (sinon une seule
+            # entrée, le tableau entier, et les modifications en attente de redémarrage étaient perdues dès 2 entrées)
+            foreach ($o in @((Get-Content -LiteralPath $PendingFile -Raw -Encoding UTF8 | ConvertFrom-Json))) { if ($o.Key) { $h[$o.Key] = $o } }
         } catch {
             Write-Ignored 'Lecture des réglages en attente' $_
         }

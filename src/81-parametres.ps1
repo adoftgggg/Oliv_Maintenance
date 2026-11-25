@@ -133,6 +133,13 @@ function New-SettingsPage {
         foreach ($b in $SetUI.TrayClose) { $b.Tag = $(if ($b.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
         Write-UiLog $(if ($Tray.Close) { 'Bouton Fermer : réduit dans la zone de notification.' } else { 'Bouton Fermer : ferme l''application.' }) 'APP'
     }
+    $SetUI.StartMin = Add-SettingsChoice $c.Body 'Au lancement' 'Fenêtre affichée, ou application réduite dans la zone de notification (près de l''horloge) : clic sur l''icône pour l''afficher.' ([ordered]@{ Window = 'Fenêtre affichée'; Tray = 'Réduite' }) $(if ($Tray.StartMin) { 'Tray' } else { 'Window' }) {
+        param($s, $e)
+        $Tray.StartMin = "$($s.DataContext)" -eq 'Tray'
+        try { Save-TraySetting } catch { Write-UiLog "Au lancement : $($_.Exception.Message)" 'ERROR'; return }
+        foreach ($b in $SetUI.StartMin) { $b.Tag = $(if ($b.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
+        Write-UiLog $(if ($Tray.StartMin) { 'Au lancement : réduite dans la zone de notification.' } else { 'Au lancement : fenêtre affichée.' }) 'APP'
+    }
     $SetUI.AutoStart = Add-SettingsChoice $c.Body 'Ouverture de session' ('Ouvre Oliv_Maintenance à l''ouverture de session de ' + ("$UserName" -split '\\')[-1] + ', sans demande d''autorisation (tâche planifiée aux droits administrateur).') ([ordered]@{ Off = 'Désactivée'; On = 'Activée' }) $(if (Get-AutoStartTask) { 'On' } else { 'Off' }) {
         param($s, $e)
         $on = "$($s.DataContext)" -eq 'On'
@@ -142,9 +149,11 @@ function New-SettingsPage {
     }
     $lb = [Windows.Controls.WrapPanel]::new(); $lb.Margin = New-Thickness 46 0 10 14
     $b1 = New-Button 'Épingler à la barre des tâches...'; $b1.Height = 30; $b1.Margin = New-Thickness 0 0 8 4; $b1.Add_Click({ Request-TaskbarPin })
+    $b3 = New-Button 'Raccourci sur le Bureau'; $b3.Height = 30; $b3.Margin = New-Thickness 0 0 8 4
+    $b3.Add_Click({ try { $f = New-DesktopShortcut; Write-UiLog "Raccourci créé sur le Bureau : $f." 'OK'; Show-Toast 'Raccourci créé sur le Bureau' } catch { Write-UiLog "Raccourci sur le Bureau : $($_.Exception.Message)" 'ERROR'; Show-Info "Raccourci impossible.`n`n$($_.Exception.Message)" 'Error' } })
     $b2 = New-Button 'Raccourci dans le menu Démarrer'; $b2.Height = 30; $b2.Margin = New-Thickness 0 0 8 4
     $b2.Add_Click({ try { New-StartMenuShortcut; Write-UiLog "Raccourci du menu Démarrer créé : $StartLnk." 'OK'; Show-Info 'Raccourci Oliv_Maintenance ajouté au menu Démarrer (Toutes les applications).' 'Ok' } catch { Show-Info "Raccourci impossible.`n`n$($_.Exception.Message)" 'Error' } })
-    [void]$lb.Children.Add($b1); [void]$lb.Children.Add($b2); [void]$c.Body.Children.Add($lb)
+    [void]$lb.Children.Add($b1); [void]$lb.Children.Add($b3); [void]$lb.Children.Add($b2); [void]$c.Body.Children.Add($lb)
     & $setCell $c 0 2
 
     # Configuration du poste : exportation / importation (préparer un autre PC à l'identique)

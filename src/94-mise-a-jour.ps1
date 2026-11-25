@@ -47,8 +47,8 @@ try {
         $h = @{ 'User-Agent' = 'Oliv_Maintenance'; 'Accept' = 'application/vnd.github+json' }
         $j = Invoke-RestMethod -Uri ('https://api.github.com/repos/{0}/releases/latest' -f $p.Repo) -Headers $h -TimeoutSec 12 -UseBasicParsing -ErrorAction Stop
         $v = "$($j.tag_name)" -replace '^[vV]', ''; $name = "Oliv_Maintenance_$v.exe"
-        if ($name -eq (Split-Path -Leaf $p.Dest)) { throw }
-        $p.Url = 'https://raw.githubusercontent.com/{0}/binaires/{1}' -f $p.Repo, $name; $p.Dest = Join-Path (Split-Path -Parent $p.Dest) $name; $p.Tag = "$($j.tag_name)"
+        if ($p.Url -like "*/$name") { throw }
+        $p.Url = 'https://raw.githubusercontent.com/{0}/binaires/{1}' -f $p.Repo, $name; $p.Tag = "$($j.tag_name)"
         $p.Size = $null; $p.Digest = $null
         if ("$($j.body)" -match '(?i)SHA-?256\W+([0-9a-f]{64})') { $p.Digest = 'sha256:' + $Matches[1].ToLower() }
         if ("$($j.body)" -match '(?i)taille\W+(\d+)\s*octets') { $p.Size = [long]$Matches[1] }
@@ -113,7 +113,9 @@ function Start-UpdInstall {
     if ($Sync.Running) { Show-Info 'Une tâche est en cours. Mettre à jour une fois terminée.'; return }
     $exe = "$env:_OLIVM_EXE"
     $dir = $(if ($exe -and (Test-Path -LiteralPath $exe)) { Split-Path -Parent $exe } else { Join-Path $UserProfilePath 'Downloads' })
-    $Sync.UpdDl = [hashtable]::Synchronized(@{ Url = $r.Url; Size = $r.Size; Digest = $r.Digest; Dest = (Join-Path $dir $r.Name); Old = $exe; Repo = $UpdRepo })
+    # nom fixe sur le poste (Oliv_Maintenance.exe), sans numéro de version : version et logo portés par le fichier lui-même.
+    # Téléchargé à côté (.new), substitué après la fermeture (l'exe en cours ne peut pas être remplacé)
+    $Sync.UpdDl = [hashtable]::Synchronized(@{ Url = $r.Url; Size = $r.Size; Digest = $r.Digest; Dest = (Join-Path $dir 'Oliv_Maintenance.exe.new'); Target = (Join-Path $dir 'Oliv_Maintenance.exe'); Old = $exe; Repo = $UpdRepo })
     $Sync.UpdDlState = [hashtable]::Synchronized(@{ Pct = 0; Ok = $false; Msg = ''; Hash = $false })
     $Ui.UpdGo.IsEnabled = $false; $Ui.UpdProg.Value = 0; $Ui.UpdProg.Visibility = 'Visible'; $Ui.UpdText.Text = 'Téléchargement de la version {0}...' -f (Get-UpdVersion $r.Tag)
     Write-UiLog ('Mise à jour : téléchargement de {0}.' -f $r.Url) 'APP'
@@ -130,16 +132,33 @@ $BgJobDone['UpdDl'] = {
         Show-UpdBar; return
     }
     if ($st.Retarget) { Write-UiLog ('Mise à jour : la version annoncée a été remplacée sur le dépôt, version {0} téléchargée à la place.' -f $st.Retarget) 'APP' }
-    Write-UiLog ('Mise à jour téléchargée : {0}{1}.' -f $p.Dest, $(if ($st.Hash) { ' (empreinte SHA-256 vérifiée)' } else { ' (empreinte non publiée : taille vérifiée)' })) 'OK'
-    # lancé par l'exe : relance sur la nouvelle version, ancien exe supprimé après la fermeture ; sinon dossier ouvert
-    if (-not $p.Old) { Start-Process explorer.exe -ArgumentList ('/select,"{0}"' -f $p.Dest); $Ui.UpdBar.Visibility = 'Collapsed'; return }
+    Write-UiLog ('Mise à jour téléchargée : {0}{1}.' -f $p.Target, $(if ($st.Hash) { ' (empreinte SHA-256 vérifiée)' } else { ' (empreinte non publiée : taille vérifiée)' })) 'OK'
+    # lancé par l'exe : remplacé par la nouvelle version sous le nom Oliv_Maintenance.exe puis relancé ; sinon fichier
+    # renommé et dossier ouvert
+    if (-not $p.Old) {
+        try { Move-Item -LiteralPath $p.Dest -Destination $p.Target -Force -ErrorAction Stop } catch { Write-UiLog "Mise à jour : renommage impossible ($($_.Exception.Message))." 'WARN'; $p.Target = $p.Dest }
+        Start-Process explorer.exe -ArgumentList ('/select,"{0}"' -f $p.Target); $Ui.UpdBar.Visibility = 'Collapsed'; return
+    }
     if (-not (Confirm-Action "Mise à jour prête.`n`nL'application se ferme puis s'ouvre dans sa nouvelle version (quelques secondes).")) { $Ui.UpdBar.Visibility = 'Collapsed'; return }
-    $same = [string]::Equals($p.Old, $p.Dest, [StringComparison]::OrdinalIgnoreCase)
     $stable = [string]::Equals($p.Old, $StableExe, [StringComparison]::OrdinalIgnoreCase)
-    # lancé par l'exe stable (raccourci, ouverture de session) : nouvelle version copiée à sa place, raccourcis inchangés
-    $cmd = $(if ($stable) { 'timeout /t 3 /nobreak >nul & copy /y "{0}" "{1}" >nul & del /f /q "{0}" & start "" "{1}"' -f $p.Dest, $StableExe }
-        else { 'timeout /t 3 /nobreak >nul' + $(if (-not $same) { ' & del /f /q "{0}"' -f $p.Old } else { '' }) + (' & start "" "{0}"' -f $p.Dest) })
-    Start-Process -FilePath (Join-Path $env:windir 'System32\cmd.exe') -ArgumentList @('/c', $cmd) -WindowStyle Hidden
+    # lancé par l'exe stable (raccourci, ouverture de session) : copie à jour aussi dans le dossier d'origine du téléchargement
+    # et exe stable remplacé, raccourcis inchangés ; sinon ancien exe (Oliv_Maintenance_1.x.y.exe) supprimé, nouveau sous
+    # le nom fixe. Substitution répétée jusqu'à 30 s (exe encore verrouillé le temps de la fermeture)
+    $q = { param($s) "'" + ($s -replace "'", "''") + "'" }
+    $ps = "`$n = $(& $q $p.Dest); `$t = $(& $q $p.Target); `$o = $(& $q $p.Old); `$s = $(& $q $StableExe); `$st = `$$stable" + @'
+
+for ($i = 0; $i -lt 60; $i++) {
+    try {
+        if ($st) { Copy-Item -LiteralPath $n -Destination $s -Force -ErrorAction Stop }
+        Move-Item -LiteralPath $n -Destination $t -Force -ErrorAction Stop
+        if (-not $st -and $o -ne $t -and (Test-Path -LiteralPath $o)) { Remove-Item -LiteralPath $o -Force -ErrorAction SilentlyContinue }
+        break
+    } catch { Start-Sleep -Milliseconds 500 }
+}
+Start-Process -FilePath $(if ($st) { $s } elseif (Test-Path -LiteralPath $t) { $t } else { $o })
+'@
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($ps))
+    Start-Process -FilePath (Join-Path $env:windir 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) -WindowStyle Hidden
     Write-UiLog 'Fermeture pour mise à jour.' 'APP'
     $Tray.Quit = $true; $Window.Close()
 }

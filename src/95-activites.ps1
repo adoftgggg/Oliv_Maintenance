@@ -92,7 +92,9 @@ function Watch-UiFreeze {
     $now = [DateTime]::Now; $f = $Sync.UiFreeze
     if ($f) {
         $Sync.UiFreeze = $null; $d = ($now - $f.Start).TotalSeconds
-        if ($d -gt 2) { Write-UiLog ('Interface bloquée {0:N1} s (étape : {1}).' -f $d, $(if ($f.Step) { $f.Step } else { 'action de l''utilisateur' })) $(if ($d -gt 10) { 'ERROR' } else { 'WARN' }) }
+        # blocages de l'interface : plus signalés (ni journal ni bandeau), demande de l'utilisateur ; mesure conservée pour la
+        # surveillance (Sync.UiFreezeLast)
+        $Sync.UiFreezeLast = @{ S = $d; Step = "$($f.Step)"; At = $now }
     }
     $Sync.UiPing = $now
 }
