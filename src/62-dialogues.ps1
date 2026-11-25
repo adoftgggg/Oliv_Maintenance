@@ -176,48 +176,4 @@ function Show-Info([string]$Message, [string]$Kind = 'Info') { [void](Show-Dialo
 function Confirm-List([string]$Head, [string[]]$Lines, [string]$Foot, [string]$YesText = 'Oui', [string]$YesStyle = 'WarnBtn') {
     (Show-Dialog $Head 'Warn' @(@{ T = 'Non'; V = $false; D = $true; C = $true }, @{ T = $YesText; V = $true; S = $YesStyle }) $Lines $Foot) -eq $true
 }
-function Request-AdminAuth([string]$Purpose) {
-    $x = [xml]@'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Authentification administrateur" Width="440" SizeToContent="Height" WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
-        ShowInTaskbar="False" Background="{DynamicResource BgBrush}" Foreground="{DynamicResource FgBrush}" FontFamily="Segoe UI" FontSize="13">
-  <StackPanel Margin="22,20,22,18">
-    <TextBlock x:Name="Head" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"/>
-    <TextBlock Text="Identifiants d'un compte administrateur de ce poste." Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,14" TextWrapping="Wrap"/>
-    <TextBlock TextWrapping="Wrap" Text="Compte"/>
-    <TextBlock Text="DOMAINE\utilisateur, utilisateur@domaine ou compte local" Foreground="{DynamicResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,1,0,0"/>
-    <TextBox x:Name="User" Margin="0,4,0,10" Padding="6,5" Background="{DynamicResource PanelBrush}" Foreground="{DynamicResource FgBrush}" BorderBrush="{DynamicResource LineBrush}" CaretBrush="{DynamicResource FgBrush}"/>
-    <TextBlock TextWrapping="Wrap" Text="Mot de passe"/>
-    <PasswordBox x:Name="Pass" Margin="0,4,0,4" Padding="6,5" Background="{DynamicResource PanelBrush}" Foreground="{DynamicResource FgBrush}" BorderBrush="{DynamicResource LineBrush}" CaretBrush="{DynamicResource FgBrush}"/>
-    <TextBlock x:Name="Err" Foreground="{DynamicResource ErrFgBrush}" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,6,0,0"/>
-    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-      <Button x:Name="Ok" Content="Valider" Style="{DynamicResource ActionBtn}" Margin="0,0,8,0" IsDefault="True"/>
-      <Button x:Name="Cancel" Content="Annuler" Style="{DynamicResource PrimaryBtn}" Margin="0" IsCancel="True"/>
-    </StackPanel>
-  </StackPanel>
-</Window>
-'@
-    $dlg = [Windows.Markup.XamlReader]::Load([System.Xml.XmlNodeReader]::new($x))
-    $dlg.Resources.MergedDictionaries.Add($Window.Resources)
-    $dlg.Owner = $Window
-    if ($AppIcon) { $dlg.Icon = $AppIcon }; Add-WindowAnim $dlg -NoClose
-    $d = @{ User = $dlg.FindName('User'); Pass = $dlg.FindName('Pass'); Err = $dlg.FindName('Err'); Ok = $dlg.FindName('Ok'); Win = $dlg; Account = $null; Tries = 0 }
-    $dlg.FindName('Head').Text = $Purpose
-    $d.User.Text = "$env:USERDOMAIN\$env:USERNAME"
-    $d.Ok.Tag = $d
-    $d.Ok.Add_Click({
-        param($s, $e)
-        $d = $s.Tag
-        $r = Test-AdminCredential $d.User.Text $d.Pass.Password
-        $d.Pass.Clear()
-        if ($r.Ok) { $d.Account = $r.Account; $d.Win.DialogResult = $true; return }
-        $d.Tries++
-        Write-UiLog ('Authentification administrateur refusée pour {0} : {1}' -f $d.User.Text, $r.Msg) 'WARN'
-        $d.Err.Text = $r.Msg; $d.Err.Visibility = 'Visible'
-        if ($d.Tries -ge 3) { $d.Win.DialogResult = $false }
-    })
-    $dlg.Add_ContentRendered({ param($s, $e) $s.FindName('Pass').Focus() })
-    if ($dlg.ShowDialog()) { return $d.Account }
-    $null
-}
 

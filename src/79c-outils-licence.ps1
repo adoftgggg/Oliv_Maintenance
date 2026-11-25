@@ -64,21 +64,10 @@ function Get-LicChannel([string]$Desc) {
     $(switch -Regex ($Desc) { 'RETAIL' { 'Retail (clé achetée séparément)' } 'OEM' { 'OEM (livrée avec le PC)' } 'VOLUME_KMSCLIENT' { 'Volume KMS (serveur d''entreprise)' } 'VOLUME_MAK' { 'Volume MAK (entreprise)' } default { $Desc } })
 }
 # Licence Windows : une ligne d'état (activation, édition, type de licence), puis les clés sur des lignes alignées
-# (valeur masquée, boutons Afficher et Copier, même présentation que la clé de récupération BitLocker), puis les actions.
+# (valeur masquée, icônes œil et copier, même présentation que la clé de récupération BitLocker), puis les actions.
 # Clé installée identique à celle du BIOS : une seule ligne.
 function Add-LicKeyRow($Body, [string]$Label, [string]$Key, [string]$Tip) {
-    $v = Add-KV $Body $Label (Get-MaskedText $Key); $g = $v.Parent
-    $v.VerticalAlignment = 'Center'; $g.Children[0].VerticalAlignment = 'Center'; $v.FontFamily = [Windows.Media.FontFamily]::new('Consolas')
-    if ($Tip) { $v.ToolTip = $Tip }
-    $col = Add-AutoColumn $g
-    $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; $sp.VerticalAlignment = 'Center'
-    $b1 = New-Button 'Afficher'; $b1.Height = 30; $b1.MinWidth = 96; $b1.Margin = New-Thickness 8 0 0 0
-    $b1.Tag = @{ Box = $v; Key = $Key; Shown = $false }
-    $b1.Add_Click({ param($s, $e) $t = $s.Tag; $t.Shown = -not $t.Shown; $t.Box.Text = $(if ($t.Shown) { $t.Key } else { Get-MaskedText $t.Key }); $s.Content = $(if ($t.Shown) { 'Masquer' } else { 'Afficher' }) })
-    $b2 = New-Button 'Copier'; $b2.Height = 30; $b2.MinWidth = 96; $b2.Margin = New-Thickness 6 0 0 0; $b2.Tag = $Key
-    $b2.Add_Click({ param($s, $e) Set-ClipText "$($s.Tag)"; Write-UiLog 'Clé Windows copiée dans le presse-papiers.' 'APP' })
-    [void]$sp.Children.Add($b1); [void]$sp.Children.Add($b2)
-    [Windows.Controls.Grid]::SetColumn($sp, $col); [void]$g.Children.Add($sp)
+    [void](Add-SecretKeyRow $Body $Label $Key $Tip $null 'Clé Windows copiée dans le presse-papiers.')
 }
 function Update-LicCard($R) {
     $b = $ToolsUI.LicBody; $b.Children.Clear()
@@ -91,7 +80,7 @@ function Update-LicCard($R) {
     # clés
     $same = $R.Full -and $R.Oa3 -and $R.Full -eq $R.Oa3
     if ($R.Full) { Add-LicKeyRow $b $(if ($same) { 'Clé (installée = BIOS)' } else { 'Clé installée' }) $R.Full $null }
-    elseif ($R.Partial) { $v = Add-KV $b 'Clé installée' ('XXXXX-XXXXX-XXXXX-XXXXX-' + $R.Partial); $v.ToolTip = 'Windows ne conserve que la fin de la clé : licence numérique ou clé générique d''édition' }
+    elseif ($R.Partial) { $v = Add-KV $b 'Clé installée' ((Get-MaskedText 'XXXXX-XXXXX-XXXXX-XXXXX-') + $R.Partial); $v.FontFamily = [Windows.Media.FontFamily]::new('Consolas'); $v.ToolTip = 'Windows ne conserve que la fin de la clé : licence numérique ou clé générique d''édition' }
     else { [void](Add-KV $b 'Clé installée' 'aucune') }
     if ($R.Oa3 -and -not $same) { Add-LicKeyRow $b 'Clé du BIOS' $R.Oa3 $(if ($R.Oa3Desc) { "$($R.Oa3Desc)" } else { $null }) }
     elseif (-not $R.Oa3) { $v = Add-KV $b 'Clé du BIOS' 'aucune'; $v.ToolTip = 'PC assemblé, ou licence numérique liée au matériel' }
@@ -114,8 +103,9 @@ function Update-LicCard($R) {
 # secrets (clé du BIOS, mots de passe Wi-Fi) : masqués par défaut, affichés / masqués par l'œil (application déjà lancée
 # en administrateur : pas de nouvelle saisie d'identifiants)
 function Request-ToolAuth([string]$Scope, [string]$Purpose) { $true }
-function Switch-ToolSecret($Sec, [string]$Scope, [string]$Purpose) {
+function Switch-ToolSecret($Sec, [string]$Scope, [string]$Purpose, $Btn) {
     if ($Sec.Shown) { $Sec.Box.Text = $Sec.Masked; $Sec.Shown = $false } else { $Sec.Box.Text = $Sec.Clear; $Sec.Shown = $true }
+    # œil barré une fois le secret affiché (retour visuel de l'action)
+    if ($Btn) { Set-EyeState $Btn $Sec.Shown }
 }
-function Get-MaskedText([string]$S) { ($S -replace '[A-Za-z0-9]', [string][char]0x2022) }
 

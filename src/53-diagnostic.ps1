@@ -74,53 +74,12 @@ function Show-DiagResult($D) {
 }
 
 # ---------- Clé de récupération BitLocker : blocs 3 à 6 masqués, bouton Afficher / Masquer ----------
-function Get-MaskedKey([string]$K) {
-    $b = $K -split '-'
-    if ($b.Count -ne 8) { return $K }
-    (@($b[0], $b[1]) + @('XXXXXX') * 4 + @($b[6], $b[7])) -join '-'
-}
+# clé de récupération BitLocker : même ligne que les clés de la licence Windows (points, œil, copier)
 function Add-RecoveryKeyRow([string]$Key) {
-    $v = Add-KV $InfoUI.DiagPanel 'Clé de récupération' (Get-MaskedKey $Key)
-    $g = $v.Parent
-    $v.VerticalAlignment = 'Center'; $g.Children[0].VerticalAlignment = 'Center'; $v.FontFamily = [Windows.Media.FontFamily]::new('Consolas')
-    $col = Add-AutoColumn $g
-    $b = New-Button 'Afficher'; $b.Height = 30; $b.MinWidth = 96; $b.Margin = New-Thickness 8 0 0 0; $b.VerticalAlignment = 'Center'
-    $b.Tag = @{ Box = $v; Key = $Key; Shown = $false }
-    $b.Add_Click($KeyRevealClick)
-    [Windows.Controls.Grid]::SetColumn($b, $col); [void]$g.Children.Add($b)
-}
-$KeyRevealClick = {
-    param($s, $e)
-    $t = $s.Tag
-    if ($t.Shown) { $t.Box.Text = Get-MaskedKey $t.Key; $t.Shown = $false; $s.Content = 'Afficher'; return }
-    $t.Box.Text = $t.Key; $t.Shown = $true; $s.Content = 'Masquer'
-    Write-UiLog 'Clé de récupération BitLocker affichée.' 'APP'
+    [void](Add-SecretKeyRow $InfoUI.DiagPanel 'Clé de récupération' $Key $null 'Clé de récupération BitLocker affichée.' 'Clé de récupération BitLocker copiée dans le presse-papiers.')
 }
 # Vérification d'un compte administrateur : ouverture de session réseau (sinon interactive) avec LogonUser,
 # puis présence du SID Administrateurs (S-1-5-32-544) dans le jeton, y compris en « refus seul » (jeton filtré par l'UAC).
-function Test-AdminCredential([string]$User, [string]$Pass) {
-    if ($User -match '^(.+?)\\(.+)$') {
-        $dom = $Matches[1]
-        $u = $Matches[2]
-    } elseif ($User -like '*@*') {
-        $dom = $null
-        $u = $User
-    } else {
-        $dom = '.'
-        $u = $User
-    }
-    if ($dom -eq '.' -or $dom -eq $env:COMPUTERNAME) { $dom = '.' }
-    $tok = [IntPtr]::Zero
-    $ok = [_OlivM.Auth]::LogonUserW($u, $dom, $Pass, 3, 0, [ref]$tok)
-    if (-not $ok) { $ok = [_OlivM.Auth]::LogonUserW($u, $dom, $Pass, 2, 0, [ref]$tok) }
-    if (-not $ok) { return @{ Ok = $false; Msg = 'Identifiants refusés.' } }
-    try {
-        $id = [Security.Principal.WindowsIdentity]::new($tok)
-        $adm = @($id.Claims | Where-Object { $_.Value -eq 'S-1-5-32-544' }).Count -gt 0
-        if (-not $adm) { return @{ Ok = $false; Msg = "Le compte $($id.Name) n'est pas administrateur de ce poste." } }
-        @{ Ok = $true; Account = $id.Name }
-    } finally { [void][_OlivM.Auth]::CloseHandle($tok) }
-}
 
 # ---------- BitLocker du volume système : menu « ... » de la ligne du diagnostic rapide ----------
 # Activer : protecteur TPM + mot de passe de récupération numérique, espace utilisé seul, sans test matériel (chiffrement

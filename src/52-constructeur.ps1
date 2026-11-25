@@ -30,7 +30,6 @@ function Invoke-Native([string]$FilePath, [string[]]$ArgumentList) {
     $p.ExitCode
 }
 & {
-
     $bios = Get-ItemProperty 'HKLM:\HARDWARE\DESCRIPTION\System\BIOS' -ErrorAction SilentlyContinue
     $man = "$($bios.SystemManufacturer)".Trim()
     $res = @{ Time = [DateTime]::Now.ToString('o'); Vendor = $man; Model = (@("$($bios.SystemFamily)".Trim(), "$($bios.SystemProductName)".Trim()) | Where-Object { $_ -and $_ -notmatch '^(?i)(to be filled.*|default string|system (product name|version|family|manufacturer|serial number)|not (specified|applicable|available)|none|n/?a|oem|o\.e\.m\.?|unknown|invalid|empty|x+|0+|[\s.\-_0]*)$' } | Select-Object -Unique) -join ' · '; Tool = ''; Items = @(); Error = $null }
@@ -466,28 +465,9 @@ $OemBrands = [ordered]@{
     '(?i)supermicro|super micro' = 'Supermicro'; '(?i)biostar' = 'Biostar'; '(?i)^intel' = 'Intel'; '(?i)medion' = 'Medion'
     '(?i)panasonic' = 'Panasonic'; '(?i)getac' = 'Getac'; '(?i)huawei' = 'Huawei'; '(?i)^apple' = 'Apple'; '(?i)^nzxt' = 'NZXT'
 }
-function Get-OemBrand([string]$Name) {
-    $n = $Name.Trim(); if (-not $n) { return '' }
-    foreach ($k in $OemBrands.Keys) { if ($n -match $k) { return $OemBrands[$k] } }
-    ($n -replace '(?i)[,.]?\s*\b(inc|corp(oration)?|co|ltd|limited|gmbh|s\.?a\.?s?|computer|technology|international|electronics)\b\.?', '').Trim(' ', ',', '.')
-}
 # Ligne « Constructeur » : marque  ·  modèle  ·  n° de série. Modèle : nom commercial (famille chez Lenovo, dont le
 # nom de produit est le type machine) ; PC assemblé (valeurs système par défaut) : marque et modèle de la carte mère.
 # N° de série lu par la collecte de l'accueil (première valeur réelle : BIOS, produit, châssis, carte mère).
-function Get-OemIdentity($Bios) {
-    $ok = { param($v) $v = "$v".Trim(); if ($v -and $v -notmatch $SmbJunk) { $v } else { '' } }
-    $man = & $ok $Bios.SystemManufacturer; $mod = & $ok $Bios.SystemProductName
-    if ($man -match '(?i)^lenovo') { $fam = & $ok $Bios.SystemVersion; if (-not $fam) { $fam = & $ok $Bios.SystemFamily }; if ($fam) { $mod = $fam } }
-    if (-not $man -or -not $mod) { $bm = & $ok $Bios.BaseBoardManufacturer; $bp = & $ok $Bios.BaseBoardProduct; if ($bm -or $bp) { $man = $bm; $mod = $bp } }
-    $br = Get-OemBrand $man
-    # « HP EliteBook 840 G8 » : marque non répétée devant le modèle
-    if ($br -and $mod) { $mod = ($mod -replace ('^(?i)' + [regex]::Escape($br) + '\s+'), '') }
-    $parts = @(@($br, $mod) | Where-Object { $_ })
-    $S = $Sync.InfoSlow
-    if ($S -and $S.Serial -and "$($S.SerialSrc)" -ne 'aucun') { $parts += 'n° de série ' + ("$($S.Serial)" -replace '\s+\(.*\)$', '') }
-    $InfoUI.OemSerialShown = [bool]($S -and $S.Serial)
-    $(if ($parts.Count) { $parts -join '  ·  ' } else { 'non renseigné par le fabricant' })
-}
 function Show-OemResult {
     if (-not $InfoUI.OemPanel) { return }
     # recherche ou installation en cours, sans changement d'état : seule la ligne d'avancement est mise à jour (même
@@ -510,7 +490,6 @@ function Show-OemResult {
     Update-AllSearchButton
     if (-not $InfoUI.OemSel) { $InfoUI.OemSel = @{} }
     $p = $InfoUI.OemPanel; $p.Children.Clear()
-    $bios = Get-ItemProperty 'HKLM:\HARDWARE\DESCRIPTION\System\BIOS' -ErrorAction SilentlyContinue
     # constructeur, modèle et n° de série : déjà dans la carte Matériel, non répétés ici
     $r = $Sync.OemResult
     $InfoUI.OemAge.Text = ''

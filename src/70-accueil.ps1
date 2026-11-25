@@ -15,33 +15,36 @@ $CardCopyClick = {
         $ok = $false
         Write-UiLog "Copie du bloc « $name » impossible : $($_.Exception.Message)" 'ERROR'
     }
-    Show-CopyFeedback $s $ok $(if ($ok) { "« $name » copié dans le presse-papiers" } else { 'Copie impossible : presse-papiers occupé' })
+    Show-CopyFeedback $s $ok 'Copié'
 }
-# Retour visuel d'une copie : « Copié » en vert collé à l'icône (coche) pendant 3 s
-function Show-CopyFeedback($Btn, [bool]$Ok, [string]$Text) {
-    if (-not $Btn.Uid.StartsWith('copy|')) { $Btn.Uid = "copy|$($Btn.Content)|$($Btn.Uid)"; $Btn.DataContext = $Btn.ToolTip }
+# Retour visuel d'une copie : « Copié » / « Copiée » (ou échec) en couleur collé à une coche, pendant 3 s, puis contenu,
+# infobulle, largeur et couleur d'origine du bouton rétablis. $Word : libellé accordé (ancien 3e paramètre = phrase ignorée)
+$CopyFb = @{}
+function Show-CopyFeedback($Btn, [bool]$Ok, [string]$Word = 'Copié') {
+    if ($Word -notmatch '^Copi') { $Word = 'Copié' }
+    $h = [Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($Btn)
+    if (-not $CopyFb.ContainsKey($h)) { $CopyFb[$h] = @{ Content = $Btn.Content; Tip = $Btn.ToolTip; Width = $Btn.Width; Timer = $null } }
+    $st = $CopyFb[$h]
     $Btn.ToolTip = $null; $Btn.Width = [double]::NaN
     $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'
-    $tx = New-Text $(if ($Ok) { 'Copié' } else { 'Échec de la copie' })
-    $tx.FontFamily = [Windows.Media.FontFamily]::new('Segoe UI')
-    $tx.FontSize = 12
-    $tx.FontWeight = [Windows.FontWeights]::SemiBold
+    $tx = New-Text $(if ($Ok) { $Word } else { 'Échec de la copie' })
+    $tx.FontFamily = [Windows.Media.FontFamily]::new('Segoe UI'); $tx.FontSize = 12; $tx.FontWeight = [Windows.FontWeights]::SemiBold
     $tx.VerticalAlignment = 'Center'; $tx.Margin = New-Thickness 6 0 6 0
     $gl = New-Text ([string][char]$(if ($Ok) { 0xE73E } else { 0xE783 }))
-    $gl.FontFamily = [Windows.Media.FontFamily]::new('Segoe MDL2 Assets')
-    $gl.VerticalAlignment = 'Center'
-    [void]$sp.Children.Add($tx); [void]$sp.Children.Add($gl)
+    $gl.FontFamily = [Windows.Media.FontFamily]::new('Segoe MDL2 Assets'); $gl.VerticalAlignment = 'Center'
+    [void]$sp.Children.Add($gl); [void]$sp.Children.Add($tx)
     $Btn.Content = $sp
     $Btn.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, $(if ($Ok) { 'OkFgBrush' } else { 'ErrFgBrush' }))
-    $t = [Windows.Threading.DispatcherTimer]::new(); $t.Interval = [TimeSpan]::FromSeconds(3); $t.Tag = $Btn
+    if ($st.Timer) { $st.Timer.Stop() }
+    $t = [Windows.Threading.DispatcherTimer]::new(); $t.Interval = [TimeSpan]::FromSeconds(3); $t.Tag = @{ Btn = $Btn; H = $h }
     $t.Add_Tick({
         param($s, $e)
-        $s.Stop(); $b = $s.Tag
-        $p = $b.Uid -split '\|', 3; $b.Content = $p[1]; $b.Uid = $p[2]; $b.ToolTip = $b.DataContext; $b.Width = 32
+        $s.Stop(); $b = $s.Tag.Btn; $o = $CopyFb[$s.Tag.H]; $CopyFb.Remove($s.Tag.H)
+        if ($o) { $b.Content = $o.Content; $b.ToolTip = $o.Tip; $b.Width = $o.Width }
         $b.ClearValue([Windows.Controls.Control]::ForegroundProperty)
         if ($b.Uid -eq 'hover' -and -not $b.Tag.IsMouseOver) { $b.Visibility = 'Hidden' }
     })
-    $t.Start()
+    $st.Timer = $t; $t.Start()
 }
 function Add-InfoCard($C, $Column) {
     Add-CardCopy $C; $C.Body.Children[0].Margin = New-Thickness 16 14 16 8
@@ -684,23 +687,6 @@ function Update-StorageLayout {
         & $diskLine $sp $d $true
         [void]$InfoUI.VolPanel.Children.Add($sp); & $hoverWrap $sp
     }
-}
-function Add-DiskRow([string]$Name, [string]$State, [string]$Type, [string]$Size, [string]$Brush, [string]$Letters) {
-    $v = Add-KV $InfoUI.DiskPanel $Name (('{0}  ·  {1}  ·  {2}' -f $State, $Type, $Size) + $(if ($Letters) { '  ·  ' + $Letters } else { '' })) $Brush
-    $v.Visibility = 'Collapsed'
-    $g = [Windows.Controls.Grid]::new()
-    foreach ($grp in 'DiskState', 'DiskType', 'DiskSize', '') {
-        $cd = [Windows.Controls.ColumnDefinition]::new()
-        if ($grp) { $cd.Width = [Windows.GridLength]::Auto; $cd.SharedSizeGroup = $grp }
-        [void]$g.ColumnDefinitions.Add($cd)
-    }
-    $col = 0
-    foreach ($t in $State, $Type, $Size, $Letters) {
-        $x = New-SelText $t $(if ($col -eq 3) { 'MutedBrush' } else { $Brush }); $x.FontSize = 13; $x.Margin = New-Thickness 0 0 18 0
-        if ($col -lt 3) { $x.FontWeight = [Windows.FontWeights]::SemiBold } else { $x.ToolTip = 'Lecteurs portés par ce disque' }
-        [Windows.Controls.Grid]::SetColumn($x, $col++); [void]$g.Children.Add($x)
-    }
-    [Windows.Controls.Grid]::SetColumn($g, 1); [void]$v.Parent.Children.Add($g)
 }
 function Show-InfoSlow($S) {
     $f = $InfoUI.F

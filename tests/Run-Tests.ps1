@@ -60,7 +60,7 @@ Test-Eq 'Write-Ignored : texte'               $EarlyWarn[0] 'Enregistrement du z
 Test-Eq 'Get-ErrText : vide'                  (Get-ErrText $null) 'erreur inconnue'
 
 # ---------- importance des mises à jour en attente (rapport d'intervention)
-Import-SrcFunction Get-OemImportance, Get-WuImportance, Get-ImportanceSummary
+Import-SrcFunction Get-OemImportance
 $ImportanceLabels = Get-SrcValue 'ImportanceLabels'
 $o1 = Get-OemImportance @{ Title = 'Lenovo Ltd. Firmware Driver Update (1.15.0.0)'; Category = 'Firmware  ·  Lenovo Ltd.'; Severity = '' }
 $o2 = Get-OemImportance @{ Title = 'Advanced Micro Devices Inc. SecurityDevices Driver Update (5.46.0.0)'; Category = 'OtherHardware  ·  Advanced Micro Devices Inc.'; Severity = '' }
@@ -72,9 +72,6 @@ Test-Eq 'Importance : composant logiciel'     $o3.Label 'Facultative'
 Test-Eq 'Importance : gravité constructeur'   $o4.Label 'Critique'
 Test-Eq 'Importance : origine constructeur'   $o4.Basis 'indiquée par le constructeur (Critical)'
 Test-Eq 'Importance : origine estimée'        ($o3.Basis -like 'estimée*') $true
-Test-Eq 'Importance WU : gravité Microsoft'   (Get-WuImportance @{ Severity = 'Important'; Class = 'Security Updates' }).Label 'Importante'
-Test-Eq 'Importance WU : définitions'         (Get-WuImportance @{ Severity = ''; Class = 'Definition Updates' }).Label 'Recommandée'
-Test-Eq 'Importance : résumé'                 (Get-ImportanceSummary @($o1, $o2, $o3)) '2 importantes, 1 facultative'
 
 # ---------- comparaison de versions (logiciels)
 Import-SrcFunction Compare-Ver
@@ -306,14 +303,6 @@ Test-Eq 'Rapport final : tâches terminées seules' @(Get-RunEvent).Count 1
 # ---------- bilan
 # ---------- nom court du fabricant (ligne Constructeur des mises à jour constructeur)
 $OemBrands = Get-SrcValue 'OemBrands'
-Import-SrcFunction 'Get-OemBrand'
-Test-Eq 'Marque : ASUSTeK'      (Get-OemBrand 'ASUSTeK COMPUTER INC.') 'ASUS'
-Test-Eq 'Marque : MSI'          (Get-OemBrand 'Micro-Star International Co., Ltd.') 'MSI'
-Test-Eq 'Marque : Gigabyte'     (Get-OemBrand 'Gigabyte Technology Co., Ltd.') 'Gigabyte'
-Test-Eq 'Marque : HP'           (Get-OemBrand 'HP') 'HP'
-Test-Eq 'Marque : Lenovo'       (Get-OemBrand 'LENOVO') 'Lenovo'
-Test-Eq 'Marque : Dell'         (Get-OemBrand 'Dell Inc.') 'Dell'
-Test-Eq 'Marque : inconnue'     (Get-OemBrand 'Contoso Computer Corporation') 'Contoso'
 
 # ---------- libellé court des mises à jour Windows
 Import-SrcFunction 'Get-WuShortTitle'

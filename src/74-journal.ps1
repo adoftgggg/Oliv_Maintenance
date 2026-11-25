@@ -166,10 +166,6 @@ function Sync-LogView {
         Update-LogFilterInfo
     }
 }
-function Clear-LogView {
-    $LogView.Lines.Clear(); $LogView.Pending.Clear(); $LogView.Hidden = 0; $LogView.Rebuild = $false
-    $LogView.Cnt = @{ E = 0; W = 0; A = 0; Shown = 0 }; $Ui.LogBox.Document.Blocks.Clear(); Update-LogFilterInfo
-}
 # compteurs sur les boutons de niveau et sur la case des messages de l'application
 function Update-LogCount {
     $nE = $LogView.Cnt.E; $nW = $LogView.Cnt.W; $nA = $LogView.Cnt.A

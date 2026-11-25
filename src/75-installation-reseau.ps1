@@ -363,7 +363,6 @@ function Restore-AppConfig { Import-PcConfig }
 $KnownPorts = @{ 135 = 'appel de procédure à distance (RPC)'; 139 = 'NetBIOS'; 445 = 'partage de fichiers (SMB)'; 3389 = 'Bureau à distance'; 5040 = 'appareils connectés (CDP)'
     5357 = 'découverte d''appareils (WSD)'; 7680 = 'partage des mises à jour (Optimisation de distribution)'; 5985 = 'gestion à distance (WinRM)'; 2869 = 'UPnP'; 1900 = 'UPnP'
     49664 = 'service système Windows (RPC)'; 49665 = 'service système Windows (RPC)'; 49666 = 'service système Windows (RPC)'; 49667 = 'service système Windows (RPC)'; 49668 = 'service système Windows (RPC)'; 49669 = 'service système Windows (RPC)'; 49670 = 'service système Windows (RPC)' }
-$NetUI = @{}
 # section de la carte Réseau de l'accueil : intertitre, ports, liens Actualiser / Connexions actives
 # carte Réseau de l'accueil : un seul bouton, ports ouverts et connexions actives dans une fenêtre
 function New-NetPortSection($Body) {

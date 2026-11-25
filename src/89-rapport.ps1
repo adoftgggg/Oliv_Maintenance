@@ -58,32 +58,6 @@ function Get-RunEvent([switch]$Live) {
 }
 function Add-RunToSession { foreach ($e in @(Get-RunEvent)) { [void]$Session.Events.Add($e); Save-HistoryEvent $e } }
 # Traitements en cours au moment du rapport (non encore enregistrés dans le journal de session)
-function Get-LiveEvent {
-    $ev = [Collections.ArrayList]::new()
-    if ($Sync.Running) { foreach ($e in @(Get-RunEvent -Live)) { [void]$ev.Add($e) } }
-    if ($Sync.OemInstalling) {
-        if ($Sync.OemRun) {
-            foreach ($k in @($Sync.OemRun.Items.Keys)) {
-                $it = $Sync.OemRun.Items[$k]; $x = Get-OemItemText $it
-                [void]$ev.Add(@{ Time = $Sync.OemStart; Cat = 'Constructeur'; Title = $it.Name; Result = $x.Text; Detail = ''
-                    Level = $(switch ("$($it.State)") { 'ok' { 'ok' } 'fail' { 'error' } 'skip' { 'warn' } default { 'info' } }) })
-            }
-        } else { [void]$ev.Add(@{ Time = $Sync.OemStart; Cat = 'Constructeur'; Title = "$($Sync.OemInstStatus)"; Result = 'en cours'; Level = 'info'; Detail = '' }) }
-    }
-    if ($Sync.OemRunning) {
-        [void]$ev.Add(@{ Time = $Sync.OemStart; Cat = 'Constructeur'; Title = 'Recherche des mises à jour constructeur'; Result = 'en cours'; Level = 'info'; Detail = '' })
-    }
-    if ($Sync.WuSearching -and $Sync.WuOnline -and -not $Sync.WuCancel) {
-        [void]$ev.Add(@{ Time = $Sync.WuStartT; Cat = 'Windows Update'; Title = 'Recherche des mises à jour'; Result = 'en cours'; Level = 'info'; Detail = '' })
-    }
-    if ($Sync.WgRunning -and -not $Sync.WgCancel) {
-        [void]$ev.Add(@{ Time = $Sync.WgStart; Cat = 'Logiciels'; Title = 'Recherche des mises à jour des logiciels'; Result = 'en cours'; Level = 'info'; Detail = '' })
-    }
-    if ($TreeUI.Job) {
-        [void]$ev.Add(@{ Time = $TreeUI.Start; Cat = 'Espace disque'; Title = "Analyse de $($TreeUI.Target)"; Result = 'en cours'; Level = 'info'; Detail = '' })
-    }
-    $ev.ToArray()
-}
 function Add-OemRunToSession {
     if (-not $Sync.OemRun) { return }
     foreach ($k in @($Sync.OemRun.Items.Keys)) {
@@ -122,63 +96,11 @@ function Get-OemImportance($Item) {
     })
     @{ Level = $lv; Label = $ImportanceLabels[$lv]; Basis = "estimée : $why" }
 }
-function Get-WuImportance($Item) {
-    $sv = "$($Item.Severity)".Trim()
-    $lv = $(switch ($sv) { 'Critical' { 1 } 'Important' { 2 } 'Moderate' { 3 } 'Low' { 3 } default { 0 } })
-    if ($lv) { return @{ Level = $lv; Label = $ImportanceLabels[$lv]; Basis = "gravité Microsoft : $sv" } }
-    $cl = "$($Item.Class)"
-    $lv, $why = $(switch -Regex ($cl) {
-        'Critical Updates' { 2, 'classification Microsoft : mise à jour critique'; break }
-        'Security Updates' { 2, 'classification Microsoft : mise à jour de sécurité'; break }
-        'Definition Updates' { 3, 'classification Microsoft : définitions (antivirus)'; break }
-        'Update Rollups|^Updates$|Updates' { 3, "classification Microsoft : $cl"; break }
-        'Feature Packs|Tools|Upgrades|Drivers' { 4, "classification Microsoft : $cl"; break }
-        default { 3, 'classification non communiquée' }
-    })
-    @{ Level = $lv; Label = $ImportanceLabels[$lv]; Basis = $why }
-}
 # mises à jour en attente, triées par importance : @{ Level; Label; Basis; Title; Detail }
-function Get-PendingUpdateRow {
-    $wu = foreach ($x in @($Sync.WuPending.Items | Where-Object { $_ })) {
-        $i = Get-WuImportance $x
-        $d = @(); if ($x.KB) { $d += $x.KB }; if ($x.Size -gt 0) { $d += Format-SizeUi $x.Size }; if ($x.Done) { $d += 'déjà téléchargée' }
-        @{ Level = $i.Level; Label = $i.Label; Basis = $i.Basis; Title = "$($x.Title)"; Detail = $d -join '  ·  ' }
-    }
-    $oem = @()
-    if ($Sync.OemResult -and -not $Sync.OemResult.Error) {
-        $oem = foreach ($x in @($Sync.OemResult.Items | Where-Object { $_ })) {
-            $i = Get-OemImportance $x
-            $d = @(); if ($x.Category) { $d += "$($x.Category)" }; if ($x.Version) { $d += "version $($x.Version)" }; if ($x.Date) { $d += "$($x.Date)" }
-            if ("$($x.Size)" -match '^\d+$' -and [double]$x.Size -gt 0) { $d += Format-SizeUi ([double]$x.Size) }
-            if ("$($x.Source)" -eq 'WU') { $d += 'via Windows Update' }
-            @{ Level = $i.Level; Label = $i.Label; Basis = $i.Basis; Title = "$($x.Title)"; Detail = $d -join '  ·  ' }
-        }
-    }
-    $sw = @()
-    try {
-        $sw = foreach ($x in @(Get-SoftUpdate | Where-Object { -not $SoftExcl[(Get-SoftKey $_)] })) {
-            @{ Level = 0; Label = 'Non indiquée'; Basis = 'winget ne publie pas de gravité'; Title = "$($x.Name)"; Detail = ('{0} > {1}  ·  {2}' -f $x.From, $x.To, $x.SrcLabel) }
-        }
-    } catch { Write-Ignored 'Rapport : logiciels à mettre à jour' $_ }
-    @{ Wu = @($wu | Sort-Object { $_.Level }); Oem = @($oem | Sort-Object { $_.Level }); Soft = @($sw | Sort-Object { $_.Title }) }
-}
 # résumé par importance : « 3 constructeur : 2 importantes, 1 facultative »
-function Get-ImportanceSummary([object[]]$Rows) {
-    @($Rows | Group-Object { $_.Level } | Sort-Object { [int]$_.Name } | ForEach-Object {
-        $l = "$($_.Group[0].Label)".ToLower(); '{0} {1}' -f $_.Count, $(if ($_.Count -gt 1 -and $l -notmatch 'non ') { $l + 's' } else { $l }) }) -join ', '
-}
 
 # échappement HTML minimal (& < > ") : les accents restent lisibles dans le fichier (UTF-8)
-function ConvertTo-HtmlText([string]$T) { ("$T" -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;' -replace '"', '&quot;') -replace "`r?`n", '<br>' }
 # valeur affichée d'un champ de l'Accueil (vide si absent ou masqué)
-function Get-InfoField([string]$K) {
-    # Modèle affiché avec le fabricant dans l'Accueil : modèle seul pour le rapport (le fabricant a sa ligne)
-    if ($K -eq 'Modèle' -and $InfoUI.ModelRaw) { return "$($InfoUI.ModelRaw)" }
-    $f = $InfoUI.F[$K]; if (-not $f) { return '' }
-    # champs masqués de données (recomposés dans l'Accueil) : lus quand même
-    try { if ("$($f.Parent.Parent.Visibility)" -eq 'Collapsed' -and "$($f.Tag)" -ne 'data') { return '' } } catch {}
-    $t = "$($f.Text)".Trim(); if ($t -eq '...') { '' } else { $t }
-}
 # rapport d'intervention retiré (1.2.0) : plus de besoin ; événements de session conservés pour le journal
 
 $Ui.HistoryBtn.Add_Click({ try { Show-History } catch { Write-UiLog "Historique du poste : $($_.Exception.Message)" 'ERROR' } })

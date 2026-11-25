@@ -655,7 +655,6 @@ $DnsProviders = [ordered]@{
     Google     = @{ V4 = @('8.8.8.8', '8.8.4.4'); V6 = @('2001:4860:4860::8888', '2001:4860:4860::8844'); Doh = 'https://dns.google/dns-query' }
     AdGuard    = @{ V4 = @('94.140.14.14', '94.140.15.15'); V6 = @('2a10:50c0::ad1:ff', '2a10:50c0::ad2:ff'); Doh = 'https://dns.adguard-dns.com/dns-query' }
 }
-function Get-DnsAdapter { @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { "$($_.Status)" -eq 'Up' }) }
 # fournisseur en vigueur : DNS IPv4 de la 1re carte active ; DHCP (aucun serveur fixé dans le registre de la carte) = Auto
 function Get-DnsProvider {
     # carte active (Ethernet ou Wi-Fi) lue par .NET : instantané, Get-NetAdapter (CIM) figeait l'interface

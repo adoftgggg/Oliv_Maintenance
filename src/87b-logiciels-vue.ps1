@@ -199,12 +199,12 @@ function Show-SoftMenu($Row) {
     # logiciels en échec lors de la dernière mise à jour : détail de l'erreur copiable
     $failed = @($sel | Where-Object { $Sync.SoftRun -and $Sync.SoftRun.Items["$($_.Id)"] -and $Sync.SoftRun.Items["$($_.Id)"].State -eq 'fail' })
     if ($failed.Count) {
-        & $add $(if ($failed.Count -eq 1) { 'Copier l''erreur' } else { "Copier les $($failed.Count) erreurs" }) { param($s, $e) Set-ClipText ((@($s.Tag | ForEach-Object { Get-SoftErrorText "$($_.Id)" }) -join "`r`n`r`n")) } $failed
+        & $add $(if ($failed.Count -eq 1) { 'Copier l''erreur' } else { "Copier les $($failed.Count) erreurs" }) { param($s, $e) [void](Set-ClipText ((@($s.Tag | ForEach-Object { Get-SoftErrorText "$($_.Id)" }) -join "`r`n`r`n")) (Get-CopyDone "$($s.Header)")) } $failed
     }
-    & $add 'Copier la version installée' { param($s, $e) Set-ClipText ((@($s.Tag | ForEach-Object { "$($_.From)" }) -join "`r`n")) } $sel
-    & $add $(if ($one) { 'Copier la ligne' } else { 'Copier les lignes' }) { param($s, $e) Set-ClipText ((@($s.Tag | ForEach-Object { Format-SoftAppLine $_ }) -join "`r`n")) } $sel
-    & $add $(if ($one) { 'Copier le nom' } else { 'Copier les noms' }) { param($s, $e) Set-ClipText ((@($s.Tag | ForEach-Object { "$($_.Name)" }) -join "`r`n")) } $sel
-    & $add $(if ($one) { 'Copier l''identifiant' } else { 'Copier les identifiants' }) { param($s, $e) Set-ClipText ((@($s.Tag | Where-Object { $_.Id } | ForEach-Object { "$($_.Id)" }) -join "`r`n")) } $sel
+    & $add 'Copier la version installée' { param($s, $e) [void](Set-ClipText ((@($s.Tag | ForEach-Object { "$($_.From)" }) -join "`r`n")) (Get-CopyDone "$($s.Header)")) } $sel
+    & $add $(if ($one) { 'Copier la ligne' } else { 'Copier les lignes' }) { param($s, $e) [void](Set-ClipText ((@($s.Tag | ForEach-Object { Format-SoftAppLine $_ }) -join "`r`n")) (Get-CopyDone "$($s.Header)")) } $sel
+    & $add $(if ($one) { 'Copier le nom' } else { 'Copier les noms' }) { param($s, $e) [void](Set-ClipText ((@($s.Tag | ForEach-Object { "$($_.Name)" }) -join "`r`n")) (Get-CopyDone "$($s.Header)")) } $sel
+    & $add $(if ($one) { 'Copier l''identifiant' } else { 'Copier les identifiants' }) { param($s, $e) [void](Set-ClipText ((@($s.Tag | Where-Object { $_.Id } | ForEach-Object { "$($_.Id)" }) -join "`r`n")) (Get-CopyDone "$($s.Header)")) } $sel
     $m.IsOpen = $true
 }
 # codes de retour de winget (APPINSTALLER_CLI_ERROR_*, documentation winget-cli) : signification et conduite à tenir
@@ -288,7 +288,7 @@ function Show-SoftHistMenu($Row) {
         $mi = [Windows.Controls.MenuItem]::new()
         $mi.Header = $Head
         $mi.Tag = $Text
-        $mi.Add_Click({ param($s, $e) Set-ClipText ("$($s.Tag)") })
+        $mi.Add_Click({ param($s, $e) [void](Set-ClipText ("$($s.Tag)") (Get-CopyDone "$($s.Header)")) })
         [void]$m.Items.Add($mi)
     }
     if (-not $h.Ok) { & $add 'Copier l''erreur' (Format-SoftError $h) }

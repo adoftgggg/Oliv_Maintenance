@@ -1,7 +1,6 @@
 // Code natif de Oliv_Maintenance : compilé par build.ps1 dans une seule DLL embarquée dans le script (chargée en mémoire
 // au démarrage, aucune compilation sur le poste, aucun fichier DLL écrit). Syntaxe C# 5 (compilateur du .NET Framework).
 // Tâches longues (runspace worker) : lecture de la console des outils (SFC, DISM), santé NVMe, bit dirty du volume ;
-// vérification d'un compte administrateur (élévation)
 using System;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
@@ -46,11 +45,5 @@ public static class VolDirty {
     public static extern SafeFileHandle CreateFile(string n, uint a, uint s, IntPtr sa, uint c, uint f, IntPtr t);
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool DeviceIoControl(SafeFileHandle h, uint code, IntPtr i, uint il, out uint o, uint ol, out uint r, IntPtr ov);
-}
-public static class Auth {
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    public static extern bool LogonUserW(string user, string domain, string pass, int type, int provider, out IntPtr token);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool CloseHandle(IntPtr h);
 }
 }

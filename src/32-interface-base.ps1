@@ -40,7 +40,79 @@ function Write-UiLog([string]$Message, [string]$Level = 'INFO') {
 }
 
 # copie dans le presse-papiers (menus contextuels) : presse-papiers occupé par une autre application = avertissement
-function Set-ClipText([string]$Text) { try { [Windows.Clipboard]::SetText($Text) } catch { Write-Ignored 'Copie dans le presse-papiers' $_ } }
+# Copie dans le presse-papiers : renvoie $true / $false ; $Done = message de confirmation affiché (bandeau bref) quand la copie
+# vient d'un menu, sans bouton pour porter le retour visuel. Échec toujours signalé (bandeau rouge + journal).
+function Set-ClipText([string]$Text, [string]$Done) {
+    $ok = $false
+    for ($k = 0; $k -lt 5 -and -not $ok; $k++) { try { [Windows.Clipboard]::SetText($Text); $ok = $true } catch { if ($k -eq 4) { Write-UiLog "Copie dans le presse-papiers impossible : $($_.Exception.Message)" 'WARN' } else { Start-Sleep -Milliseconds 60 } } }
+    if ($Done -or -not $ok) { Show-Toast $(if ($ok) { "$Done dans le presse-papiers" } else { 'Copie impossible : presse-papiers occupé par un autre programme' }) $ok }
+    $ok
+}
+# libellé de confirmation accordé depuis l'intitulé d'un menu « Copier ... » (genre et nombre du nom copié)
+function Get-CopyDone([string]$Head) {
+    $h = $Head -replace '^Copier\s+', '' -replace '^(le|la|les|l'')\s*', '' -replace '^\d+\s+', ''
+    $fem = $h -match '^(erreur|version|ligne|clé|cle|adresse|valeur|commande)'
+    $plu = $Head -match '^Copier\s+les\s'
+    $mot = $h.Substring(0, 1).ToUpper() + $h.Substring(1)
+    '{0} {1}' -f $mot, $('copi' + 'é' + $(if ($fem) { 'e' } else { '' }) + $(if ($plu) { 's' } else { '' }))
+}
+# bandeau bref (2,5 s) en bas de la fenêtre : confirmation d'une action sans bouton dédié (copie depuis un menu...)
+$ToastUI = @{}
+function Show-Toast([string]$Text, [bool]$Ok = $true) {
+    if (-not $ToastUI.Pop) {
+        $pp = [Windows.Controls.Primitives.Popup]::new(); $pp.AllowsTransparency = $true; $pp.Placement = 'Center'; $pp.StaysOpen = $true; $pp.IsHitTestVisible = $false
+        $bd = [Windows.Controls.Border]::new(); $bd.CornerRadius = [Windows.CornerRadius]::new(8); $bd.Padding = New-Thickness 14 8 16 8; $bd.Margin = New-Thickness 12 12 12 12; $bd.BorderThickness = New-Thickness 1 1 1 1
+        $bd.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'PanelBrush'); $bd.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'LineBrush')
+        $fx = [Windows.Media.Effects.DropShadowEffect]::new(); $fx.BlurRadius = 16; $fx.ShadowDepth = 2; $fx.Opacity = 0.3; $fx.Direction = 270; $bd.Effect = $fx
+        $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'
+        $ToastUI.Glyph = New-Text ''; $ToastUI.Glyph.FontFamily = [Windows.Media.FontFamily]::new('Segoe MDL2 Assets'); $ToastUI.Glyph.VerticalAlignment = 'Center'; $ToastUI.Glyph.Margin = New-Thickness 0 0 10 0
+        $ToastUI.Text = New-Text ''; $ToastUI.Text.VerticalAlignment = 'Center'; $ToastUI.Text.FontWeight = [Windows.FontWeights]::SemiBold
+        [void]$sp.Children.Add($ToastUI.Glyph); [void]$sp.Children.Add($ToastUI.Text); $bd.Child = $sp; $pp.Child = $bd
+        $ToastUI.Pop = $pp
+        $ToastUI.Timer = [Windows.Threading.DispatcherTimer]::new(); $ToastUI.Timer.Interval = [TimeSpan]::FromMilliseconds(2500)
+        $ToastUI.Timer.Add_Tick({ $ToastUI.Timer.Stop(); $ToastUI.Pop.IsOpen = $false })
+    }
+    $ToastUI.Glyph.Text = [string][char]$(if ($Ok) { 0xE73E } else { 0xE783 })
+    foreach ($x in $ToastUI.Glyph, $ToastUI.Text) { $x.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($Ok) { 'OkFgBrush' } else { 'ErrFgBrush' })) }
+    $ToastUI.Text.Text = $Text
+    $ToastUI.Pop.PlacementTarget = $Window.Content
+    $ToastUI.Pop.VerticalOffset = [math]::Max([double]0, $Window.ActualHeight / 2 - 60)
+    $ToastUI.Pop.IsOpen = $false; $ToastUI.Pop.IsOpen = $true
+    $ToastUI.Timer.Stop(); $ToastUI.Timer.Start()
+}
+# Bouton de copie (icône ou texte) : copie, puis le bouton affiche « Copié » / « Copiée » (accord avec ce qui est copié) et une
+# coche en vert pendant 3 s, ou l'échec en rouge
+function Invoke-CopyButton($Btn, [string]$Text, [string]$Word = 'Copié', [string]$Log) {
+    $ok = Set-ClipText $Text
+    if ($ok -and $Log) { Write-UiLog $Log 'APP' }
+    Show-CopyFeedback $Btn $ok $Word
+    $ok
+}
+# Ligne de clé secrète commune (licence Windows, récupération BitLocker...) : valeur masquée en points (points à la place des caractères, mêmes tirets
+# que la clé), icône œil (afficher / masquer) et icône copier (« Copiée »), alignées à droite de la ligne
+function Get-MaskedText([string]$S) { ($S -replace '[A-Za-z0-9]', [string][char]0x2022) }
+function Add-SecretKeyRow($Body, [string]$Label, [string]$Key, [string]$Tip, [string]$ShowLog, [string]$CopyLog) {
+    $v = Add-KV $Body $Label (Get-MaskedText $Key); $g = $v.Parent
+    $v.VerticalAlignment = 'Center'; $g.Children[0].VerticalAlignment = 'Center'; $v.FontFamily = [Windows.Media.FontFamily]::new('Consolas')
+    if ($Tip) { $v.ToolTip = $Tip }
+    $col = Add-AutoColumn $g
+    $sp = [Windows.Controls.StackPanel]::new(); $sp.Orientation = 'Horizontal'; $sp.VerticalAlignment = 'Center'; $sp.Margin = New-Thickness 8 0 0 0
+    $eye = New-ToolIconButton 0xE7B3 'Afficher' @{ Box = $v; Key = $Key; Shown = $false; Log = $ShowLog } {
+        param($s, $e) $t = $s.Tag; $t.Shown = -not $t.Shown
+        $t.Box.Text = $(if ($t.Shown) { $t.Key } else { Get-MaskedText $t.Key }); Set-EyeState $s $t.Shown
+        if ($t.Shown -and $t.Log) { Write-UiLog $t.Log 'APP' }
+    }
+    $cp = New-ToolIconButton 0xE8C8 'Copier' @{ Key = $Key; Log = $CopyLog } { param($s, $e) [void](Invoke-CopyButton $s $s.Tag.Key 'Copiée' $s.Tag.Log) }
+    [void]$sp.Children.Add($eye); [void]$sp.Children.Add($cp)
+    [Windows.Controls.Grid]::SetColumn($sp, $col); [void]$g.Children.Add($sp)
+    $v
+}
+# Bouton œil : afficher / masquer un secret, icône et infobulle qui suivent l'état
+function Set-EyeState($Btn, [bool]$Shown) {
+    $Btn.Content = [string][char]$(if ($Shown) { 0xED1A } else { 0xE7B3 })
+    $Btn.ToolTip = $(if ($Shown) { 'Masquer' } else { 'Afficher' })
+    if ($Shown) { $Btn.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, 'AccentBrush') } else { $Btn.ClearValue([Windows.Controls.Control]::ForegroundProperty) }
+}
 
 $BrushCache = @{}
 function New-Brush([string]$Hex) {
@@ -142,7 +214,8 @@ function Add-CardIcon($C, [int]$Glyph, [string]$Tip, [scriptblock]$Click, [switc
                 foreach ($x in $s.Child.Children[0].Children) { if ($x.Uid -eq 'hover') { $x.Visibility = 'Visible' } }
             })
             $C.Card.Add_MouseLeave({ param($s, $e)
-                foreach ($x in $s.Child.Children[0].Children) { if ($x.Uid -eq 'hover') { $x.Visibility = 'Hidden' } }
+                # bouton qui affiche encore « Copié » : laissé visible, masqué à la fin de son retour (Show-CopyFeedback)
+                foreach ($x in $s.Child.Children[0].Children) { if ($x.Uid -eq 'hover' -and -not $CopyFb.ContainsKey([Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($x))) { $x.Visibility = 'Hidden' } }
             })
         }
     }
