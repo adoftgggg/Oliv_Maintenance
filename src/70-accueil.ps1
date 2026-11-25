@@ -352,6 +352,9 @@ function Initialize-InfoPage {
     [void]$bar.Children.Add($InfoUI.WuBtn)
     [void]$bar.Children.Add($InfoUI.WuSearchBtn)
     [void]$bar.Children.Add($InfoUI.WuCancelBtn)
+    # suspension jusqu'à une date (Suspendre / Reprendre selon l'état)
+    $InfoUI.WuPauseBtn = New-Button 'Suspendre'; $InfoUI.WuPauseBtn.Add_Click({ Switch-WuPause })
+    [void]$bar.Children.Add($InfoUI.WuPauseBtn); Update-WuPauseButton
     [void]$c.Body.Children.Add($bar)
     Add-InfoCard $c $Ui.InfoRight
     Show-WuPending

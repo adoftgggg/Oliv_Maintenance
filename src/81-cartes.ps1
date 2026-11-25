@@ -45,9 +45,157 @@ function Update-CardVisibility([string]$Page) {
             [void]$cm.Items.Add($mi)
             $m2 = [Windows.Controls.MenuItem]::new(); $m2.Header = 'Cartes masquées...'; $m2.Add_Click({ Show-CardPicker })
             [void]$cm.Items.Add($m2)
+            $m3 = [Windows.Controls.MenuItem]::new(); $m3.Header = 'Disposition d''origine de l''onglet'; $m3.Tag = $Page; $m3.Add_Click({ param($s, $e) Reset-CardOrder "$($s.Tag)" })
+            [void]$cm.Items.Add($m3)
             $c.El.ContextMenu = $cm
+            Enable-CardMove $c
         }
     }
+    Restore-CardOrder $Page
+}
+
+# ---------- Cartes déplaçables dans leur onglet : glisser une carte par son en-tête (titre) et la lâcher sur une autre carte du
+# même onglet = les 2 cartes échangent leur place (y compris d'une colonne à l'autre). Disposition enregistrée par onglet dans
+# HKCU\Software\Oliv_Maintenance\Affichage\CartesOrdre_<onglet> (« clé|n° de colonne|position »), réappliquée à chaque affichage ;
+# clic droit > Disposition d'origine de l'onglet pour revenir à l'ordre de l'application (pris en compte au prochain lancement).
+$CardMove = @{ Applied = @{}; PageOf = @{}; ColDone = [Collections.Generic.HashSet[object]]::new(); BgSet = [Collections.Generic.HashSet[object]]::new() }
+# colonnes (panneaux) d'un onglet dans l'ordre de l'arbre : identifiant stable d'une colonne = son rang
+function Register-CardColumnDrop($Col) {
+    if ($CardMove.ColDone.Contains($Col)) { return }; [void]$CardMove.ColDone.Add($Col)
+    $Col.Add_DragOver({ param($s, $e)
+        $d = $CardMove.Drag; $e.Handled = $true; if (-not $d -or $d.Cols -notcontains $s) { $e.Effects = 'None'; return }
+        $e.Effects = 'Move'
+        # sous la dernière carte de la colonne : bloc en fin de colonne
+        if ($e.OriginalSource -eq $s -and $d.Block.Parent -ne $s) { if ($d.Block.Parent -is [Windows.Controls.Panel]) { $d.Block.Parent.Children.Remove($d.Block) }; [void]$s.Children.Add($d.Block) }
+    })
+    $Col.Add_Drop({ param($s, $e) $e.Handled = $true; Complete-CardDrag })
+}
+function Get-CardColumn([string]$Page) {
+    $cols = [Collections.ArrayList]::new()
+    foreach ($c in (Get-AllPageCard $Page)) { $p = $c.El.Parent; if ($p -is [Windows.Controls.Panel] -and -not $cols.Contains($p)) { [void]$cols.Add($p) } }
+    # sortie déroulée : chaque appel @(Get-CardColumn) reçoit les colonnes elles-mêmes (avec « , » il recevait un tableau dans un tableau)
+    $cols.ToArray()
+}
+# Déplacement visible : la carte saisie suit le pointeur (copie semi-transparente), sa place est remplacée par un bloc en
+# pointillés de même hauteur qui se déplace entre les cartes (au-dessus ou au-dessous de la carte survolée, selon la moitié
+# survolée) et pousse les autres ; au lâcher, la carte prend la place du bloc. Échap ou lâcher hors de l'onglet : rien ne bouge.
+function Enable-CardMove($C) {
+    $el = $C.El
+    if ("$($el.Tag)" -notlike 'card:*' -or $el.Parent -isnot [Windows.Controls.Panel]) { return }
+    $hdr = $null; try { $hdr = $el.Child.Children[0] } catch { $hdr = $null }
+    if (-not $hdr) { return }
+    $CardMove.PageOf[[Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($el)] = $C.Page
+    $el.AllowDrop = $true
+    $hdr.Cursor = [Windows.Input.Cursors]::SizeAll; $hdr.ToolTip = 'Glisser le titre pour déplacer la carte dans l''onglet'
+    $hdr.Tag = $C
+    $hdr.Add_PreviewMouseLeftButtonDown({ param($s, $e) $CardMove.Start = $e.GetPosition($null); $CardMove.Src = $s.Tag })
+    $hdr.Add_PreviewMouseMove({ param($s, $e)
+        if ($e.LeftButton -ne 'Pressed' -or -not $CardMove.Src -or $CardMove.Src -ne $s.Tag) { return }
+        $o = $e.OriginalSource; while ($o -and $o -ne $s) { if ($o -is [Windows.Controls.Primitives.ButtonBase]) { return }; $o = [Windows.Media.VisualTreeHelper]::GetParent($o) }
+        $d = $e.GetPosition($null) - $CardMove.Start
+        if ([math]::Abs($d.X) -lt 8 -and [math]::Abs($d.Y) -lt 8) { return }
+        $src = $CardMove.Src; $CardMove.Src = $null
+        Start-CardDrag $src $s
+    })
+    $el.Add_DragOver({ param($s, $e) Update-CardDrop $s $e })
+    $el.Add_Drop({ param($s, $e) $e.Handled = $true; Complete-CardDrag })
+}
+function New-CardGhostBlock([double]$H) {
+    $b = [Windows.Controls.Border]::new(); $b.Height = [math]::Max([double]60, $H); $b.Margin = New-Thickness 0 0 0 14; $b.CornerRadius = [Windows.CornerRadius]::new(10)
+    $b.BorderThickness = New-Thickness 2 2 2 2; $b.AllowDrop = $true
+    $b.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'AccentBrush')
+    $dash = [Windows.Shapes.Rectangle]::new(); $dash.StrokeDashArray = [Windows.Media.DoubleCollection]::new([double[]](6, 4)); $dash.StrokeThickness = 2; $dash.RadiusX = 10; $dash.RadiusY = 10
+    $dash.SetResourceReference([Windows.Shapes.Shape]::StrokeProperty, 'AccentBrush')
+    $b.BorderThickness = New-Thickness 0 0 0 0; $g = [Windows.Controls.Grid]::new(); [void]$g.Children.Add($dash)
+    $t = New-Text 'Déposer ici'; $t.HorizontalAlignment = 'Center'; $t.VerticalAlignment = 'Center'; $t.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'AccentBrush'); [void]$g.Children.Add($t)
+    $b.Child = $g; $b.Background = [Windows.Media.Brushes]::Transparent
+    $b.Add_DragOver({ param($s, $e) $e.Effects = 'Move'; $e.Handled = $true })
+    $b.Add_Drop({ param($s, $e) $e.Handled = $true; Complete-CardDrag })
+    $b
+}
+function Start-CardDrag($Src, $Handle) {
+    if (-not $Sync.FormsLoaded) { Add-Type -AssemblyName System.Windows.Forms, System.Drawing; $Sync.FormsLoaded = $true }
+    $el = $Src.El; $p = $el.Parent; if ($p -isnot [Windows.Controls.Panel]) { return }
+    # bloc de dépôt à la place de la carte, carte retirée du flux pendant le déplacement ; tout est remis en état dans finally,
+    # même si la préparation échoue (sinon la carte restait masquée derrière le bloc)
+    $blk = $null; $pop = $null; $cols = @(); $fb = $null
+    try {
+        $blk = New-CardGhostBlock $el.ActualHeight
+        $p.Children.Insert($p.Children.IndexOf($el), $blk); $el.Visibility = 'Collapsed'
+        # copie semi-transparente qui suit le pointeur
+        $pop = [Windows.Controls.Primitives.Popup]::new(); $pop.AllowsTransparency = $true; $pop.Placement = 'Absolute'; $pop.IsHitTestVisible = $false
+        $vb = [Windows.Media.VisualBrush]::new($el.Child); $r = [Windows.Shapes.Rectangle]::new(); $r.Width = $el.ActualWidth; $r.Height = $el.ActualHeight; $r.Fill = $vb; $r.Opacity = 0.75; $r.IsHitTestVisible = $false
+        $fr = [Windows.Controls.Border]::new(); $fr.CornerRadius = [Windows.CornerRadius]::new(10); $fr.Child = $r; $fr.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'PanelBrush'); $fr.Opacity = 0.9
+        $sh = [Windows.Media.Effects.DropShadowEffect]::new(); $sh.BlurRadius = 18; $sh.ShadowDepth = 4; $sh.Opacity = 0.35; $fr.Effect = $sh
+        $pop.Child = $fr
+        # colonnes de l'onglet : zones vides aussi réceptrices (fond transparent pour le test de survol)
+        $cols = @(Get-CardColumn $Src.Page | Where-Object { $_ -is [Windows.Controls.Panel] })
+        foreach ($c in $cols) { Register-CardColumnDrop $c; $c.AllowDrop = $true; if ($null -eq $c.Background) { $c.Background = [Windows.Media.Brushes]::Transparent; [void]$CardMove.BgSet.Add($c) } }
+        $CardMove.Drag = @{ Src = $Src; Block = $blk; Pop = $pop; Cols = $cols; Done = $false; Off = $(try { $Handle.TranslatePoint([Windows.Point]::new(0, 0), $el) } catch { [Windows.Point]::new(0, 0) }) }
+        $pop.IsOpen = $true; Move-CardGhost
+        $fb = [Windows.GiveFeedbackEventHandler]{ param($s, $e) Move-CardGhost }
+        $Handle.AddHandler([Windows.DragDrop]::GiveFeedbackEvent, $fb)
+        [void][Windows.DragDrop]::DoDragDrop($Handle, [Windows.DataObject]::new('OlivMCard', $Src), [Windows.DragDropEffects]::Move)
+    } finally {
+        if ($fb) { $Handle.RemoveHandler([Windows.DragDrop]::GiveFeedbackEvent, $fb) }
+        $d = $CardMove.Drag; $CardMove.Drag = $null
+        if ($pop) { $pop.IsOpen = $false }
+        foreach ($c in $cols) { $c.AllowDrop = $false; if ($CardMove.BgSet.Remove($c)) { $c.Background = $null } }
+        $bp = $(if ($blk) { $blk.Parent } else { $null })
+        # carte retirée d'abord, puis rang du bloc relu (sinon décalage d'une place quand la carte était au-dessus du bloc)
+        if ($d -and $d.Done -and $bp -is [Windows.Controls.Panel]) { $el.Parent.Children.Remove($el); $bp.Children.Insert($bp.Children.IndexOf($blk), $el) }
+        if ($bp -is [Windows.Controls.Panel]) { $bp.Children.Remove($blk) }
+        $el.Visibility = 'Visible'
+        if ($d -and $d.Done) { Save-CardOrder $Src.Page; Write-UiLog ('{0} : carte « {1} » déplacée.' -f $CardPages[$Src.Page], $Src.Title) 'APP' }
+    }
+}
+# copie sous le pointeur (position de l'écran convertie en unités WPF de la fenêtre)
+function Move-CardGhost {
+    $d = $CardMove.Drag; if (-not $d) { return }
+    $pt = [System.Windows.Forms.Cursor]::Position
+    $m = [Windows.PresentationSource]::FromVisual($Window).CompositionTarget.TransformFromDevice
+    $w = $m.Transform([Windows.Point]::new($pt.X, $pt.Y))
+    $d.Pop.HorizontalOffset = $w.X - $d.Off.X - 20; $d.Pop.VerticalOffset = $w.Y - 18
+}
+# survol : bloc de dépôt placé avant ou après la carte survolée (moitié haute / basse), ou en fin de colonne vide
+function Update-CardDrop($S, $E) {
+    $d = $CardMove.Drag; $E.Handled = $true
+    if (-not $d -or $CardMove.PageOf[[Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($S)] -ne $d.Src.Page) { $E.Effects = 'None'; return }
+    $E.Effects = 'Move'
+    $p = $S.Parent; if ($p -isnot [Windows.Controls.Panel]) { return }
+    $after = $E.GetPosition($S).Y -gt $S.ActualHeight / 2
+    $blk = $d.Block; $bp = $blk.Parent
+    $want = $p.Children.IndexOf($S) + $(if ($after) { 1 } else { 0 })
+    if ($bp -eq $p) { $cur = $p.Children.IndexOf($blk); if ($cur -lt $want) { $want-- }; if ($cur -eq $want) { return } }
+    if ($bp -is [Windows.Controls.Panel]) { $bp.Children.Remove($blk) }
+    if ($want -lt 0) { $want = 0 }; if ($want -gt $p.Children.Count) { $want = $p.Children.Count }
+    $p.Children.Insert($want, $blk)
+}
+function Complete-CardDrag { if ($CardMove.Drag) { $CardMove.Drag.Done = $true } }
+function Save-CardOrder([string]$Page) {
+    $cols = @(Get-CardColumn $Page); $l = [Collections.Generic.List[string]]::new()
+    foreach ($c in (Get-AllPageCard $Page)) { $p = $c.El.Parent; $ci = [array]::IndexOf($cols, $p); if ($ci -ge 0) { $l.Add(('{0}|{1}|{2}' -f $c.Key, $ci, $p.Children.IndexOf($c.El))) } }
+    try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue("CartesOrdre_$Page", [string[]]$l, [Microsoft.Win32.RegistryValueKind]::MultiString) } finally { $k.Close() } } catch { Write-UiLog "Disposition des cartes : $($_.Exception.Message)" 'WARN' }
+}
+# disposition enregistrée réappliquée une fois par construction de l'onglet (cartes construites à la demande)
+function Restore-CardOrder([string]$Page) {
+    $saved = @(Get-RegValue $CardRegKey "CartesOrdre_$Page" | Where-Object { $_ }); if (-not $saved.Count) { return }
+    $cards = @(Get-AllPageCard $Page); if (-not $cards.Count) { return }
+    $sig = ($cards | ForEach-Object { [Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($_.El) }) -join ','
+    if ($CardMove.Applied[$Page] -eq $sig) { return }
+    $cols = @(Get-CardColumn $Page); $byKey = @{}; foreach ($c in $cards) { $byKey[$c.Key] = $c }
+    $want = @(foreach ($x in $saved) { $f = "$x" -split '\|'; if ($f.Count -ge 4) { @{ Key = "$($f[0])|$($f[1])"; Col = [int]$f[2]; Pos = [int]$f[3] } } }) | Sort-Object { $_.Col }, { $_.Pos }
+    foreach ($w in $want) {
+        $c = $byKey[$w.Key]; if (-not $c -or $w.Col -ge $cols.Count) { continue }
+        $dst = $cols[$w.Col]; $p = $c.El.Parent; if ($p -isnot [Windows.Controls.Panel]) { continue }
+        $p.Children.Remove($c.El); $dst.Children.Insert([math]::Min($w.Pos, $dst.Children.Count), $c.El)
+    }
+    $CardMove.Applied[$Page] = $sig
+}
+function Reset-CardOrder([string]$Page) {
+    try { $k = Open-RegKey $CardRegKey $true; if ($k) { try { $k.DeleteValue("CartesOrdre_$Page", $false) } finally { $k.Close() } } } catch { Write-Ignored 'Disposition des cartes' $_ }
+    Write-UiLog ('{0} : disposition d''origine des cartes rétablie au prochain lancement de l''application.' -f $CardPages[$Page]) 'APP'
+    Show-Info ('Disposition d''origine de l''onglet {0} rétablie au prochain lancement de l''application.' -f $CardPages[$Page])
 }
 function Hide-Card($C) {
     [void]$HiddenCards.Add($C.Key); Save-HiddenCard; Set-CardShown $C $false

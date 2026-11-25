@@ -484,6 +484,7 @@ function Update-WuButton {
     $InfoUI.WuSearchBtn.Visibility = $(if ($busy -and -not $Sync.WuCancel) { 'Collapsed' } else { 'Visible' })
     $InfoUI.WuSearchBtn.IsEnabled = -not $busy -and -not $Sync.Running
     Update-AllSearchButton
+    Update-WuPauseButton
 }
 $WuScanFile = Join-Path (Get-LogPath 'Etat') 'wu-recherche.txt'
 $Sync.WuOwnLast = $null
@@ -596,4 +597,52 @@ function Show-WuPending {
     $InfoUI.WuBtn.Visibility = $(if ($n -gt 0) { 'Visible' } else { 'Collapsed' })
     Update-WuInstallButton
     Update-WuAge
+}
+# ---------- Suspension des mises à jour Windows (bouton à côté de Rechercher) : mêmes valeurs que Paramètres > Windows Update >
+# Suspendre (HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings, chaînes UTC « yyyy-MM-ddTHH:mm:ssZ »), 35 jours au plus
+# comme Windows (support.microsoft.com, « Pause updates in Windows ») ; reprise = valeurs retirées (équivalent du bouton
+# Reprendre : méthode non documentée par Microsoft, état relu ensuite pour vérification)
+$WuPauseKey = 'HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'
+$WuPauseNames = 'PauseUpdatesStartTime', 'PauseUpdatesExpiryTime', 'PauseFeatureUpdatesStartTime', 'PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesStartTime', 'PauseQualityUpdatesEndTime'
+function Get-WuPauseEnd {
+    $v = "$(Get-RegValue $WuPauseKey 'PauseUpdatesExpiryTime')"; if (-not $v) { return $null }
+    try { $t = [DateTime]::Parse($v, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal).ToLocalTime() } catch { return $null }
+    $(if ($t -gt [DateTime]::Now) { $t } else { $null })
+}
+function Update-WuPauseButton {
+    $b = $InfoUI.WuPauseBtn; if (-not $b) { return }
+    $end = Get-WuPauseEnd
+    $b.Content = $(if ($end) { 'Reprendre' } else { 'Suspendre' })
+    $b.ToolTip = $(if ($end) { 'Mises à jour Windows suspendues jusqu''au {0:dd/MM/yyyy à HH:mm} : cliquer pour les reprendre' -f $end } else { 'Suspendre les mises à jour Windows jusqu''à une date (35 jours au plus)' })
+    $b.IsEnabled = -not $Sync.Running
+}
+function Switch-WuPause {
+    $end = Get-WuPauseEnd
+    if ($end) {
+        if (-not (Confirm-Action ("Reprendre les mises à jour Windows ?`n`nElles sont suspendues jusqu'au {0:dd/MM/yyyy à HH:mm}. Windows recommencera à les télécharger et les installer." -f $end))) { return }
+        try {
+            $k = Open-RegKey $WuPauseKey $true; if ($k) { try { foreach ($n in $WuPauseNames) { $k.DeleteValue($n, $false) } } finally { $k.Close() } }
+            if (Get-WuPauseEnd) { throw 'suspension toujours active après retrait des valeurs (stratégie de groupe ?)' }
+            Write-UiLog 'Mises à jour Windows reprises.' 'OK'; Add-SessionEvent 'Windows Update' 'Suspension des mises à jour' 'reprise' 'ok'
+        } catch { Write-UiLog "Reprise des mises à jour Windows impossible : $($_.Exception.Message)" 'ERROR'; Show-Info "Reprise impossible.`n`n$($_.Exception.Message)`n`nÀ faire dans Paramètres > Windows Update > Reprendre les mises à jour." 'Error' }
+        Update-WuPauseButton; return
+    }
+    $dp = [Windows.Controls.DatePicker]::new(); $dp.Margin = New-Thickness 0 10 0 0; $dp.Width = 220; $dp.HorizontalAlignment = 'Left'
+    $dp.DisplayDateStart = [DateTime]::Today.AddDays(1); $dp.DisplayDateEnd = [DateTime]::Today.AddDays(35); $dp.SelectedDate = [DateTime]::Today.AddDays(7)
+    $dp.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, 'FgBrush')
+    $sp = [Windows.Controls.StackPanel]::new(); [void]$sp.Children.Add($dp)
+    $v = Show-Dialog "Suspendre les mises à jour Windows jusqu'au :`n`nDu lendemain à 35 jours au plus (limite de Windows). Elles reprennent seules à la date choisie ; correctifs de sécurité compris pendant la suspension." 'Question' @(@{ T = 'Annuler'; V = 'no'; C = $true }, @{ T = 'Suspendre'; V = 'ok'; S = 'PrimaryBtn' }) $null $null 520 $sp
+    if ($sp.Parent) { $sp.Parent.Content = $null }
+    if ($v -ne 'ok' -or -not $dp.SelectedDate) { return }
+    $d = [DateTime]$dp.SelectedDate
+    if ($d -le [DateTime]::Today -or $d -gt [DateTime]::Today.AddDays(35)) { Show-Info 'Date hors limites : du lendemain à 35 jours au plus.' 'Warn'; return }
+    try {
+        # fin à 23:59 locale de la date choisie, enregistrée en UTC comme Windows
+        $fmt = 'yyyy-MM-ddTHH:mm:ssZ'; $now = [DateTime]::UtcNow.ToString($fmt, [Globalization.CultureInfo]::InvariantCulture)
+        $to = $d.Date.AddHours(23).AddMinutes(59).ToUniversalTime().ToString($fmt, [Globalization.CultureInfo]::InvariantCulture)
+        foreach ($n in $WuPauseNames) { Set-RegValueDirect $WuPauseKey $n $(if ($n -match 'Start') { $now } else { $to }) 'String' }
+        $e = Get-WuPauseEnd; if (-not $e) { throw 'valeurs écrites mais suspension non relue' }
+        Write-UiLog ('Mises à jour Windows suspendues jusqu''au {0:dd/MM/yyyy à HH:mm}.' -f $e) 'OK'; Add-SessionEvent 'Windows Update' 'Suspension des mises à jour' ('jusqu''au {0:dd/MM/yyyy}' -f $e) 'warn'
+    } catch { Write-UiLog "Suspension des mises à jour Windows impossible : $($_.Exception.Message)" 'ERROR'; Show-Info "Suspension impossible.`n`n$($_.Exception.Message)" 'Error' }
+    Update-WuPauseButton
 }
