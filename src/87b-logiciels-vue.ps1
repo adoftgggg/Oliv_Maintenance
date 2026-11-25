@@ -107,7 +107,13 @@ function Set-SoftScope([string]$Mode) {
     # Mes applications : affichage du dernier inventaire, aucune recherche (simple lecture s'il n'y en a pas) ;
     # Mettre à jour : recherche complète à la 1re ouverture de la session
     if (-not $Sync.WgRunning -and -not (Test-SoftUpgrading)) {
-        if ($Mode -eq 'Upd' -and -not $SoftUI.Searched) { Start-SoftSearch }
+        # résultat déjà connu (recherche de fond du lancement, inventaire enregistré) de moins de 12 h : affiché tel quel, sans
+        # nouvelle recherche (bouton Rechercher pour relancer) ; recherche seulement s'il n'y a rien ou trop ancien
+        if ($Mode -eq 'Upd' -and -not $SoftUI.Searched -and -not $Sync.WgRunning) {
+            $r = $Sync.WgResult; $fresh = $false
+            if ($r -and -not $r.Error) { try { $fresh = ([DateTime]::Now - [DateTime](Get-SoftSearchStamp $r)).TotalHours -lt 12 } catch { $fresh = $false } }
+            if ($fresh) { $SoftUI.Searched = $true } else { Start-SoftSearch }
+        }
         elseif ($Mode -eq 'Mine' -and (-not $Sync.WgResult -or -not $SoftUI.ListRead -or ([DateTime]::Now - $SoftUI.ListRead).TotalMinutes -ge 2)) { Start-SoftSearch -ListOnly }
     }
     if ($SoftUI.SelSet -and $SoftUI.SelSet.Count) { $SoftUI.SelSet.Clear(); Update-SoftSelection }
