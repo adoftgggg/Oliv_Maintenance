@@ -599,9 +599,6 @@
                     <DockPanel><TextBlock Text="&#xE90F;" Style="{StaticResource CardIcon}" DockPanel.Dock="Left"/><TextBlock TextWrapping="Wrap" Text="Réparation" Style="{StaticResource Section}"/></DockPanel>
                     <TextBlock TextWrapping="Wrap" Style="{StaticResource Muted}" Margin="30,4,0,0" Text="Plantages, gels, écrans bleus, mises à jour en échec"/>
                   </StackPanel>
-                  <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,2,4,0"
-                             ToolTipService.ShowDuration="60000"
-                             ToolTip="Analyser : DISM /ScanHealth, SFC /verifyonly.&#x0a;Réparer : DISM /RestoreHealth, SFC /scannow.&#x0a;CHKDSK Analyser : état du volume (bit dirty, événements NTFS 55 / 98).&#x0a;CHKDSK Réparer : /F programmé au prochain démarrage (fsutil dirty set)."/>
                 </Grid>
                 <StackPanel x:Name="RepairList" Margin="0,8,0,0"/>
                 <Grid Margin="0,10,0,0">

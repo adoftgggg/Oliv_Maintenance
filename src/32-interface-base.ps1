@@ -15,17 +15,65 @@ function Save-HistoryEvent($E) {
         [IO.File]::AppendAllText($f, (ConvertTo-Json -Compress -InputObject $o) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
     } catch { Write-Ignored 'Historique du poste' $_ }
 }
-function Show-History {
-    $f = Join-Path (Get-LogPath 'Etat') 'historique.jsonl'
-    $rows = @(); try { if (Test-Path -LiteralPath $f) { $rows = @(Get-Content -LiteralPath $f -Encoding UTF8 | Where-Object { $_ } | ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } | Where-Object { $_ }) } } catch { Write-Ignored 'Lecture de l''historique' $_ }
-    $lines = [Collections.Generic.List[string]]::new(); $day = ''
-    foreach ($r in @($rows | Sort-Object { [DateTime]$_.Date } -Descending | Select-Object -First 1000)) {
-        $d = [DateTime]$r.Date; $k = $d.ToString('dddd dd MMMM yyyy')
-        if ($k -ne $day) { if ($day) { $lines.Add('') }; $lines.Add($k.Substring(0, 1).ToUpper() + $k.Substring(1)); $day = $k }
-        $lines.Add('  {0:HH:mm}   {1}  ·  {2}  ·  {3}' -f $d, $r.Cat, $r.Title, $r.Result)
+# Historique unique : actions de l'application (historique.jsonl) + mises à jour et installations de logiciels
+# (logiciels-historique.jsonl, écrit par la tâche de fond), filtrables par catégorie et par texte
+function Get-HistoryRow {
+    $out = [Collections.Generic.List[object]]::new()
+    foreach ($n in 'historique.jsonl', 'logiciels-historique.jsonl') {
+        $f = Join-Path (Get-LogPath 'Etat') $n
+        if (-not (Test-Path -LiteralPath $f)) { continue }
+        try {
+            foreach ($l in [IO.File]::ReadAllLines($f, [Text.Encoding]::UTF8)) {
+                if (-not $l) { continue }
+                try { $r = $l | ConvertFrom-Json } catch { continue }
+                try { $d = [DateTime]$r.Date } catch { continue }
+                if ($n -eq 'historique.jsonl') { $out.Add([pscustomobject]@{ D = $d; Cat = "$($r.Cat)"; Title = "$($r.Title)"; Result = "$($r.Result)" }) }
+                else {
+                    $res = $(if ($r.Ok) { $(if ($r.From -and $r.To) { "$($r.From) > $($r.To)" } elseif ($r.To) { "installé ($($r.To))" } else { 'réussi' }) } else { 'échec (code {0})' -f $r.Code })
+                    $out.Add([pscustomobject]@{ D = $d; Cat = 'Logiciels'; Title = "$($r.Name)"; Result = $res })
+                }
+            }
+        } catch { Write-Ignored 'Lecture de l''historique' $_ }
     }
-    if (-not $lines.Count) { $lines.Add('Aucune action enregistrée pour l''instant.') }
-    [void](Show-Dialog ('Historique du poste  ·  {0} action{1} (1 000 dernières affichées)' -f $rows.Count, $(if ($rows.Count -gt 1) { 's' } else { '' })) 'Info' $null @($lines) $null 900)
+    # une mise à jour de logiciel figure parfois aussi dans l'historique des actions : doublons (même minute, même titre) retirés
+    $seen = @{}
+    @($out | Sort-Object D -Descending | Where-Object { $k = '{0:yyyyMMddHHmm}|{1}' -f $_.D, $_.Title; if ($seen[$k]) { $false } else { $seen[$k] = 1; $true } })
+}
+function Format-HistoryLine($Rows) {
+    $lines = [Collections.Generic.List[string]]::new(); $day = ''
+    foreach ($r in @($Rows | Select-Object -First 1000)) {
+        $k = $r.D.ToString('dddd dd MMMM yyyy')
+        if ($k -ne $day) { if ($day) { $lines.Add('') }; $lines.Add($k.Substring(0, 1).ToUpper() + $k.Substring(1)); $day = $k }
+        $lines.Add(('  {0:HH:mm}   {1}  ·  {2}  ·  {3}' -f $r.D, $r.Cat, $r.Title, $r.Result))
+    }
+    if (-not $lines.Count) { $lines.Add('Aucune action ne correspond au filtre.') }
+    @($lines)
+}
+function Show-History {
+    $rows = @(Get-HistoryRow)
+    if (-not $rows.Count) { Show-Info "Historique du poste`n`nAucune action enregistrée pour l'instant."; return }
+    $st = @{ Rows = $rows; Cat = ''; Q = ''; Box = $null; Count = $null }
+    $bar = [Windows.Controls.DockPanel]::new(); $bar.LastChildFill = $true
+    $cb = [Windows.Controls.ComboBox]::new(); $cb.Width = 200; $cb.Height = 30; $cb.Margin = New-Thickness 0 0 10 0; $cb.VerticalContentAlignment = 'Center'
+    [void]$cb.Items.Add('Toutes les catégories'); foreach ($c in @($rows | ForEach-Object { $_.Cat } | Where-Object { $_ } | Sort-Object -Unique)) { [void]$cb.Items.Add($c) }
+    $cb.SelectedIndex = 0; [Windows.Controls.DockPanel]::SetDock($cb, 'Left'); [void]$bar.Children.Add($cb)
+    $cnt = New-Text ''; $cnt.VerticalAlignment = 'Center'; $cnt.Margin = New-Thickness 10 0 0 0; $cnt.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'MutedBrush')
+    [Windows.Controls.DockPanel]::SetDock($cnt, 'Right'); [void]$bar.Children.Add($cnt); $st.Count = $cnt
+    $q = [Windows.Controls.TextBox]::new(); $q.Height = 30; $q.VerticalContentAlignment = 'Center'; $q.ToolTip = 'Rechercher (titre, résultat, catégorie)'; [void]$bar.Children.Add($q)
+    $refresh = {
+        $f = @($st.Rows | Where-Object { (-not $st.Cat -or $_.Cat -eq $st.Cat) -and (-not $st.Q -or ('{0} {1} {2}' -f $_.Cat, $_.Title, $_.Result).IndexOf($st.Q, [StringComparison]::OrdinalIgnoreCase) -ge 0) })
+        $st.Count.Text = '{0} / {1}' -f $f.Count, $st.Rows.Count
+        if ($st.Box) { $st.Box.Text = (Format-HistoryLine $f) -join "`r`n"; $st.Box.ScrollToHome() }
+    }.GetNewClosure()
+    $cb.Tag = $refresh; $q.Tag = $refresh
+    $cb.Add_SelectionChanged({ param($s) $st.Cat = $(if ($s.SelectedIndex -gt 0) { "$($s.SelectedItem)" } else { '' }); & $s.Tag }.GetNewClosure())
+    $q.Add_TextChanged({ param($s) $st.Q = $s.Text.Trim(); & $s.Tag }.GetNewClosure())
+    $ready = {
+        param($dlg)
+        $ex = $dlg.FindName('Extra'); [Windows.Controls.DockPanel]::SetDock($ex, 'Top'); $ex.Margin = New-Thickness 0 12 0 0
+        $st.Box = @($dlg.FindName('List').Children)[0]; $dlg.Tag = $q; & $refresh
+    }.GetNewClosure()
+    [void](Show-Dialog ('Historique du poste  ·  {0} {1}' -f $rows.Count, (Get-Plural $rows.Count 'action' 'actions')) 'Info' $null @(Format-HistoryLine $rows) 'Actions de l''application, réglages, tâches, mises à jour et installations de logiciels (1 000 dernières lignes affichées par filtre).' 900 $bar $ready)
 }
 function Write-UiLog([string]$Message, [string]$Level = 'INFO') {
     $line = '{0} [{1,-5}] {2}' -f (Get-Date -Format 'HH:mm:ss'), $Level, $Message

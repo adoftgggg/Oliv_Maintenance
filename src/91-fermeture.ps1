@@ -130,6 +130,7 @@ $Window.Add_Closing({
         try { [void]$Sync.PS.BeginStop($null, $null) } catch {}
     }
     $Timer.Stop()
+    try { Save-TweakReference } catch { Write-Ignored 'Réglages de référence' $_ }
     Save-WindowPlacement 'Principale' $Window
     # fenêtres secondaires sans propriétaire : fermées explicitement
     foreach ($cw in @($TreeUI.Win, $SoftUI.Win, $MonUI.Win)) { if ($cw) { try { $cw.Close() } catch {} } }

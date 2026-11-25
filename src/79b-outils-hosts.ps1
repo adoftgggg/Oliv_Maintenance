@@ -156,6 +156,9 @@ try {
     }
     $plus = 0; foreach ($d in $set) { if (-not $old.Contains($d)) { $plus++ } }
     $moins = 0; foreach ($d in $old) { if (-not $set.Contains($d)) { $moins++ } }
+    # liste identique à celle déjà en place : fichier non réécrit. Chaque réécriture oblige le service Client DNS à relire
+    # tout le fichier (plus de 100 000 domaines), pendant quoi la résolution des noms est bloquée plusieurs minutes
+    if (-not $plus -and -not $moins -and $old.Count) { $r.Count = $l.Count; $r.Plus = 0; $r.Moins = 0; $r.OldCount = $old.Count; $r.Same = $true; $r.TotalS = ([DateTime]::Now - $t0j).TotalSeconds; $P.Pct = 100.0; $Sync.HostsDl = $r; return }
     if (-not [IO.File]::Exists($Sync.HostsBak)) { try { [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Sync.HostsBak)); [IO.File]::Copy($Sync.HostsPath, $Sync.HostsBak, $true) } catch { $null = $_ } }
     $fi = [IO.FileInfo]::new($Sync.HostsPath); if ($fi.Exists -and $fi.IsReadOnly) { $fi.IsReadOnly = $false }
     $sb = [Text.StringBuilder]::new(($own -join "`r`n").TrimEnd()); [void]$sb.Append("`r`n`r`n")
@@ -203,6 +206,9 @@ try {
     if ($l.Count -lt 1000) { throw "liste inattendue ($($l.Count) entrées)" }
     $own = [Collections.Generic.List[string]]::new(); $in = $false
     foreach ($x in ($txt -split "`r?`n")) { if ($x.StartsWith($A)) { $in = $true; continue }; if ($in) { if ($x.StartsWith($B)) { $in = $false }; continue }; [void]$own.Add($x) }
+    $old = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $in = $false
+    foreach ($x in ($txt -split "`r?`n")) { if ($x.StartsWith($A)) { $in = $true; continue }; if ($in) { if ($x.StartsWith($B)) { $in = $false } elseif ($x.StartsWith('0.0.0.0')) { foreach ($d in @($x -split '\s+' | Select-Object -Skip 1)) { if ($d) { [void]$old.Add($d) } } } } }
+    if ($old.Count -eq $set.Count -and $old.IsSupersetOf($set)) { Write-Line ('liste inchangée ({0} domaines) : fichier non réécrit' -f $l.Count); exit 0 }
     $g9 = for ($i = 0; $i -lt $l.Count; $i += 9) { '0.0.0.0 ' + ($l.GetRange($i, [math]::Min(9, $l.Count - $i)) -join ' ') }
     $blk = @("$A ($((Get-Date).ToString('dd/MM/yyyy'))) - source : $url - ne pas modifier") + @($g9) + @($B)
     $fi = [IO.FileInfo]::new($h); if ($fi.IsReadOnly) { $fi.IsReadOnly = $false }
@@ -231,13 +237,15 @@ function Set-HostsAuto([bool]$On) {
 function Get-HostsAutoLast { try { $l = @(Get-Content -LiteralPath (Join-Path $HostsAutoDir 'hosts-maj.log') -Encoding UTF8 -Tail 1); "$($l[-1])" } catch { '' } }
 function Start-HostsBlock([bool]$On) {
     if (-not $On) {
-        if (-not (Confirm-Action 'Retirer le blocage des pubs et traqueurs du fichier hosts ?')) { return }
+        if (-not (Confirm-Action "Retirer le blocage des pubs et traqueurs du fichier hosts ?`n`nCoupure réseau possible d'environ 5 minutes : à chaque modification du fichier hosts, le service Client DNS de Windows (Dnscache) doit relire tout le fichier ; tant que la relecture n'est pas finie, plus aucun nom de site n'est résolu (navigateur, mails, mises à jour).")) { return }
         try { $p = Split-HostsContent (Read-HostsFile); Write-HostsFile $p.Own @(); Write-UiLog 'Fichier hosts : blocage des pubs et traqueurs retiré.' 'OK' } catch { Show-Info "Écriture du fichier hosts impossible.`n`n$($_.Exception.Message)" 'Error' }
         try { Set-HostsAuto $false } catch { Write-Ignored 'Tâche de mise à jour du fichier hosts' $_ }
         Update-HostsCard; return
     }
     if ($BgJobs.ContainsKey('Hosts')) { return }
-    if (-not (Test-Path -LiteralPath $HostsBackup) -and -not (Confirm-Action "Bloquer les pubs, traqueurs et sites malveillants connus dans le fichier hosts ?`n`nListe StevenBlack/hosts (environ 80 000 domaines, mise à jour régulièrement), ajoutée à la fin du fichier sans toucher à vos entrées ; sauvegarde du fichier d'origine dans le dossier d'état. Un site qui ne s'affiche plus se débloque en retirant le blocage.")) { return }
+    $first = -not (Split-HostsContent (Read-HostsFile)).Block.Count
+    $msg = $(if ($first) { "Bloquer les pubs, traqueurs et sites malveillants connus dans le fichier hosts ?`n`nListe StevenBlack/hosts (environ 80 000 domaines, mise à jour régulièrement), ajoutée à la fin du fichier sans toucher à vos entrées ; sauvegarde du fichier d'origine dans le dossier d'état. Un site qui ne s'affiche plus se débloque en retirant le blocage." } else { "Actualiser la liste de blocage du fichier hosts ?`n`nSi la liste n'a pas changé, le fichier n'est pas réécrit et rien n'est coupé." })
+    if (-not (Confirm-Action ($msg + "`n`nCoupure réseau possible d'environ 5 minutes : à chaque modification du fichier hosts, le service Client DNS de Windows (Dnscache) doit relire tout le fichier ; tant que la relecture n'est pas finie, plus aucun nom de site n'est résolu (navigateur, mails, mises à jour)."))) { return }
     $Sync.HostsUrl = $HostsListUrl; $Sync.HostsDl = $null; $Sync.HostsProg = $null
     $Sync.HostsPath = $HostsFile; $Sync.HostsBak = $HostsBackup; $Sync.HostsA = $HostsMarkA; $Sync.HostsB = $HostsMarkB
     # avancement réel : octets reçus sur la taille annoncée par le serveur, temps écoulé ; barre indéterminée sans taille annoncée
@@ -275,7 +283,7 @@ $BgJobDone['Hosts'] = {
     if ($ToolsUI.HostsTimer) { $ToolsUI.HostsTimer.Stop(); $ToolsUI.HostsTimer = $null }
     $r = $Sync.HostsDl
     if (-not $r -or $r.Error) { $m = $(if ($r) { $r.Error } else { 'tâche interrompue' }); Write-UiLog "Fichier hosts : liste de blocage non appliquée - $m" 'ERROR'; Show-Info "Mise à jour de la liste de blocage impossible.`n`n$m" 'Error'; Update-HostsCard; return }
-    $chg = $(if ($r.OldCount) { '{0:N0} domaines ajoutés, {1:N0} retirés depuis la liste précédente' -f $r.Plus, $r.Moins } else { 'blocage activé' })
+    $chg = $(if ($r.Same) { 'liste déjà à jour, fichier hosts non réécrit (aucune coupure de la résolution DNS)' } elseif ($r.OldCount) { '{0:N0} domaines ajoutés, {1:N0} retirés depuis la liste précédente' -f $r.Plus, $r.Moins } else { 'blocage activé' })
     Write-UiLog ('Fichier hosts : {0:N0} domaines de pubs et traqueurs bloqués ({1}) en {2:N0} s (écriture du fichier : {3:N1} s).' -f $r.Count, $chg, $r.TotalS, $r.WriteS) 'OK'
     # 1re activation : mise à jour automatique hebdomadaire mise en place d'office (désactivable dans la carte)
     if (-not $r.OldCount -and -not (Get-HostsAutoTask)) { try { Set-HostsAuto $true; Write-UiLog 'Fichier hosts : mise à jour automatique hebdomadaire de la liste activée.' 'APP' } catch { Write-Ignored 'Tâche de mise à jour du fichier hosts' $_ } }
