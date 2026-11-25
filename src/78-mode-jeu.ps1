@@ -21,6 +21,10 @@ $pc = "$env:windir\System32\powercfg.exe"
 # planificateur multimédia (MMCSS) : bridage réseau pendant les lectures, part du processeur réservée, priorité des jeux
 $mm = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile'; $mg = "$mm\Tasks\Games"
 $svcs = 'SysMain', 'WSearch'
+# powercfg : sortie d'erreur jamais transformée en erreur bloquante (Windows PowerShell 5.1 avec $ErrorActionPreference
+# = 'Stop' arrêtait tout le script sur le 1er message de powercfg, ex. plan Performances optimales absent sur ce poste) ;
+# réussite lue sur le code de retour
+function Invoke-Pc([string[]]$A) { $ErrorActionPreference = 'Continue'; & $pc @A 2>&1 | Out-Null; $LASTEXITCODE }
 function Get-V($P, $N) { (Get-ItemProperty -LiteralPath $P -Name $N -ErrorAction SilentlyContinue).$N }
 function Set-V($P, $N, $V, $T) {
     if ($null -eq $V) { Remove-ItemProperty -LiteralPath $P -Name $N -ErrorAction SilentlyContinue; return }
@@ -46,10 +50,11 @@ if ($Mode -eq 'on') {
     [void][IO.Directory]::CreateDirectory($dir)
     ConvertTo-Json -InputObject $b | Set-Content -LiteralPath $sf -Encoding UTF8
     $done = @()
+    try {
     if (-not $NoPower) {
         $ok = $false
-        foreach ($id in 'e9a42b02-d5df-448d-aa00-03f14749eb61', 'b7a4e9c1-4c53-4a1f-9e2b-0a4d53595302') { & $pc /setactive $id 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { $ok = $true; break } }
-        if (-not $ok) { & $pc /duplicatescheme e9a42b02-d5df-448d-aa00-03f14749eb61 b7a4e9c1-4c53-4a1f-9e2b-0a4d53595302 2>&1 | Out-Null; & $pc /setactive b7a4e9c1-4c53-4a1f-9e2b-0a4d53595302 2>&1 | Out-Null; $ok = $LASTEXITCODE -eq 0 }
+        foreach ($id in 'e9a42b02-d5df-448d-aa00-03f14749eb61', 'b7a4e9c1-4c53-4a1f-9e2b-0a4d53595302') { if ((Invoke-Pc @('/setactive', $id)) -eq 0) { $ok = $true; break } }
+        if (-not $ok) { [void](Invoke-Pc @('/duplicatescheme', 'e9a42b02-d5df-448d-aa00-03f14749eb61', 'b7a4e9c1-4c53-4a1f-9e2b-0a4d53595302')); $ok = (Invoke-Pc @('/setactive', 'b7a4e9c1-4c53-4a1f-9e2b-0a4d53595302')) -eq 0 }
         $done += $(if ($ok) { 'Performances optimales' } else { 'plan d''alimentation inchangé (refusé)' })
     }
     if (-not $NoHags) { Set-V $gd 'HwSchMode' 2 'DWord'; $done += 'planification GPU (après redémarrage)' }
@@ -61,12 +66,18 @@ if ($Mode -eq 'on') {
     $done += 'priorité aux jeux et réseau non bridé (après redémarrage)'
     $st = @(foreach ($n in $b.Stopped) { try { Stop-Service -Name $n -Force -ErrorAction Stop; $n } catch { $null = $_ } })
     if ($st.Count) { $done += 'services suspendus : ' + ($st -join ', ') }
+    } catch {
+        # échec en cours d'activation : réglages déjà changés remis à leur valeur d'avant, mode jeu laissé désactivé
+        $err = $_.Exception.Message
+        try { & $MyInvocation.MyCommand.ScriptBlock -Mode off -UserRoot $UserRoot | Out-Null } catch { Remove-Item -LiteralPath $sf -Force -ErrorAction SilentlyContinue }
+        throw "activation impossible ($err) : réglages d'avant restaurés"
+    }
     return ('activé : ' + ($done -join ', '))
 }
 # off : valeurs d'avant remises à l'identique
 if (-not $on) { return 'déjà désactivé' }
 $b = Get-Content -LiteralPath $sf -Raw | ConvertFrom-Json
-if (-not $b.NoPower -and $b.Plan) { & $pc /setactive $b.Plan 2>&1 | Out-Null }
+if (-not $b.NoPower -and $b.Plan) { [void](Invoke-Pc @('/setactive', $b.Plan)) }
 if (-not $b.NoHags) { Set-V $gd 'HwSchMode' $b.HwSchMode 'DWord' }
 Set-V $ms 'MouseSpeed' $b.MouseSpeed 'String'; Set-V $ms 'MouseThreshold1' $b.MouseThreshold1 'String'; Set-V $ms 'MouseThreshold2' $b.MouseThreshold2 'String'
 $sp = $(if ($null -ne $b.MouseSpeed) { [int]$b.MouseSpeed } else { 1 }); $t1 = $(if ($null -ne $b.MouseThreshold1) { [int]$b.MouseThreshold1 } else { 6 }); $t2 = $(if ($null -ne $b.MouseThreshold2) { [int]$b.MouseThreshold2 } else { 10 })
