@@ -45,7 +45,7 @@ function Update-CardVisibility([string]$Page) {
             [void]$cm.Items.Add($mi)
             $m2 = [Windows.Controls.MenuItem]::new(); $m2.Header = 'Cartes masquées...'; $m2.Add_Click({ Show-CardPicker })
             [void]$cm.Items.Add($m2)
-            $m3 = [Windows.Controls.MenuItem]::new(); $m3.Header = 'Disposition d''origine de l''onglet'; $m3.Tag = $Page; $m3.Add_Click({ param($s, $e) Reset-CardOrder "$($s.Tag)" })
+            $m3 = [Windows.Controls.MenuItem]::new(); $m3.Header = 'Ordre des cartes par défaut (cet onglet)'; $m3.Tag = $Page; $m3.Add_Click({ param($s, $e) Reset-CardOrder "$($s.Tag)" })
             [void]$cm.Items.Add($m3)
             $c.El.ContextMenu = $cm
             Enable-CardMove $c
@@ -57,8 +57,8 @@ function Update-CardVisibility([string]$Page) {
 # ---------- Cartes déplaçables dans leur onglet : glisser une carte par son en-tête (titre) et la lâcher sur une autre carte du
 # même onglet = les 2 cartes échangent leur place (y compris d'une colonne à l'autre). Disposition enregistrée par onglet dans
 # HKCU\Software\Oliv_Maintenance\Affichage\CartesOrdre_<onglet> (« clé|n° de colonne|position »), réappliquée à chaque affichage ;
-# clic droit > Disposition d'origine de l'onglet pour revenir à l'ordre de l'application (pris en compte au prochain lancement).
-$CardMove = @{ Applied = @{}; PageOf = @{}; ColDone = [Collections.Generic.HashSet[object]]::new(); BgSet = [Collections.Generic.HashSet[object]]::new() }
+# clic droit > Ordre des cartes par défaut (cet onglet), ou bouton de Paramètres > Cartes affichées, pour revenir tout de suite à l'ordre de l'application.
+$CardMove = @{ Applied = @{}; PageOf = @{}; Orig = @{}; ColDone = [Collections.Generic.HashSet[object]]::new(); BgSet = [Collections.Generic.HashSet[object]]::new() }
 # colonnes (panneaux) d'un onglet dans l'ordre de l'arbre : identifiant stable d'une colonne = son rang
 function Register-CardColumnDrop($Col) {
     if ($CardMove.ColDone.Contains($Col)) { return }; [void]$CardMove.ColDone.Add($Col)
@@ -70,9 +70,13 @@ function Register-CardColumnDrop($Col) {
     })
     $Col.Add_Drop({ param($s, $e) $e.Handled = $true; Complete-CardDrag })
 }
+# bandeaux fixes (pleine largeur, hors colonnes) : ni déplaçables, ni zones de dépôt, ni dans l'ordre des flèches
+$CardFixed = @('Info|Processeur', 'Perf|Point de restauration')
+function Test-CardFixed($C) { $CardFixed -contains $C.Key }
 function Get-CardColumn([string]$Page) {
     $cols = [Collections.ArrayList]::new()
-    foreach ($c in (Get-AllPageCard $Page)) { $p = $c.El.Parent; if ($p -is [Windows.Controls.Panel] -and -not $cols.Contains($p)) { [void]$cols.Add($p) } }
+    $fixed = @(Get-AllPageCard $Page | Where-Object { Test-CardFixed $_ } | ForEach-Object { $_.El.Parent })
+    foreach ($c in (Get-AllPageCard $Page)) { $p = $c.El.Parent; if ($p -is [Windows.Controls.Panel] -and -not $cols.Contains($p) -and $fixed -notcontains $p) { [void]$cols.Add($p) } }
     # sortie déroulée : chaque appel @(Get-CardColumn) reçoit les colonnes elles-mêmes (avec « , » il recevait un tableau dans un tableau)
     $cols.ToArray()
 }
@@ -81,7 +85,7 @@ function Get-CardColumn([string]$Page) {
 # survolée) et pousse les autres ; au lâcher, la carte prend la place du bloc. Échap ou lâcher hors de l'onglet : rien ne bouge.
 function Enable-CardMove($C) {
     $el = $C.El
-    if ("$($el.Tag)" -notlike 'card:*' -or $el.Parent -isnot [Windows.Controls.Panel]) { return }
+    if ((Test-CardFixed $C) -or "$($el.Tag)" -notlike 'card:*' -or $el.Parent -isnot [Windows.Controls.Panel]) { return }
     $hdr = $null; try { $hdr = $el.Child.Children[0] } catch { $hdr = $null }
     if (-not $hdr) { return }
     $CardMove.PageOf[[Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($el)] = $C.Page
@@ -178,7 +182,18 @@ function Save-CardOrder([string]$Page) {
     try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue("CartesOrdre_$Page", [string[]]$l, [Microsoft.Win32.RegistryValueKind]::MultiString) } finally { $k.Close() } } catch { Write-UiLog "Disposition des cartes : $($_.Exception.Message)" 'WARN' }
 }
 # disposition enregistrée réappliquée une fois par construction de l'onglet (cartes construites à la demande)
+# disposition d'origine (celle construite par l'application) relevée avant toute remise en ordre : bouton « Ordre par défaut »
+# appliqué tout de suite, sans relancer l'application
+function Save-CardOrigin([string]$Page) {
+    $cols = @(Get-CardColumn $Page)
+    foreach ($c in (Get-AllPageCard $Page)) {
+        $h = [Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($c.El); if ($CardMove.Orig.ContainsKey($h)) { continue }
+        $p = $c.El.Parent; $ci = [array]::IndexOf($cols, $p)
+        if ($ci -ge 0) { $CardMove.Orig[$h] = @{ C = $c; Page = $Page; Col = $ci; Pos = $p.Children.IndexOf($c.El) } }
+    }
+}
 function Restore-CardOrder([string]$Page) {
+    Save-CardOrigin $Page
     $saved = @(Get-RegValue $CardRegKey "CartesOrdre_$Page" | Where-Object { $_ }); if (-not $saved.Count) { return }
     $cards = @(Get-AllPageCard $Page); if (-not $cards.Count) { return }
     $sig = ($cards | ForEach-Object { [Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($_.El) }) -join ','
@@ -192,10 +207,29 @@ function Restore-CardOrder([string]$Page) {
     }
     $CardMove.Applied[$Page] = $sig
 }
-function Reset-CardOrder([string]$Page) {
+function Reset-CardOrder([string]$Page, [switch]$Quiet) {
     try { $k = Open-RegKey $CardRegKey $true; if ($k) { try { $k.DeleteValue("CartesOrdre_$Page", $false) } finally { $k.Close() } } } catch { Write-Ignored 'Disposition des cartes' $_ }
-    Write-UiLog ('{0} : disposition d''origine des cartes rétablie au prochain lancement de l''application.' -f $CardPages[$Page]) 'APP'
-    Show-Info ('Disposition d''origine de l''onglet {0} rétablie au prochain lancement de l''application.' -f $CardPages[$Page])
+    $cols = @(Get-CardColumn $Page)
+    foreach ($o in @($CardMove.Orig.Values | Where-Object { $_.Page -eq $Page } | Sort-Object { $_.Col }, { $_.Pos })) {
+        if ($o.Col -ge $cols.Count) { continue }
+        $el = $o.C.El; $p = $el.Parent; if ($p -isnot [Windows.Controls.Panel]) { continue }
+        $dst = $cols[$o.Col]; $p.Children.Remove($el); $dst.Children.Insert([math]::Min($o.Pos, $dst.Children.Count), $el)
+    }
+    $CardMove.Applied.Remove($Page)
+    if (-not $Quiet) { Write-UiLog ('{0} : ordre des cartes par défaut rétabli.' -f $CardPages[$Page]) 'APP' }
+}
+# une place plus haut / plus bas dans l'onglet (ordre de lecture : colonne par colonne) ; en haut d'une colonne, la carte
+# passe en bas de la colonne précédente, en bas d'une colonne, en haut de la suivante
+function Move-CardStep($C, [int]$Dir) {
+    $cols = @(Get-CardColumn $C.Page); $el = $C.El; $p = $el.Parent; $ci = [array]::IndexOf($cols, $p); if ($ci -lt 0) { return }
+    $cards = @(Get-AllPageCard $C.Page | Where-Object { $_.El.Parent -eq $p } | ForEach-Object { $_.El })
+    $k = [array]::IndexOf($cards, $el)
+    if ($Dir -lt 0 -and $k -gt 0) { $p.Children.Remove($el); $p.Children.Insert($p.Children.IndexOf($cards[$k - 1]), $el) }
+    elseif ($Dir -gt 0 -and $k -lt $cards.Count - 1) { $p.Children.Remove($el); $p.Children.Insert($p.Children.IndexOf($cards[$k + 1]) + 1, $el) }
+    elseif ($Dir -lt 0 -and $ci -gt 0) { $p.Children.Remove($el); [void]$cols[$ci - 1].Children.Add($el) }
+    elseif ($Dir -gt 0 -and $ci -lt $cols.Count - 1) { $p.Children.Remove($el); $cols[$ci + 1].Children.Insert(0, $el) }
+    else { return }
+    Save-CardOrder $C.Page
 }
 function Hide-Card($C) {
     [void]$HiddenCards.Add($C.Key); Save-HiddenCard; Set-CardShown $C $false
@@ -253,25 +287,44 @@ function Show-CardPicker {
     if ($ToolsUI.UndoPop) { $ToolsUI.UndoPop.IsOpen = $false }
     if (-not $Lazy.Done) { New-DeferredPage }
     if (-not $ToolsUI.Built) { New-ToolsPage }
-    $wrap = [Windows.Controls.WrapPanel]::new()
-    $boxes = [Collections.ArrayList]::new()
+    # disposition enregistrée appliquée à tous les onglets avant affichage : la liste suit l'ordre réel des cartes
+    foreach ($p in $CardPages.Keys) { try { Restore-CardOrder $p } catch { Write-Ignored 'Disposition des cartes' $_ } }
+    $wrap = [Windows.Controls.WrapPanel]::new(); $CardMove.PickWrap = $wrap
+    Update-CardPickerList
+    $sv = [Windows.Controls.ScrollViewer]::new(); $sv.VerticalScrollBarVisibility = 'Auto'; $sv.MaxHeight = 520; $sv.Content = $wrap
+    $v = Show-Dialog "Cartes affichées`n`nDécocher une carte la masque dans son onglet, la cocher la réaffiche. Flèches : monter ou descendre la carte dans son onglet (ordre de lecture, colonne par colonne). Tout est appliqué tout de suite." 'Info' @(@{ T = 'Ordre par défaut'; V = 'order' }, @{ T = 'Tout réafficher'; V = 'all' }, @{ T = 'Fermer'; V = 'ok'; C = $true }) $null $null 980 $sv
+    if ($sv.Parent) { $sv.Parent.Content = $null }
+    if ($v -eq 'all') { Show-AllCard; Show-CardPicker }
+    elseif ($v -eq 'order') { foreach ($p in $CardPages.Keys) { Reset-CardOrder $p -Quiet }; Write-UiLog 'Ordre des cartes par défaut rétabli dans tous les onglets.' 'APP'; Show-CardPicker }
+}
+# liste de la fenêtre : un bloc par onglet, cartes dans l'ordre affiché, case + flèches haut / bas
+function Update-CardPickerList {
+    $wrap = $CardMove.PickWrap; if (-not $wrap) { return }
+    $wrap.Children.Clear()
     foreach ($p in $CardPages.Keys) {
-        $cards = @(Get-AllPageCard $p); if (-not $cards.Count) { continue }
-        $col = [Windows.Controls.StackPanel]::new(); $col.Width = 270; $col.Margin = New-Thickness 0 0 14 14
+        # bandeaux fixes en tête, cartes déplaçables ensuite (flèches limitées à celles-ci)
+        $all = @(Get-AllPageCard $p); if (-not $all.Count) { continue }
+        $cards = @(@($all | Where-Object { Test-CardFixed $_ }) + @($all | Where-Object { -not (Test-CardFixed $_) }))
+        $nFix = @($all | Where-Object { Test-CardFixed $_ }).Count
+        $col = [Windows.Controls.StackPanel]::new(); $col.Width = 300; $col.Margin = New-Thickness 0 0 14 14
         $h = New-Text $CardPages[$p]; $h.FontWeight = [Windows.FontWeights]::SemiBold; $h.FontSize = 14; $h.Margin = New-Thickness 8 0 0 4; [void]$col.Children.Add($h)
-        foreach ($c in $cards) {
+        for ($i = 0; $i -lt $cards.Count; $i++) {
+            $c = $cards[$i]
+            $g = [Windows.Controls.Grid]::new()
+            foreach ($w in '*', 'Auto', 'Auto') { $cd = [Windows.Controls.ColumnDefinition]::new(); $cd.Width = $(if ($w -eq '*') { [Windows.GridLength]::new(1, 'Star') } else { [Windows.GridLength]::Auto }); [void]$g.ColumnDefinitions.Add($cd) }
             # case cochée = carte affichée ; gestionnaires posés après l'état initial (clic sur la case ou sur la ligne)
             $ct = New-Text $c.Title; $ct.TextWrapping = 'Wrap'
-            $cb = New-HoverCheck $col '' $null $null; $cb.Content = $ct
-            $cb.Tag = $c; $cb.IsChecked = -not $HiddenCards.Contains($c.Key); [void]$boxes.Add($cb)
+            $cb = New-HoverCheck $g '' $null $null; $cb.Content = $ct
+            $cb.Tag = $c; $cb.IsChecked = -not $HiddenCards.Contains($c.Key)
             $cb.Add_Checked({ param($s, $e) [void]$HiddenCards.Remove($s.Tag.Key); Save-HiddenCard; Set-CardShown $s.Tag $true; Update-CardCount })
             $cb.Add_Unchecked({ param($s, $e) [void]$HiddenCards.Add($s.Tag.Key); Save-HiddenCard; Set-CardShown $s.Tag $false; Update-CardCount })
+            $movable = -not (Test-CardFixed $c) -and "$($c.El.Tag)" -like 'card:*' -and $c.El.Parent -is [Windows.Controls.Panel]
+            $up = New-ToolIconButton 0xE70E 'Monter' $c { param($s, $e) Move-CardStep $s.Tag -1; Update-CardPickerList }; $up.IsEnabled = $movable -and $i -gt $nFix; [Windows.Controls.Grid]::SetColumn($up, 1); [void]$g.Children.Add($up)
+            $dn = New-ToolIconButton 0xE70D 'Descendre' $c { param($s, $e) Move-CardStep $s.Tag 1; Update-CardPickerList }; $dn.IsEnabled = $movable -and $i -lt $cards.Count - 1; [Windows.Controls.Grid]::SetColumn($dn, 2); [void]$g.Children.Add($dn)
+            [void]$col.Children.Add($g)
         }
         [void]$wrap.Children.Add($col)
     }
-    $sv = [Windows.Controls.ScrollViewer]::new(); $sv.VerticalScrollBarVisibility = 'Auto'; $sv.MaxHeight = 520; $sv.Content = $wrap
-    $v = Show-Dialog "Cartes affichées`n`nDécocher une carte la masque dans son onglet, la cocher la réaffiche ; appliqué tout de suite. Raccourci : clic droit sur une carte > Masquer cette carte." 'Info' @(@{ T = 'Tout réafficher'; V = 'all' }, @{ T = 'Fermer'; V = 'ok'; C = $true }) $null $null 920 $sv
-    if ($v -eq 'all') { Show-AllCard; Show-CardPicker }
 }
 function Update-CardCount { if ($SetUI.CardsCount) { $SetUI.CardsCount.Text = $(if ($HiddenCards.Count) { '{0} carte(s) masquée(s)' -f $HiddenCards.Count } else { 'Aucune carte masquée.' }) } }
 
