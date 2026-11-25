@@ -27,13 +27,18 @@ public static class FolderPick {
     }
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
     static extern void SHCreateItemFromParsingName(string path, IntPtr pbc, ref Guid riid, out IShellItem si);
+    // objets COM (boîte de dialogue, dossier de départ, résultat) libérés dès la fin, sans attendre le ramasse-miettes
+    static void Free(object o) { if (o != null && Marshal.IsComObject(o)) Marshal.ReleaseComObject(o); }
     public static string Pick(IntPtr owner, string title, string start) {
-        IFileOpenDialog d = (IFileOpenDialog)new FileOpenDialogRCW();
-        uint o; d.GetOptions(out o); d.SetOptions(o | 0x20 | 0x40 | 0x800);   // PICKFOLDERS | FORCEFILESYSTEM | PATHMUSTEXIST
-        if (!string.IsNullOrEmpty(title)) d.SetTitle(title);
-        if (!string.IsNullOrEmpty(start)) { try { Guid g = typeof(IShellItem).GUID; IShellItem si; SHCreateItemFromParsingName(start, IntPtr.Zero, ref g, out si); d.SetFolder(si); } catch { } }
-        if (d.Show(owner) != 0) return null;
-        IShellItem r; d.GetResult(out r); string p; r.GetDisplayName(0x80058000, out p); return p;   // SIGDN_FILESYSPATH
+        IFileOpenDialog d = null; IShellItem si = null, r = null;
+        try {
+            d = (IFileOpenDialog)new FileOpenDialogRCW();
+            uint o; d.GetOptions(out o); d.SetOptions(o | 0x20 | 0x40 | 0x800);   // PICKFOLDERS | FORCEFILESYSTEM | PATHMUSTEXIST
+            if (!string.IsNullOrEmpty(title)) d.SetTitle(title);
+            if (!string.IsNullOrEmpty(start)) { try { Guid g = typeof(IShellItem).GUID; SHCreateItemFromParsingName(start, IntPtr.Zero, ref g, out si); d.SetFolder(si); } catch { } }
+            if (d.Show(owner) != 0) return null;
+            d.GetResult(out r); string p; r.GetDisplayName(0x80058000, out p); return p;   // SIGDN_FILESYSPATH
+        } finally { Free(r); Free(si); Free(d); }
     }
 }
 }

@@ -47,15 +47,29 @@ namespace _OlivM
                     return Fail("Les droits du dossier " + root + " n'ont pas pu être sécurisés : lancement annulé.\n\nVérifier le propriétaire et les droits du dossier (icacls \"" + root + "\").");
 
                 Directory.CreateDirectory(app);
-                foreach (string f in Directory.GetFiles(app)) File.Delete(f);
-                foreach (string d in Directory.GetDirectories(app)) Directory.Delete(d, true);
                 string ps1 = Path.Combine(app, "Oliv_Maintenance.ps1");
+                // script écrit dans un fichier temporaire propre à ce lancement puis substitué d'un coup (File.Replace) : un
+                // 2e lancement rapproché (double-clic répété, relance) ne supprime plus le script qu'une instance est en train de lire
+                string tmp = Path.Combine(app, "Oliv_Maintenance." + Process.GetCurrentProcess().Id + ".tmp");
                 using (Stream res = Assembly.GetExecutingAssembly().GetManifestResourceStream("app.ps1.gz"))
                 using (GZipStream gz = new GZipStream(res, CompressionMode.Decompress))
-                using (FileStream fs = new FileStream(ps1, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+                using (FileStream fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
                 {
                     gz.CopyTo(fs);
                 }
+                for (int k = 0; ; k++)
+                {
+                    try
+                    {
+                        if (File.Exists(ps1)) File.Replace(tmp, ps1, null); else File.Move(tmp, ps1);
+                        break;
+                    }
+                    catch (IOException) { if (k >= 40) throw; System.Threading.Thread.Sleep(100); }
+                    catch (UnauthorizedAccessException) { if (k >= 40) throw; System.Threading.Thread.Sleep(100); }
+                }
+                // restes (anciens fichiers, sous-dossiers) : supprimés s'ils ne sont pas en cours d'utilisation
+                foreach (string f in Directory.GetFiles(app)) { if (!string.Equals(f, ps1, StringComparison.OrdinalIgnoreCase)) { try { File.Delete(f); } catch { } } }
+                foreach (string d in Directory.GetDirectories(app)) { try { Directory.Delete(d, true); } catch { } }
 
                 string sys32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
                 ProcessStartInfo psi = new ProcessStartInfo(Path.Combine(sys32, @"WindowsPowerShell\v1.0\powershell.exe"));

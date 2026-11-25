@@ -305,6 +305,8 @@ function Test-IsLaptop {
 $NeedCache = @{}
 function Test-Need([string]$Need) {
     if (-not $Need) { return $true }
+    # plusieurs conditions « A|B » : toutes requises
+    if ($Need -like '*|*') { foreach ($n in $Need -split '\|') { if (-not (Test-Need $n)) { return $false } }; return $true }
     if ($NeedCache.ContainsKey($Need)) { return $NeedCache[$Need] }
     $v = $true
     try {
@@ -317,6 +319,8 @@ function Test-Need([string]$Need) {
             # signature SMB : exigée par défaut depuis Windows 11 24H2 (build 26100), réglage utile avant
             'OldSmb' { $v = $Build -lt 26100 }
             'NotHome' { $v = "$(Get-RegValue 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion' 'EditionID')" -notlike 'Core*' }
+            # stratégies honorées seulement en Entreprise / Éducation (DisableSettingsAgent : Pro exclu par Microsoft)
+            'Entreprise' { $v = "$(Get-RegValue 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion' 'EditionID')" -match '(?i)^(Enterprise|Education|IoTEnterprise)' }
             # Defender actif (ni passif ni désactivé au profit d'un autre antivirus) : réglages Defender utiles
             'Defender' { $v = "$((Get-MpComputerStatus -ErrorAction Stop).AMRunningMode)" -eq 'Normal' }
             # version cible : éditions Pro / Entreprise / Éducation (pas Famille = Core*), version affichée lisible (24H2...)

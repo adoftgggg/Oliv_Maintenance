@@ -234,11 +234,14 @@ public static class FileLock {
         if (RmStartSession(out h, 0, key) != 0) return res.ToArray();
         try {
             if (RmRegisterResources(h, (uint)files.Length, files, 0, IntPtr.Zero, 0, null) != 0) return res.ToArray();
+            // liste relue jusqu'à 3 fois : un processus qui ouvre un des fichiers entre les 2 appels renvoyait ERROR_MORE_DATA
+            // (234) au 2e appel, et la liste restait vide (rien de fermé, installeur en échec « fichier en cours d'utilisation »)
             uint needed, count = 0, reasons = 0;
             int rc = RmGetList(h, out needed, ref count, null, ref reasons);
-            if (rc == 234 && needed > 0) {
-                RmProcessInfo[] info = new RmProcessInfo[needed]; count = needed;
-                if (RmGetList(h, out needed, ref count, info, ref reasons) == 0) for (int i = 0; i < count; i++) res.Add(info[i].Process.Pid);
+            for (int k = 0; rc == 234 && needed > 0 && k < 3; k++) {
+                RmProcessInfo[] info = new RmProcessInfo[needed + 4]; count = needed + 4;
+                rc = RmGetList(h, out needed, ref count, info, ref reasons);
+                if (rc == 0) for (int i = 0; i < count; i++) res.Add(info[i].Process.Pid);
             }
         } finally { RmEndSession(h); }
         return res.ToArray();

@@ -104,9 +104,9 @@ $Tweaks = @(
         Reg=@(
             @{ P='HKCU\Software\Policies\Microsoft\Windows\Explorer'; N='DisableSearchBoxSuggestions'; T='DWord'; On=$null; Off=1; D=0 }
             @{ P='HKCU\Software\Microsoft\Windows\CurrentVersion\Search'; N='BingSearchEnabled'; T='DWord'; On=$null; Off=0; D=1 }) }
-    [pscustomobject]@{ Id='StoreSuggest'; Page='Perso'; Group='Menu démarrer'; MinBuild=26200; Effect='E'
+    [pscustomobject]@{ Id='StoreSuggest'; Page='Perso'; Group='Menu démarrer'; MinBuild=26300; Effect='E'
         Label='Suggestions du Microsoft Store dans la recherche'
-        Desc='Applications du Store proposées dans les résultats de la recherche Windows (Windows 11 26H2 et suivants).'
+        Desc='Applications du Store proposées dans les résultats de la recherche Windows (Windows 11 26H2, build 26300 et suivants).'
         Tip='HKCU\Software\Microsoft\Windows\CurrentVersion\SearchSettings\IsStoreSuggestionsEnabled : 1 affichées (défaut), 0 masquées.'
         Reg=@( @{ P='HKCU\Software\Microsoft\Windows\CurrentVersion\SearchSettings'; N='IsStoreSuggestionsEnabled'; T='DWord'; On=1; Off=0; D=1 }) }
     [pscustomobject]@{ Id='StartReco'; Page='Perso'; Group='Menu démarrer'; MinBuild=22621; Effect='E'
@@ -148,14 +148,9 @@ $Tweaks = @(
     [pscustomobject]@{ Id='SearchMode'; Page='Perso'; Group='Barre des tâches'; MinBuild=0; Effect='E'; Kind='Choice'
         Label='Recherche'
         Desc='Affichage de la recherche dans la barre des tâches.'
-        Tip='Search\SearchboxTaskbarMode : 0 masquée, 1 icône, 2 zone de recherche.'
-        Options=@( @{ L='Masquée'; V=0 }, @{ L='Icône'; V=1 }, @{ L='Zone'; V=2 })
-        Reg=@( @{ P='HKCU\Software\Microsoft\Windows\CurrentVersion\Search'; N='SearchboxTaskbarMode'; T='DWord'; D=1 }) }
-    [pscustomobject]@{ Id='BatteryPct'; Page='Perso'; Group='Barre des tâches'; MinBuild=26100; Effect='E'; Need='Laptop'
-        Label='Pourcentage de batterie'
-        Desc='Affiche le pourcentage à côté de l''icône de batterie (Windows 11 24H2 / 25H2 build 7019 et suivants). Postes portables uniquement.'
-        Tip='Explorer\Advanced\IsBatteryPercentageEnabled : 1 affiché, 0 masqué (défaut).'
-        Reg=@( @{ P=$ADV; N='IsBatteryPercentageEnabled'; T='DWord'; On=1; Off=0; D=0 }) }
+        Tip='Search\SearchboxTaskbarMode : 0 masquée, 1 icône, 2 zone de recherche, 3 icône et libellé (Windows 11). Absente : icône sous Windows 11, zone sous Windows 10.'
+        Options=@( @{ L='Masquée'; V=0 }, @{ L='Icône'; V=1 }, @{ L='Zone'; V=2 }, @{ L='Icône et libellé'; V=3; H=($Build -lt 22621) })
+        Reg=@( @{ P='HKCU\Software\Microsoft\Windows\CurrentVersion\Search'; N='SearchboxTaskbarMode'; T='DWord'; D=$(if ($Build -ge 22000) { 1 } else { 2 }) }) }
     [pscustomobject]@{ Id='TaskView'; Page='Perso'; Group='Barre des tâches'; MinBuild=0; Effect='E'
         Label='Bouton Vue des tâches'
         Desc='Bouton d''accès aux bureaux virtuels et fenêtres ouvertes.'
@@ -190,8 +185,8 @@ $Tweaks = @(
     [pscustomobject]@{ Id='LaunchTo'; Page='Perso'; Group='Explorateur, souris et presse-papiers'; MinBuild=0; Effect='I'; Kind='Choice'
         Label='Ouvrir l''Explorateur sur'
         Desc='Dossier affiché à l''ouverture d''une nouvelle fenêtre (Accueil = Accès rapide sous Windows 10).'
-        Tip='Explorer\Advanced\LaunchTo : 2 Accueil / Accès rapide, 1 Ce PC.'
-        Options=@( @{ L='Accueil'; V=2 }, @{ L='Ce PC'; V=1 })
+        Tip='Explorer\Advanced\LaunchTo : 2 Accueil / Accès rapide, 1 Ce PC, 3 Téléchargements, 4 OneDrive (Windows 11).'
+        Options=@( @{ L='Accueil'; V=2 }, @{ L='Ce PC'; V=1 }, @{ L='Téléchargements'; V=3; H=($Build -lt 22000) }, @{ L='OneDrive'; V=4; H=$true })
         Reg=@( @{ P=$ADV; N='LaunchTo'; T='DWord'; D=2 }) }
     [pscustomobject]@{ Id='FileExt'; Page='Perso'; Group='Explorateur, souris et presse-papiers'; MinBuild=0; Effect='E'
         Label='Afficher les extensions de fichiers'
@@ -219,7 +214,7 @@ $Tweaks = @(
         Tip='HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled (applications longPathAware uniquement).'
         Reg=@( @{ P='HKLM\SYSTEM\CurrentControlSet\Control\FileSystem'; N='LongPathsEnabled'; T='DWord'; On=1; Off=0; D=0 }) }
 
-    [pscustomobject]@{ Id='SettingsAgent'; Need='CopilotPlus'; Page='Perso'; Group='Intelligence artificielle'; MinBuild=26100; Effect='P'
+    [pscustomobject]@{ Id='SettingsAgent'; Need='CopilotPlus|Entreprise'; Page='Perso'; Group='Intelligence artificielle'; MinBuild=26100; Effect='P'
         Label='Expérience de recherche agentique'
         Desc='Agent IA de la recherche des Paramètres (langage naturel). Désactivé : recherche indexée et sémantique uniquement. Stratégie honorée sur Entreprise / Éducation, non prise en charge sur Pro.'
         Tip='HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsAI\DisableSettingsAgent = 1 (Policy CSP WindowsAI).'
@@ -250,8 +245,9 @@ $Tweaks = @(
     [pscustomobject]@{ Id='EdgeSidebar'; Page='Perso'; Group='Intelligence artificielle'; MinBuild=0; Effect='A'
         Label='Copilot et barre latérale d''Edge'
         Desc='Barre latérale de Microsoft Edge, dont le bouton Copilot. Désactivé : barre et bouton retirés pour tous les comptes.'
-        Tip='HKLM\SOFTWARE\Policies\Microsoft\Edge\HubsSidebarEnabled = 0 (stratégie Edge). Pris en compte au prochain lancement d''Edge.'
-        Reg=@( @{ P='HKLM\SOFTWARE\Policies\Microsoft\Edge'; N='HubsSidebarEnabled'; T='DWord'; On=$null; Off=0; D=1 }) }
+        Tip='HKLM\SOFTWARE\Policies\Microsoft\Edge : HubsSidebarEnabled = 0 (barre latérale) et Microsoft365CopilotChatIconEnabled = 0 (bouton Copilot de la barre d''outils : selon Microsoft, seule stratégie qui le contrôle). Pris en compte au prochain lancement d''Edge.'
+        Reg=@( @{ P='HKLM\SOFTWARE\Policies\Microsoft\Edge'; N='HubsSidebarEnabled'; T='DWord'; On=$null; Off=0; D=1 }
+               @{ P='HKLM\SOFTWARE\Policies\Microsoft\Edge'; N='Microsoft365CopilotChatIconEnabled'; T='DWord'; On=$null; Off=0; D=1 }) }
     [pscustomobject]@{ Id='Location'; Page='Secu'; Group='Confidentialité'; MinBuild=0; Effect='I'
         Label='Localisation'
         Desc='Accès à la position du poste pour Windows et les applications (Cartes, Météo, fuseau horaire automatique...).'

@@ -29,10 +29,12 @@ public static class DirScan {
     struct FileOp { public IntPtr Hwnd; public uint Func; public string From; public string To; public ushort Flags; [MarshalAs(UnmanagedType.Bool)] public bool Aborted; public IntPtr Mappings; public string Title; }
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     static extern int SHFileOperation(ref FileOp op);
-    // FO_DELETE, FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT (+ FOF_ALLOWUNDO pour la corbeille) ; 0 = succès
+    // FO_DELETE, FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_NO_CONNECTED_ELEMENTS (+ FOF_ALLOWUNDO pour la corbeille) ;
+    // 0 = succès. FOF_NO_CONNECTED_ELEMENTS : sans lui, supprimer « page.html » emportait aussi le dossier « page_files » voisin
+    // (éléments liés de l'Explorateur), jamais montré dans la confirmation
     public static int Delete(string path, bool recycle) {
         FileOp op = new FileOp(); op.Func = 3; op.From = path + "\0\0";
-        op.Flags = (ushort)(0x0010 | 0x0400 | 0x0004 | (recycle ? 0x0040 : 0));
+        op.Flags = (ushort)(0x0010 | 0x0400 | 0x0004 | 0x2000 | (recycle ? 0x0040 : 0));
         return SHFileOperation(ref op);
     }
     public static long Scanned; public static long Bytes; public static long Denied; public static long Cloud;
