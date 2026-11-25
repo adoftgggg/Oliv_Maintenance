@@ -535,7 +535,7 @@ function Import-PcConfig {
     $new = "$($o.Application)" -eq 'Oliv_Maintenance'; $old = "$($o.Type)" -in 'Oliv_Maintenance.Configuration', 'Oliv_Maintenance.Recette'
     if (-not $new -and -not $old) { Show-Info 'Ce fichier n''est pas une configuration Oliv_Maintenance.' 'Error'; return }
     $vals = $(if ($new) { $o.Reglages } else { $o.Values }); if (-not $vals) { $vals = [pscustomobject]@{} }
-    $diff = @(Get-SnapshotDiff ([pscustomobject]@{ Values = $vals }))
+    $diff = Get-SnapshotDiff ([pscustomobject]@{ Values = $vals })
     if (-not $AppsUI.Built) { try { New-AppsPage } catch { Write-Ignored 'Catalogue Applications' $_ } }
     $todo = @(@($(if ($new) { $o.Applications } else { $o.Apps })) | Where-Object { $_ -and $AppsUI.Tiles.ContainsKey("$_") -and -not ($AppsUI.Installed -and $AppsUI.Installed.Contains("$_")) } | ForEach-Object { "$_" } | Select-Object -Unique)
     $tabs = @(@($o.OngletsMasques) | Where-Object { $_ -and -not $HiddenTabs.Contains("$_") } | ForEach-Object { "$_" })

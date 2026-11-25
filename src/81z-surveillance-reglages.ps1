@@ -23,7 +23,7 @@ function Test-TweakReference {
     if (-not $ref) { Save-TweakReference; return }   # 1re ouverture : référence posée, rien à comparer
     # valeurs relues maintenant (la ligne garde la valeur de sa construction) ; seules les valeurs encore applicables sont comparées
     foreach ($r in @($TweakRows)) { if ($r.Tweak -and $r.Enabled -and -not $r.Pending) { try { $now = Get-TweakValue $r.Tweak; if ("$now" -ne "$($r.Current)") { $r.Current = $now; Set-RowDisplay $r $now } } catch { $null = $_ } } }
-    $diff = @(Get-SnapshotDiff ([pscustomobject]@{ Values = $ref.Values }))
+    $diff = Get-SnapshotDiff ([pscustomobject]@{ Values = $ref.Values })
     $TweakWatch.Diff = $diff
     $winChanged = "$($ref.Win)" -and "$($ref.Win)" -ne (Get-WinVersionTag)
     if ($winChanged) { Write-UiLog ('Windows a été mis à jour depuis la dernière ouverture : {0} (build {1}) > {2} (build {3}).' -f $ref.Display, $ref.Build, $WinDisplayVer, $Build) 'APP' }
