@@ -745,6 +745,10 @@ $DnsJobDone = {
         foreach ($w in @($r.Warn)) { if ($w) { Write-UiLog "DNS : $w" 'WARN' } }
         if (@($r.Prev).Count) { Write-UiLog ('DNS : serveurs avant le changement - ' + (@($r.Prev) -join ' ; ')) 'INFO' }
     }
+    # Accueil : carte Réseau relue tout de suite (serveurs DNS affichés par carte)
+    try { Update-InfoFast -Force } catch { Write-Ignored 'Accueil (réseau)' $_ }
+    # Outils : carte du fichier hosts (état du blocage par le DNS AdGuard)
+    try { if ($ToolsUI.Built -and $ToolsUI.HostsBody) { Update-HostsCard } } catch { Write-Ignored 'Carte du fichier hosts' $_ }
     # ligne du réglage : valeur relue et état final
     if ($DnsUI.Row) { $R = $DnsUI.Row; $DnsUI.Row = $null; $now = try { Get-DnsProvider } catch { $null }; if ($r -and -not $r.Error) { Complete-TweakChange $R $key $now } else { $R.Current = $now; Set-RowDisplay $R $now; Set-Badge $R 'error' }; Update-PendingBar }
 }

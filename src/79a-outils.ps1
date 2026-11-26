@@ -5,7 +5,7 @@ $HostsFile = Join-Path $env:windir 'System32\drivers\etc\hosts'
 $HostsBackup = Join-Path (Get-LogPath 'Etat') 'hosts.sauvegarde'
 $HostsMarkA = '# >>> Oliv_Maintenance : blocage pubs et traqueurs'
 $HostsMarkB = '# <<< Oliv_Maintenance'
-$HostsListUrl = 'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts'
+
 
 # ---- éléments communs : ligne (survol, hors index de la recherche), bouton icône, saisie de texte
 function New-ToolRow([string]$Main, [string]$Sub, [object[]]$Buttons, [string]$Tip) {
