@@ -21,7 +21,7 @@ $Window.Add_ContentRendered({
     if ($Sync.CurPage) { Move-TabIndicator $Sync.CurPage $false }
     if ($Sync.Started) { return }
     $Sync.Started = $true
-    Write-UiLog ('Fenêtre affichée en {0:N1} s (préparation {1:N1} s).' -f $AppClock.Elapsed.TotalSeconds, $Sync.TimeUi) 'APP'
+    Write-FileLog ('Fenêtre affichée en {0:N1} s (préparation {1:N1} s).' -f $AppClock.Elapsed.TotalSeconds, $Sync.TimeUi) 'APP'
     Start-CleanScan
     Start-DiagCollector
     $Sync.WuOnline = $false; [void](Start-WuSearch)
@@ -35,11 +35,11 @@ $Window.Add_ContentRendered({
 })
 Write-UiLog ('Oliv_Maintenance {0} démarré - réglages utilisateur appliqués à {1} ({2})' -f $AppVersion, $UserName, $UserSid) 'APP'
 if ($UpgradeNote) { Write-UiLog $UpgradeNote 'APP' }
-if ($env:_OLIVM_EXE) { Write-UiLog "Lancé par $env:_OLIVM_EXE (script extrait dans $SelfPath)." 'APP' }
-if ($AppDirState -eq 'fixed') { Write-UiLog "Droits du dossier $env:ProgramData\Oliv_Maintenance corrigés : écriture réservée aux administrateurs et à SYSTEM." }
+if ($env:_OLIVM_EXE) { Write-FileLog "Lancé par $env:_OLIVM_EXE (script extrait dans $SelfPath)." 'APP' }
+if ($AppDirState -eq 'fixed') { Write-FileLog "Droits du dossier $env:ProgramData\Oliv_Maintenance corrigés : écriture réservée aux administrateurs et à SYSTEM." }
 elseif (-not $AppDirSafe) { Write-UiLog "Droits du dossier $env:ProgramData\Oliv_Maintenance non conformes ($AppDirState) : vérifier le propriétaire et les droits (icacls)." 'WARN' }
 # erreurs survenues avant l'interface (rangement des journaux...)
-foreach ($w in $EarlyWarn) { Write-UiLog $w 'WARN' }; $EarlyWarn.Clear()
+foreach ($w in $EarlyWarn) { Write-FileLog $w 'WARN' }; $EarlyWarn.Clear()
 # boucle de messages du répartiteur (et non ShowDialog) : la fenêtre peut être masquée dans la zone de notification sans
 # terminer l'application ; fin de la boucle à la fermeture de la fenêtre
 $Window.Add_Closed({ $Window.Dispatcher.InvokeShutdown() })
@@ -52,6 +52,8 @@ $Window.Dispatcher.Add_UnhandledException({
     try { Write-UiLog ('Erreur interne interceptée : {0}{1}' -f $x.Message, $where) 'ERROR' } catch { $null = $_ }
     $e.Handled = $true
 })
+# redémarrage programmé avant la fermeture de l'application : compte à rebours de nouveau visible
+if ($Sync.RebootAt) { try { Show-RebootCountdown } catch { Write-Ignored 'Compte à rebours du redémarrage' $_ } }
 Start-MainWindow
 # surveillance des blocages de l'interface (fil de fond, 95-activites)
 try { Start-BgJob 'Watchdog' $WatchdogScript } catch { Write-Ignored 'Surveillance de l''interface' $_ }

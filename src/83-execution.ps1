@@ -18,6 +18,10 @@ function Set-Busy([bool]$Busy) {
 function Start-Worker([string[]]$Ids) {
     if ($Sync.Running) { return $false }
     $Sync.Selected = $Ids
+    # « Redémarrer à la fin si nécessaire » proposé seulement si une des tâches peut réellement demander un redémarrage :
+    # réinitialisation réseau, ou mise à jour Windows dont Windows Update annonce un redémarrage (RebootBehavior 1 ou 2)
+    $Sync.RebootPossible = ($Ids -contains 'NetReset') -or ($Ids -contains 'WuInstall' -and @(@($Sync.WuPending.Items) | Where-Object { $_ -and (-not $Sync.WuSel -or @($Sync.WuSel) -contains $_.Id) -and ($null -eq $_.Rb -or [int]$_.Rb -ne 0) }).Count -gt 0)
+    if (-not $Sync.RebootPossible -and $Sync.AutoReboot) { $Sync.AutoReboot = $false; $Ui.AutoReboot.IsChecked = $false }
     $Sync.Cancel   = $false
     if (-not $Sync.WuSearching) { $Sync.WuCancel = $false }
     $Sync.Aborted  = $false
@@ -59,7 +63,7 @@ function Set-RunInfoLog([string]$Prefix, [string]$Path, $Target = $Ui.RunInfo) {
     $h.Add_Click({
         param($s, $e)
         if (Test-Path -LiteralPath $s.Tag) { Start-Process explorer.exe -ArgumentList ('"{0}"' -f $s.Tag) }
-        else { Write-UiLog "Journal introuvable : $($s.Tag)" 'WARN' }
+        else { Write-FileLog "Journal introuvable : $($s.Tag)" 'WARN' }
     })
     $Target.Inlines.Add($h)
 }
@@ -82,7 +86,7 @@ function Complete-Run {
     try { $Sync.PS.Runspace.Dispose(); $Sync.PS.Dispose() } catch {}
     Set-Busy $false
     Set-RunInfoLog "$($Sync.Status) - journal : " $Sync.LogFile $Ui.StatusText
-    try { Add-RunToSession } catch { Write-UiLog "Rapport d'intervention : $($_.Exception.Message)" 'WARN' }
+    try { Add-RunToSession } catch { Write-FileLog "Rapport d'intervention : $($_.Exception.Message)" 'WARN' }
     $dur = [DateTime]::Now - $Sync.RunStart
     $nErr = @($Sync.TaskResults | Where-Object { $_.Err }).Count
     $title = $(if ($Sync.Aborted -or $Sync.Cancel) { 'Tâche interrompue' } elseif ($nErr) { 'Tâche terminée avec des erreurs' } else { 'Tâche terminée' })

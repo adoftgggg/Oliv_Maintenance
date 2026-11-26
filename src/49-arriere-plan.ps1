@@ -3,16 +3,16 @@
 # ouverts à l'avance (OpenAsync, hors fil d'interface) : 3 au démarrage (collectes lancées à l'affichage de la fenêtre),
 # 1 ensuite (chaque runspace ouvert occupe plusieurs Mo) ; une tâche prend une réserve déjà ouverte et ne démarre en synchrone que si aucune n'est prête.
 $SpareRs = [Collections.Generic.List[object]]::new()
-# erreurs non bloquantes dans les runspaces : même règle que Write-Ignored (02-journaux.ps1), dans le journal de la tâche
-# (Write-TaskLog) s'il existe, sinon directement à l'interface
+# erreurs non bloquantes dans les runspaces : même règle que Write-Ignored (02-journaux.ps1), fichier journal seulement
 $Sync.WarnOnce = $WarnOnce
+$Sync.FileLog = $TweakLog
 $IgnoreLib = @'
 function Write-Ignored([string]$What, $Err) {
     $m = $(if ($Err -is [Management.Automation.ErrorRecord]) { $Err.Exception.Message } elseif ($Err -is [Exception]) { $Err.Message } elseif ($Err) { "$Err" } else { 'erreur inconnue' })
     $k = "$What|$m"
     if ($Sync.WarnOnce) { if ($Sync.WarnOnce.ContainsKey($k)) { return }; $Sync.WarnOnce[$k] = 1 }
-    if (Get-Command Write-TaskLog -CommandType Function -ErrorAction SilentlyContinue) { Write-TaskLog "$What : $m" 'WARN' }
-    else { $Sync.Queue.Enqueue(('{0} [WARN ] {1} : {2}' -f (Get-Date -Format 'HH:mm:ss'), $What, $m)) }
+    # incident non bloquant : fichier journal du jour seulement (jamais dans le Journal de l'application ni le bilan de la tâche)
+    if ($Sync.FileLog) { try { [IO.File]::AppendAllText($Sync.FileLog, ('{0:yyyy-MM-dd HH:mm:ss} [WARN ] {1} : {2}{3}' -f (Get-Date), $What, $m, [Environment]::NewLine), [Text.Encoding]::UTF8) } catch { $null = $_ } }
 }
 '@
 function New-BgRunspace([bool]$Async = $false) {

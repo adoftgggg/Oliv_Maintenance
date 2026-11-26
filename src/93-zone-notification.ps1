@@ -97,7 +97,7 @@ function Set-AutoStart([bool]$On) {
     if (-not (Sync-StableExe)) { throw 'exe de l''application introuvable (lancement par le fichier .cmd : utiliser l''exe)' }
     $acct = $(if ($HkuSidOk) { $UserName } else { [Security.Principal.WindowsIdentity]::GetCurrent().Name })
     $td = $svc.NewTask(0)
-    $td.RegistrationInfo.Description = 'Ouvre Oliv_Maintenance à l''ouverture de session (réglage Paramètres > Démarrage et fermeture).'
+    $td.RegistrationInfo.Description = 'Ouvre Oliv_Maintenance à l''ouverture de session (réglage Paramètres > Démarrage et raccourcis).'
     $td.Settings.ExecutionTimeLimit = 'PT0S'; $td.Settings.DisallowStartIfOnBatteries = $false; $td.Settings.StopIfGoingOnBatteries = $false; $td.Settings.MultipleInstances = 2
     $tr = $td.Triggers.Create(9); $tr.UserId = $acct; $tr.Delay = 'PT10S'
     $td.Principal.UserId = $acct; $td.Principal.LogonType = 3; $td.Principal.RunLevel = 1
@@ -108,7 +108,7 @@ function Set-AutoStart([bool]$On) {
 function Update-AutoStart {
     $ok = Sync-StableExe
     $t = Get-AutoStartTask; if (-not $t) { return }
-    try { $p = "$(@($t.Definition.Actions)[0].Path)"; if ($ok -and $p -ne $StableExe) { Set-AutoStart $true; Write-UiLog 'Lancement à l''ouverture de session : tâche mise à jour.' 'APP' } } catch { Write-Ignored 'Lancement à l''ouverture de session' $_ }
+    try { $p = "$(@($t.Definition.Actions)[0].Path)"; if ($ok -and $p -ne $StableExe) { Set-AutoStart $true; Write-FileLog 'Lancement à l''ouverture de session : tâche mise à jour.' 'APP' } } catch { Write-Ignored 'Lancement à l''ouverture de session' $_ }
 }
 # Bureau de l'utilisateur ciblé (dossier redirigé vers OneDrive pris en compte)
 function Get-UserDesktop {
@@ -125,7 +125,7 @@ function New-DesktopShortcut {
     $f
 }
 # 1er lancement sur ce poste : raccourci sur le Bureau et mode de démarrage, modifiables ensuite dans Paramètres >
-# Démarrage et fermeture
+# Démarrage et raccourcis
 function Show-FirstRun {
     $sp = [Windows.Controls.StackPanel]::new()
     $cb = [Windows.Controls.CheckBox]::new(); $cb.Content = 'Créer un raccourci Oliv_Maintenance sur le Bureau'; $cb.IsChecked = $true; $cb.Margin = New-Thickness 0 0 0 12
@@ -134,7 +134,7 @@ function Show-FirstRun {
     $r1 = [Windows.Controls.RadioButton]::new(); $r1.Content = 'Fenêtre affichée'; $r1.GroupName = 'FrStart'; $r1.IsChecked = $true; $r1.Margin = New-Thickness 0 2 0 2
     $r2 = [Windows.Controls.RadioButton]::new(); $r2.Content = 'Réduite dans la zone de notification (près de l''horloge)'; $r2.GroupName = 'FrStart'; $r2.Margin = New-Thickness 0 2 0 2
     foreach ($r in $r1, $r2) { $r.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, 'FgBrush'); [void]$sp.Children.Add($r) }
-    $v = Show-Dialog "Bienvenue dans Oliv_Maintenance`n`nDeux choix avant de commencer, modifiables à tout moment dans Paramètres > Démarrage et fermeture." 'Question' @(@{ T = 'Valider'; V = 'ok'; S = 'PrimaryBtn'; D = $true }) $null $null 560 $sp
+    $v = Show-Dialog "Bienvenue dans Oliv_Maintenance`n`nDeux choix avant de commencer, modifiables à tout moment dans Paramètres > Démarrage et raccourcis." 'Question' @(@{ T = 'Valider'; V = 'ok'; S = 'PrimaryBtn'; D = $true }) $null $null 560 $sp
     if ($sp.Parent) { $sp.Parent.Content = $null }
     if ($v -ne 'ok') { return }
     $msg = @()
@@ -165,7 +165,7 @@ function Request-TaskbarPin {
 function Start-MainWindow {
     try { Read-TraySetting } catch { Write-Ignored 'Réglages de la zone de notification' $_ }
     if ($Tray.Min -or $Tray.Close -or $Tray.StartMin) { [void](Initialize-AppNotifier) }
-    # démarrage réduit (Paramètres > Démarrage et fermeture) : fenêtre construite puis aussitôt rangée dans la zone de
+    # démarrage réduit (Paramètres > Démarrage et raccourcis) : fenêtre construite puis aussitôt rangée dans la zone de
     # notification (barre des tâches si l'icône est indisponible), sans bulle d'explication ; jamais au 1er lancement
     if ($Tray.StartMin -and -not $FirstRun) {
         $Tray.Tip = $true; $Window.Show()

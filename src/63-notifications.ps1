@@ -28,7 +28,7 @@ function Initialize-AppNotifier {
         $ni.Visible = $true
         $script:Notif = $ni
         $true
-    } catch { Write-UiLog "Notifications Windows indisponibles : $($_.Exception.Message)" 'WARN'; $false }
+    } catch { Write-FileLog "Notifications Windows indisponibles : $($_.Exception.Message)" 'WARN'; $false }
 }
 # Kind : Info | Warning | Error ; Duration : durée de l'opération (pas de notification sous 20 s)
 function Send-AppNotification([string]$Title, [string]$Text, [string]$Kind = 'Info', $Duration = $null, [scriptblock]$Go = $null) {
@@ -55,7 +55,7 @@ $Ui.AutoReboot.Add_Click({ param($s, $e)
 })
 # Alertes du poste en notification Windows (application réduite ou dans la zone de notification) : redémarrage en
 # attente, mises à jour Windows, mises à jour de logiciels, disque presque plein. Une notification par alerte nouvelle
-# (rien de répété tant que l'alerte reste la même), contrôle toutes les 60 s. Réglage : Paramètres > Démarrage et fermeture.
+# (rien de répété tant que l'alerte reste la même), contrôle toutes les 60 s. Réglage : Paramètres > Fenêtre et notifications.
 $AlertSeen = @{}
 function Get-AlertOn { $v = Get-RegValue $CardRegKey 'AlertesPoste'; $null -eq $v -or [int]$v -eq 1 }
 function Watch-PcAlert {

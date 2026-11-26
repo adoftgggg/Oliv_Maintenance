@@ -7,7 +7,7 @@ function Invoke-TickStep([string]$Name, [scriptblock]$Step) {
     try { & $Step; $Sync.UiStep = '' }
     catch {
         $m = $_.Exception.Message
-        if ($TickErrors[$Name] -ne $m) { $TickErrors[$Name] = $m; Write-UiLog ('Rafraîchissement ({0}) : {1}' -f $Name, $m) 'WARN' }
+        if ($TickErrors[$Name] -ne $m) { $TickErrors[$Name] = $m; Write-FileLog ('Rafraîchissement ({0}) : {1}' -f $Name, $m) 'WARN' }
     }
 }
 
@@ -84,7 +84,7 @@ function Watch-Oem {
     if ($Sync.OemInstFinished) {
         $Sync.OemInstFinished = $false; $InfoUI.OemSel = @{}
         Write-UiLog "Installation des mises à jour constructeur terminée - journal : $($Sync.OemLog)"
-        try { Add-OemRunToSession } catch { Write-UiLog "Rapport (constructeur) : $($_.Exception.Message)" 'WARN' }
+        try { Add-OemRunToSession } catch { Write-FileLog "Rapport (constructeur) : $($_.Exception.Message)" 'WARN' }
         $its = @(); if ($Sync.OemRun) { $its = @($Sync.OemRun.Items.Values) }
         $nOk = @($its | Where-Object { $_.State -eq 'ok' }).Count; $nKo = @($its | Where-Object { $_.State -eq 'fail' }).Count
         Send-AppNotification 'Mises à jour constructeur installées' ('{0} {1}{2}' -f $nOk, (Get-Plural $nOk 'installée' 'installées'), $(if ($nKo) { ", $nKo en échec" } else { '' })) $(if ($nKo) { 'Error' } else { 'Info' }) ([DateTime]::Now - $Sync.OemStart)

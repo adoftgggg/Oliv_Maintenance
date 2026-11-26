@@ -28,7 +28,8 @@ function Write-Ignored([string]$What, $Err) {
     $m = Get-ErrText $Err; $k = "$What|$m"
     if ($WarnOnce.ContainsKey($k)) { return }; $WarnOnce[$k] = 1
     if ($Sync -and $Sync.Queue -and (Get-Command Write-UiLog -ErrorAction SilentlyContinue)) {
-        Write-UiLog "$What : $m" 'WARN'
+        # incident non bloquant : fichier journal seulement (sans intérêt pour l'utilisateur, l'application continue)
+        Write-FileLog "$What : $m" 'WARN'
     } else {
         $EarlyWarn.Add("$What : $m")
     }

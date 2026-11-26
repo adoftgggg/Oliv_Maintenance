@@ -8,7 +8,7 @@ function New-StartupCard {
     $script:suFolder  = New-Button 'Ouvrir le dossier Démarrage'
     [void]$suBar.Children.Add($suFolder)
     $sortBox = [Windows.Controls.StackPanel]::new(); $sortBox.Orientation = 'Horizontal'; [Windows.Controls.DockPanel]::SetDock($sortBox, 'Right')
-    [void](Add-CardIcon $su 0xE72C 'Actualiser' { Update-StartupList; Update-PendingBar; Write-UiLog 'Applications au démarrage relues (modifications non appliquées conservées).' 'APP' })
+    [void](Add-CardIcon $su 0xE72C 'Actualiser' { Update-StartupList; Update-PendingBar; Write-FileLog 'Applications au démarrage relues (modifications non appliquées conservées).' 'APP' })
     $sl = New-Text 'Trier :' 'Muted'; $sl.FontSize = 13; $sl.VerticalAlignment = 'Center'; $sl.Margin = New-Thickness 12 0 8 0
     [void]$sortBox.Children.Add($sl)
     $script:suSortName  = New-Button 'Nom'

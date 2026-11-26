@@ -127,7 +127,9 @@ try {
     # gravité Microsoft (MsrcSeverity : Critical, Important, Moderate, Low) et classification (Security Updates...) : importance au rapport
     $res.Items = @($pu.Updates | ForEach-Object {
         $cl = ''; try { $cl = @($_.Categories | Where-Object { "$($_.Type)" -eq 'UpdateClassification' } | ForEach-Object { "$($_.Name)" }) -join ', ' } catch { Write-Ignored 'Classification Windows Update' $_ }
-        @{ Id = "$($_.Identity.UpdateID)"; KB = (Get-KB $_.Title); Title = "$($_.Title)"; Done = [bool]$_.IsDownloaded; Size = [double]$_.MaxDownloadSize; Severity = "$($_.MsrcSeverity)"; Class = $cl } })
+        @{ Id = "$($_.Identity.UpdateID)"; KB = (Get-KB $_.Title); Title = "$($_.Title)"; Done = [bool]$_.IsDownloaded; Size = [double]$_.MaxDownloadSize; Severity = "$($_.MsrcSeverity)"; Class = $cl
+            # comportement de redémarrage annoncé par Windows Update (InstallationBehavior.RebootBehavior : 0 jamais, 1 toujours, 2 possible)
+            Rb = $(try { [int]$_.InstallationBehavior.RebootBehavior } catch { 2 }) } })
     $res.Reboot = @($pu.Reboot | ForEach-Object { @{ KB = (Get-KB $_.Title); Title = "$($_.Title)" } })
     $res.Detail = $pu.Detail
 } catch { $res.Error = $_.Exception.Message }
@@ -294,7 +296,7 @@ function Invoke-ScheduledReboot([int]$Seconds, [string]$Reason = 'pour finaliser
         Show-Info "Programmation du redémarrage impossible.`n`nshutdown.exe a renvoyé le code $($p.ExitCode)." 'Error'
         return
     }
-    $Sync.RebootAt = $(if ($Seconds -le 60) { $null } else { $at }); Save-RebootAt
+    $Sync.RebootAt = $at; Save-RebootAt; Show-RebootCountdown
     Write-UiLog $(if ($Seconds -le 60) { 'Redémarrage du poste lancé.' } else { 'Redémarrage du poste programmé à {0:dd/MM/yyyy HH:mm}.' -f $at })
     if (-not $Sync.AutoReboot) {
         Add-SessionEvent 'Redémarrage' $(if ($Seconds -le 60) { 'Redémarrage du poste' } else { 'Redémarrage programmé' }) $(if ($Seconds -le 60) { 'lancé' } else { '{0:dd/MM HH:mm}' -f $at }) 'info' $Reason
@@ -439,12 +441,51 @@ function Request-Reboot([string]$Intro, [string]$Reason = 'pour finaliser les mi
     $b = @(@{ T = $(if ($Intro) { 'Plus tard' } else { 'Annuler' }); V = $null; C = $true }, @{ T = 'Maintenant'; V = 'now'; S = 'WarnBtn' }, @{ T = 'Programmer'; V = 'at'; S = 'PrimaryBtn'; D = $true })
     $msg = $(if ($Intro) { "$Intro`n`nQuand redémarrer le poste ? L'utilisateur sera prévenu par Windows. Les documents non enregistrés au moment du redémarrage seront perdus." } else { "Quand redémarrer le poste ?`n`nL'utilisateur sera prévenu par Windows. Les documents non enregistrés au moment du redémarrage seront perdus." })
     $r = Show-Dialog $msg $(if ($Intro) { 'Warn' } else { 'Question' }) $b $null $null 0 $sp
-    if ($r -eq 'now') { Invoke-ScheduledReboot 30 $Reason }
+    # maintenant : délai nul côté application (shutdown /t 0) ; reste le temps que Windows ferme les programmes, affiché par le compte à rebours
+    if ($r -eq 'now') { Invoke-ScheduledReboot 0 $Reason }
     elseif ($r -eq 'at') {
         $t = ConvertTo-RebootTime ('{0}:{1:00}' -f $ctx.Tp.H, $ctx.Tp.M)
         if ($t) { Invoke-ScheduledReboot ([int][math]::Ceiling(($t - [DateTime]::Now).TotalSeconds)) $Reason }
     }
     elseif ($Intro) { Write-UiLog 'Redémarrage reporté : à faire plus tard.' 'WARN' }
+}
+# Compte à rebours visible du redémarrage lancé ou programmé par l'application : bandeau d'activité « Redémarrage du poste
+# dans 1:45 (à 10:32) » avec Annuler, mis à jour chaque seconde ; à l'échéance « Windows ferme les programmes... »
+$RebootUI = @{}
+function Show-RebootCountdown {
+    $at = $Sync.RebootAt
+    if (-not $at) {
+        if ($RebootUI.Row -and $Ui.BgList) { [void]$Ui.BgList.Children.Remove($RebootUI.Row); $RebootUI.Row = $null; if (-not $Ui.BgList.Children.Count) { $Ui.BgBar.Visibility = 'Collapsed' } }
+        if ($RebootUI.Timer) { $RebootUI.Timer.Stop() }
+        return
+    }
+    if (-not $Ui.BgList) { return }
+    if (-not $RebootUI.Row) {
+        $g = [Windows.Controls.Grid]::new(); $g.Margin = New-Thickness 0 2 0 2
+        [void]$g.ColumnDefinitions.Add([Windows.Controls.ColumnDefinition]::new()); $c = [Windows.Controls.ColumnDefinition]::new(); $c.Width = [Windows.GridLength]::Auto; [void]$g.ColumnDefinitions.Add($c)
+        $RebootUI.Text = New-Text ''; $RebootUI.Text.FontWeight = [Windows.FontWeights]::SemiBold; $RebootUI.Text.VerticalAlignment = 'Center'
+        $RebootUI.Text.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'WarnFgBrush'); [void]$g.Children.Add($RebootUI.Text)
+        $RebootUI.Cancel = New-Button 'Annuler le redémarrage'; $RebootUI.Cancel.Height = 30; $RebootUI.Cancel.Margin = New-Thickness 12 0 0 0; [Windows.Controls.Grid]::SetColumn($RebootUI.Cancel, 1)
+        $RebootUI.Cancel.Add_Click({ Stop-ScheduledReboot; Show-WuPending })
+        [void]$g.Children.Add($RebootUI.Cancel)
+        $RebootUI.Row = $g; $Ui.BgList.Children.Insert(0, $g); $Ui.BgBar.Visibility = 'Visible'
+    }
+    if (-not $RebootUI.Timer) {
+        $RebootUI.Timer = [Windows.Threading.DispatcherTimer]::new(); $RebootUI.Timer.Interval = [TimeSpan]::FromSeconds(1)
+        $RebootUI.Timer.Add_Tick({ try { Update-RebootCountdown } catch { Write-Ignored 'Compte à rebours du redémarrage' $_ } })
+    }
+    Update-RebootCountdown; $RebootUI.Timer.Start()
+}
+function Update-RebootCountdown {
+    $at = $Sync.RebootAt; if (-not $at -or -not $RebootUI.Text) { return }
+    $left = $at - [DateTime]::Now
+    if ($left.TotalSeconds -le 0) {
+        $RebootUI.Text.Text = 'Redémarrage du poste en cours : Windows ferme les programmes ouverts (un document non enregistré peut le retarder).'
+        $RebootUI.Cancel.Visibility = 'Collapsed'; return
+    }
+    $RebootUI.Cancel.Visibility = 'Visible'
+    $rest = $(if ($left.TotalHours -ge 1) { '{0} h {1:00}' -f [math]::Floor($left.TotalHours), $left.Minutes } else { '{0}:{1:00}' -f [math]::Floor($left.TotalMinutes), $left.Seconds })
+    $RebootUI.Text.Text = 'Redémarrage du poste dans {0} ({1})' -f $rest, $(if ($at.Date -eq [DateTime]::Today) { 'à {0:HH:mm:ss}' -f $at } else { 'le {0:dd/MM à HH:mm}' -f $at })
 }
 function Stop-ScheduledReboot {
     try {
@@ -452,7 +493,7 @@ function Stop-ScheduledReboot {
     } catch {
         Write-Ignored 'Annulation du redémarrage programmé (shutdown /a)' $_
     }
-    $Sync.RebootAt = $null; $Sync.WuShown = $null; Save-RebootAt
+    $Sync.RebootAt = $null; $Sync.WuShown = $null; Save-RebootAt; Show-RebootCountdown
     Write-UiLog 'Redémarrage programmé annulé.'
     Add-SessionEvent 'Redémarrage' 'Redémarrage programmé' 'annulé' 'warn'
 }

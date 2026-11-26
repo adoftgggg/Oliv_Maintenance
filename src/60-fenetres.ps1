@@ -19,7 +19,7 @@ function Save-WindowPlacement([string]$Name, $Win) {
         if (-not $r -or ($r[2] - $r[0]) -lt 200 -or ($r[3] - $r[1]) -lt 150) { return }
         $WinPos.W[$Name] = @{ V = 2; L = $r[0]; T = $r[1]; R = $r[2]; B = $r[3]; Max = ("$($Win.WindowState)" -eq 'Maximized') }
         Save-WindowPositionStore
-    } catch { Write-UiLog "Position de la fenêtre $Name non enregistrée : $($_.Exception.Message)" 'WARN' }
+    } catch { Write-FileLog "Position de la fenêtre $Name non enregistrée : $($_.Exception.Message)" 'WARN' }
 }
 # appliqué quand la fenêtre a son handle et avant son affichage (SourceInitialized), puis agrandissement si elle l'était
 function Restore-WindowPlacement([string]$Name, $Win) {
@@ -36,7 +36,7 @@ function Restore-WindowPlacement([string]$Name, $Win) {
                 # fenêtre ouverte réduite : agrandie seulement quand elle sera rouverte
                 if ("$($s.WindowState)" -eq 'Minimized') { if ($s -eq $Window) { $Tray.LastState = 'Maximized' } } else { $s.WindowState = 'Maximized' }
             }
-        } catch { Write-UiLog "Position de la fenêtre $($s.Uid) non restaurée : $($_.Exception.Message)" 'WARN' }
+        } catch { Write-FileLog "Position de la fenêtre $($s.Uid) non restaurée : $($_.Exception.Message)" 'WARN' }
     })
     $true
 }

@@ -5,7 +5,7 @@ function Select-Folder([string]$Title, [string]$Start, $Owner) {
         $h = [Windows.Interop.WindowInteropHelper]::new($Owner).Handle
         return [_OlivM.FolderPick]::Pick($h, $Title, $Start)
     } catch {
-        Write-UiLog "Sélecteur de dossier moderne indisponible : $($_.Exception.Message)" 'WARN'
+        Write-FileLog "Sélecteur de dossier moderne indisponible : $($_.Exception.Message)" 'WARN'
         if (-not $Sync.FormsLoaded) { Add-Type -AssemblyName System.Windows.Forms, System.Drawing; $Sync.FormsLoaded = $true }
         $fb = [Windows.Forms.FolderBrowserDialog]::new(); $fb.Description = $Title; $fb.SelectedPath = $Start
         if ("$($fb.ShowDialog())" -eq 'OK') { return $fb.SelectedPath }
@@ -341,6 +341,9 @@ function Show-TreeMenu($Src) {
     }
     if ($it.IsDir -and -not $it.Denied -and $it.Children.Count) { & $add 'Ouvrir' { param($s, $e) Open-TreeItem $s.Tag } }
     & $add 'Afficher dans l''Explorateur' { param($s, $e) Start-Process explorer.exe -ArgumentList ('/select,"{0}"' -f $s.Tag.Path) }
+    & $add 'Copier le chemin' { param($s, $e) [void](Set-ClipText "$($s.Tag.Path)" (Get-CopyDone "$($s.Header)")) }
+    & $add 'Copier le nom' { param($s, $e) [void](Set-ClipText (Split-Path -Leaf "$($s.Tag.Path)") (Get-CopyDone "$($s.Header)")) }
+    & $add 'Copier la taille' { param($s, $e) [void](Set-ClipText ('{0} ({1:N0} octets)' -f (Format-SizeUi $s.Tag.Size), [long]$s.Tag.Size) (Get-CopyDone "$($s.Header)")) }
     [void]$m.Items.Add([Windows.Controls.Separator]::new())
     $ok = -not (Test-TreeProtected $it.Path) -and -not $TreeUI.Job -and -not $TreeUI.DelJob
     & $add 'Mettre à la corbeille' { param($s, $e) Start-TreeDelete $s.Tag $true } $ok
@@ -373,11 +376,13 @@ function Complete-TreeDelete {
         for ($n = $p; $n; $n = $n.Parent) { $n.Size -= $it.Size; $n.Files -= $it.Files }
         $TreeUI.Status.Text = 'Supprimé : {0} ({1}{2})' -f $it.Path, $(if ($it.Size -gt 0) { '{0} libérés' -f (Format-SizeUi $it.Size) } else { 'élément vide' }), $(if ($Sync.TreeDel.Recycle) { ', dans la corbeille' } else { '' })
         Write-UiLog ('Supprimé : {0} ({1}).' -f $it.Path, (Format-SizeUi $it.Size)) 'OK'
+        Show-Toast ('{0} : {1} libérés' -f $(if ($Sync.TreeDel.Recycle) { 'Mis à la corbeille' } else { 'Supprimé' }), (Format-SizeUi $it.Size))
         Add-SessionEvent 'Espace disque' $it.Path ('{0} {1}' -f $(if ($Sync.TreeDel.Recycle) { 'mis à la corbeille' } else { 'supprimé définitivement' }), (Format-SizeUi $it.Size)) 'ok'
         Show-TreeNode
     } else {
         $TreeUI.Status.Text = 'Suppression incomplète (code {0}) : fichiers en cours d''utilisation ou accès refusé. Relancer l''analyse pour mettre à jour les tailles.' -f $(if ($r) { $r.Code } else { '?' })
         Write-UiLog ('Suppression incomplète : {0} (code {1}).' -f $it.Path, $(if ($r) { $r.Code } else { '?' })) 'WARN'
+        Show-Toast 'Suppression incomplète : fichiers en cours d''utilisation ou accès refusé' $false
         Add-SessionEvent 'Espace disque' $it.Path ('suppression incomplète (code {0})' -f $(if ($r) { $r.Code } else { '?' })) 'warn'
     }
 }

@@ -162,6 +162,8 @@ function Set-SoftExcluded($Apps, [bool]$On) {
         }
     }
     Save-SoftExcl; Update-SoftView; Update-SoftCard
+    $n = @($Apps | Where-Object { $_.Src }).Count
+    if ($n) { Show-Toast $(if ($n -eq 1) { $(if ($On) { '{0} exclu des mises à jour' } else { '{0} réintégré aux mises à jour' }) -f @($Apps | Where-Object { $_.Src })[0].Name } else { '{0} logiciels {1}' -f $n, $(if ($On) { 'exclus des mises à jour' } else { 'réintégrés aux mises à jour' }) }) }
 }
 function Show-SoftMenu($Row) {
     $sel = @(Get-SoftSelectedApp); if (-not $sel.Count) { $sel = @($Row.DataContext) }

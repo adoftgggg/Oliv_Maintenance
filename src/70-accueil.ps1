@@ -258,7 +258,7 @@ function Initialize-Activity {
 }
 function Initialize-InfoPage {
     $Ui.InfoLeft.Children.Clear(); $Ui.InfoMid.Children.Clear(); $Ui.InfoRight.Children.Clear()
-    try { Initialize-Activity } catch { Write-UiLog "Moniteur d'activité : $($_.Exception.Message)" 'WARN' }
+    try { Initialize-Activity } catch { Write-FileLog "Moniteur d'activité : $($_.Exception.Message)" 'WARN' }
     foreach ($col in $Ui.InfoLeft, $Ui.InfoMid, $Ui.InfoRight, $Ui.SettingsPanel) { [Windows.Controls.Grid]::SetIsSharedSizeScope($col, $true) }
     $f = @{}
     # Système : Windows, démarrage et session regroupés (une seule carte au lieu de Système + Session). Champs de données
@@ -291,7 +291,7 @@ function Initialize-InfoPage {
     [void](Add-KV $InfoUI.DiagPanel 'État' 'analyse en cours...')
     $InfoUI.DiagTitle = $c.Title
     $InfoUI.DiagAge = Add-CardLabel $c
-    [void](Add-CardIcon $c 0xE72C 'Actualiser' { Start-DiagCollector; Write-UiLog 'Diagnostic rapide relancé.' 'APP' })
+    [void](Add-CardIcon $c 0xE72C 'Actualiser' { Start-DiagCollector; Write-FileLog 'Diagnostic rapide relancé.' 'APP' })
     Add-InfoCard $c $Ui.InfoMid
 
     $c = New-Card 'Réseau' '' ([string][char]0xE968)
@@ -479,7 +479,7 @@ function Update-InfoFast([switch]$Force) {
     $f = $InfoUI.F
     if ($Force) { $InfoUI.RebootSig = $null; $InfoUI.VolFastSig = $null }
     # lecture protégée : une erreur ne doit pas laisser la ligne vide (elle restait sans valeur)
-    $rs = try { Get-RebootState -Force:$Force } catch { if (-not $InfoUI.RebootErr) { $InfoUI.RebootErr = $true; Write-UiLog "Redémarrage en attente : lecture impossible - $($_.Exception.Message)" 'WARN' }; @{ Why = @(); WuAt = $null } }
+    $rs = try { Get-RebootState -Force:$Force } catch { if (-not $InfoUI.RebootErr) { $InfoUI.RebootErr = $true; Write-FileLog "Redémarrage en attente : lecture impossible - $($_.Exception.Message)" 'WARN' }; @{ Why = @(); WuAt = $null } }
     $pending = [bool]@($rs.Why).Count
     # programmé : par l'outil (shutdown /r /t) ou par Windows Update (Paramètres > Planifier le redémarrage)
     $at = $(if ($Sync.RebootAt -and $Sync.RebootAt -gt [DateTime]::Now) { $Sync.RebootAt } elseif ($rs.WuAt) { $rs.WuAt } else { $null })

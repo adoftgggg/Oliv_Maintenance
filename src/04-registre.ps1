@@ -140,7 +140,7 @@ function Set-LocalPolicyValue([string]$Key, [string]$Name, $Value) {
     try { $list = Read-PolFile $pol }
     catch { Write-UiLog ('Stratégie locale non modifiée : Registry.pol illisible ({0}).' -f $_.Exception.Message) 'ERROR'; throw }
     $saved = Backup-LocalPolicy $pol $ini
-    if ($saved) { Write-UiLog ('Sauvegarde de la stratégie locale : ' + ($saved -join ', ')) }
+    if ($saved) { Write-FileLog ('Sauvegarde de la stratégie locale : ' + ($saved -join ', ')) }
     $keep = [Collections.Generic.List[object]]::new()
     foreach ($e in $list) { if (-not ($e.Key -eq $Key -and ($e.Name -eq $Name -or $e.Name -eq "**del.$Name"))) { $keep.Add($e) } }
     if ($null -eq $Value) { $keep.Add([pscustomobject]@{ Key = $Key; Name = "**del.$Name"; Type = 1; Data = [Text.Encoding]::Unicode.GetBytes(' ' + [char]0) }) }

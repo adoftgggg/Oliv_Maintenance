@@ -34,13 +34,6 @@ function Update-MaxState {
     if ($Window.WindowState -eq 'Maximized') {
         $Ui.RootBorder.Margin = Get-MaxOverhang
         $Ui.RootBorder.BorderThickness = New-Thickness 0 0 0 0
-        # contrôle une fois l'agrandissement posé : zone de travail non entièrement couverte = détail dans le journal (une fois)
-        [void]$Window.Dispatcher.BeginInvoke([Action]{
-            try {
-                $d = [_OlivM.WinPlace]::MaxCheck([Windows.Interop.WindowInteropHelper]::new($Window).Handle)
-                if ($d) { Write-Ignored 'Fenêtre agrandie : écran non entièrement couvert' $d }
-            } catch { Write-Ignored 'Fenêtre agrandie (contrôle)' $_ }
-        }, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
         $Ui.MaxBtn.Content = [string][char]0xE923; $Ui.MaxBtn.ToolTip = 'Restaurer'
     } else {
         $Ui.RootBorder.Margin = New-Thickness 0 0 0 0

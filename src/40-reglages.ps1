@@ -222,7 +222,7 @@ function Update-Footer {
     & $set $Ui.Footer ($run -or $sel -or $keep)
     & $set $Ui.RunBtn $sel
     & $set $Ui.StopBtn $run
-    & $set $Ui.AutoReboot $run
+    & $set $Ui.AutoReboot ($run -and [bool]$Sync.RebootPossible)
     & $set $Ui.FooterStatus ($run -or $keep)
     & $set $Ui.FooterClose $keep
     $m = New-Thickness $(if ($sel) { 0 } else { 14 }) 10 8 10

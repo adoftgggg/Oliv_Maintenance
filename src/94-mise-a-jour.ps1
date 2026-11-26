@@ -86,6 +86,8 @@ $BgJobDone['Upd'] = {
         Update-UpdStatus $m; return
     }
     $new = Get-UpdVersion $r.Tag; $cur = Get-UpdVersion $AppVersion
+    # dernière version publiée mémorisée : affichée dès l'ouverture des Paramètres, sans nouvelle vérification
+    $UpdUI.Latest = $new
     if ($new -and $cur -and $new -gt $cur -and $r.Url) {
         $chg = -not $UpdUI.Info -or "$($UpdUI.Info.Tag)" -ne "$($r.Tag)"; if ($chg) { $UpdUI.Dismissed = $false }
         $UpdUI.Info = $r
@@ -94,9 +96,10 @@ $BgJobDone['Upd'] = {
     } else {
         $UpdUI.Info = $null; if (-not $BgJobs.ContainsKey('UpdDl')) { $Ui.UpdBar.Visibility = 'Collapsed' }
         if ($UpdUI.Manual) { Write-UiLog "Oliv_Maintenance $AppVersion est à jour." 'APP' }
-        Update-UpdStatus ("Oliv_Maintenance $AppVersion est à jour" + $(if ($new) { " (dernière publiée : $new)" } else { '' }) + '.')
+        Update-UpdStatus (Get-UpdUpToDate)
     }
 }
+function Get-UpdUpToDate { 'À jour' + $(if ($UpdUI.Latest) { '  ·  dernière version publiée : {0}' -f $UpdUI.Latest } else { '' }) }
 function Update-UpdStatus([string]$Text) {
     $t = $Text + $(if ($UpdUI.Checked) { '  ·  vérifié {0:HH:mm}' -f $UpdUI.Checked } else { '' })
     if ($SetUI.UpdStatus) { $SetUI.UpdStatus.Text = $t }
@@ -181,8 +184,8 @@ if (Get-SoftAuto) {
         $SoftAutoTimer.Interval = [TimeSpan]::FromHours(12)
         if (-not (Get-SoftAuto)) { return }
         try {
-            if ($Sync.WgRunning -or $Sync.Running -or (Test-SoftUpgrading)) { $SoftAutoTimer.Interval = [TimeSpan]::FromMinutes(5); Write-UiLog 'Recherche automatique des mises à jour des logiciels : reportée de 5 minutes (tâche déjà en cours).' 'APP'; return }
-            Write-UiLog 'Recherche des mises à jour des logiciels installés en arrière-plan (automatique).' 'APP'
+            if ($Sync.WgRunning -or $Sync.Running -or (Test-SoftUpgrading)) { $SoftAutoTimer.Interval = [TimeSpan]::FromMinutes(5); Write-FileLog 'Recherche automatique des mises à jour des logiciels : reportée de 5 minutes (tâche déjà en cours).' 'APP'; return }
+            Write-FileLog 'Recherche des mises à jour des logiciels installés en arrière-plan (automatique).' 'APP'
             Start-SoftSearch
         } catch { Write-Ignored 'Recherche des mises à jour des logiciels au lancement' $_ }
     })

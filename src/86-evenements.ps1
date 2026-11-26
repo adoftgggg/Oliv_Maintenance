@@ -185,11 +185,11 @@ function Invoke-PageRefresh {
             Start-DiagCollector
             $Sync.PrnRequest = $true
             $Sync.DiskRequest = $true
-            Write-UiLog 'Accueil actualisé (F5).' 'APP'
+            Write-FileLog 'Accueil actualisé (F5).' 'APP'
         }
-        'Maint' { Start-CleanScan; Write-UiLog 'Tailles du nettoyage recalculées (F5).' 'APP' }
-        'Perf'  { if ($Lazy.Done) { Update-StartupList; Update-PendingBar; Write-UiLog 'Applications au démarrage relues (F5).' 'APP' } }
-        'Perso' { if ($AppxList) { Update-AppxList; Write-UiLog 'Applications préinstallées relues (F5).' 'APP' } }
+        'Maint' { Start-CleanScan; Write-FileLog 'Tailles du nettoyage recalculées (F5).' 'APP' }
+        'Perf'  { if ($Lazy.Done) { Update-StartupList; Update-PendingBar; Write-FileLog 'Applications au démarrage relues (F5).' 'APP' } }
+        'Perso' { if ($AppxList) { Update-AppxList; Write-FileLog 'Applications préinstallées relues (F5).' 'APP' } }
         'Svc'   { if ($SvcUI.Mode -eq 'Tsk') { Start-TskRead } else { Start-SvcRead } }
         'Tools' { Update-ToolsPage }
         'Log'   { [void](Update-LogStatistic) }

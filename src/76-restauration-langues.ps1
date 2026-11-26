@@ -162,25 +162,29 @@ function Add-OfficeLangSection($B) {
     $h = New-Text 'Office'; $h.FontWeight = [Windows.FontWeights]::SemiBold; $h.Margin = New-Thickness 8 14 8 2
     [void]$B.Children.Add($h)
     foreach ($l in $langs.Keys) {
-        $g = [Windows.Controls.Grid]::new(); $g.Margin = New-Thickness 28 1 8 1
+        # une ligne encadrée par langue, surlignée au survol (boutons compris) : on voit à quelle langue s'appliquent les boutons
+        $row = [Windows.Controls.Border]::new(); $row.Style = $Window.FindResource('SvcRow'); $row.Padding = New-Thickness 10 4 6 4; $row.Margin = New-Thickness 20 2 8 2
+        $g = [Windows.Controls.Grid]::new(); $row.Child = $g
         foreach ($w in '*', 'Auto') { $cd = [Windows.Controls.ColumnDefinition]::new(); $cd.Width = $(if ($w -eq '*') { [Windows.GridLength]::new(1, 'Star') } else { [Windows.GridLength]::Auto }); [void]$g.ColumnDefinitions.Add($cd) }
         $isUi = $l -eq $ui
-        $t = New-Text ('{0}  ({1}){2}' -f (Get-CultureName $l), $l, $(if ($isUi) { '  ·  langue d''affichage d''Office' } else { '' })) 'Muted'; $t.VerticalAlignment = 'Center'
+        $t = New-Text ('{0}  ({1})' -f (Get-CultureName $l), $l); $t.VerticalAlignment = 'Center'; $t.TextWrapping = 'Wrap'
+        if ($isUi) { $t.Inlines.Add([Windows.Documents.Run]::new('  ·  langue d''affichage d''Office')); $t.FontWeight = [Windows.FontWeights]::SemiBold; $t.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'AccentBrush') }
         $t.ToolTip = 'Produits : ' + ($langs[$l] -join ', ')
         [void]$g.Children.Add($t)
         if (-not $isUi) {
             # autre langue : passage en langue d'affichage, ou retrait (jamais la langue d'affichage en cours)
             $bp = [Windows.Controls.StackPanel]::new(); $bp.Orientation = 'Horizontal'
-            $db = New-Button 'Afficher Office dans cette langue'; $db.Height = 30; $db.Padding = New-Thickness 10 0 10 0; $db.Tag = $l; $db.IsEnabled = -not $LangUI.OffBusy
+            $db = New-Button ('Afficher Office en ' + ((Get-CultureName $l) -replace '\s*\(.*$', '')); $db.Height = 30; $db.Padding = New-Thickness 10 0 10 0; $db.Tag = $l; $db.IsEnabled = -not $LangUI.OffBusy
             $db.Add_Click({ param($s, $e) Set-OfficeUiLang "$($s.Tag)" })
             [void]$bp.Children.Add($db)
-            $rb = New-Button $(if ($LangUI.OffBusy -eq $l) { 'Retrait en cours...' } else { 'Retirer' }); $rb.Height = 30; $rb.Padding = New-Thickness 10 0 10 0; $rb.Margin = New-Thickness 0 0 0 0
+            $rb = New-Button $(if ($LangUI.OffBusy -eq $l) { 'Retrait en cours...' } else { 'Retirer cette langue' }); $rb.Height = 30; $rb.Padding = New-Thickness 10 0 10 0; $rb.Margin = New-Thickness 0 0 0 0
             $rb.Tag = @{ L = $l; P = @($langs[$l]) }; $rb.IsEnabled = -not $LangUI.OffBusy
             $rb.Add_Click({ param($s, $e) Remove-OfficeLang $s.Tag.L $s.Tag.P })
             [void]$bp.Children.Add($rb)
+            $db.Margin = New-Thickness 0 0 6 0
             [Windows.Controls.Grid]::SetColumn($bp, 1); [void]$g.Children.Add($bp)
         }
-        [void]$B.Children.Add($g)
+        [void]$B.Children.Add($row)
     }
     $LangUI.OffState = New-Text '' 'Muted'; $LangUI.OffState.Margin = New-Thickness 28 4 8 0; $LangUI.OffState.FontSize = 12; $LangUI.OffState.TextWrapping = 'Wrap'
     $LangUI.OffState.Visibility = $(if ($LangUI.OffBusy) { 'Visible' } else { 'Collapsed' })

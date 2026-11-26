@@ -75,6 +75,11 @@ function Show-History {
     }.GetNewClosure()
     [void](Show-Dialog ('Historique du poste  ·  {0} {1}' -f $rows.Count, (Get-Plural $rows.Count 'action' 'actions')) 'Info' $null @(Format-HistoryLine $rows) 'Actions de l''application, réglages, tâches, mises à jour et installations de logiciels (1 000 dernières lignes affichées par filtre).' 900 $bar $ready)
 }
+# détail technique sans intérêt pour l'utilisateur (incident non bloquant, relecture, préparation) : fichier journal du jour
+# seulement, jamais affiché dans le Journal de l'application ni dans le bandeau
+function Write-FileLog([string]$Message, [string]$Level = 'INFO') {
+    try { [IO.File]::AppendAllText($TweakLog, ('{0:yyyy-MM-dd} {1:HH:mm:ss} [{2,-5}] {3}{4}' -f (Get-Date), (Get-Date), $Level, $Message, [Environment]::NewLine), [Text.Encoding]::UTF8) } catch { $null = $_ }
+}
 function Write-UiLog([string]$Message, [string]$Level = 'INFO') {
     $line = '{0} [{1,-5}] {2}' -f (Get-Date -Format 'HH:mm:ss'), $Level, $Message
     $Sync.Queue.Enqueue($line)
@@ -99,7 +104,7 @@ function Set-ClipText([string]$Text, [string]$Done) {
 # libellé de confirmation accordé depuis l'intitulé d'un menu « Copier ... » (genre et nombre du nom copié)
 function Get-CopyDone([string]$Head) {
     $h = $Head -replace '^Copier\s+', '' -replace '^(le|la|les|l'')\s*', '' -replace '^\d+\s+', ''
-    $fem = $h -match '^(erreur|version|ligne|clé|cle|adresse|valeur|commande)'
+    $fem = $h -match '^(erreur|version|ligne|clé|cle|adresse|valeur|commande|taille)'
     $plu = $Head -match '^Copier\s+les\s'
     $mot = $h.Substring(0, 1).ToUpper() + $h.Substring(1)
     '{0} {1}' -f $mot, $('copi' + 'é' + $(if ($fem) { 'e' } else { '' }) + $(if ($plu) { 's' } else { '' }))
@@ -123,8 +128,10 @@ function Show-Toast([string]$Text, [bool]$Ok = $true) {
     $ToastUI.Glyph.Text = [string][char]$(if ($Ok) { 0xE73E } else { 0xE783 })
     foreach ($x in $ToastUI.Glyph, $ToastUI.Text) { $x.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($Ok) { 'OkFgBrush' } else { 'ErrFgBrush' })) }
     $ToastUI.Text.Text = $Text
-    $ToastUI.Pop.PlacementTarget = $Window.Content
-    $ToastUI.Pop.VerticalOffset = [math]::Max([double]0, $Window.ActualHeight / 2 - 60)
+    # fenêtre active de l'application (Logiciels, Espace disque, Variables...) : bandeau affiché dans celle-ci, pas derrière
+    $w = $(if ($TreeUI.Win -and $TreeUI.Win.IsActive) { $TreeUI.Win } elseif ($SoftUI.Win -and $SoftUI.Win.IsActive) { $SoftUI.Win } elseif ($EnvUI.Win -and $EnvUI.Win.IsActive) { $EnvUI.Win } else { $Window })
+    $ToastUI.Pop.PlacementTarget = $w.Content
+    $ToastUI.Pop.VerticalOffset = [math]::Max([double]0, $w.ActualHeight / 2 - 60)
     $ToastUI.Pop.IsOpen = $false; $ToastUI.Pop.IsOpen = $true
     $ToastUI.Timer.Stop(); $ToastUI.Timer.Start()
 }

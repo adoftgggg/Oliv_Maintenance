@@ -9,7 +9,7 @@ try { foreach ($x in @((Get-RegValue $CardRegKey 'CartesMasquees'))) { if ($x) {
 $CardState = @{}
 function Save-HiddenCard {
     try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue('CartesMasquees', [string[]]@($HiddenCards), [Microsoft.Win32.RegistryValueKind]::MultiString) } finally { $k.Close() } }
-    catch { Write-UiLog "Cartes masquées : $($_.Exception.Message)" 'WARN' }
+    catch { Write-FileLog "Cartes masquées : $($_.Exception.Message)" 'WARN' }
 }
 # cartes d'une page : bordures « card:Titre » (New-Card) ou de style Panel (titre = premier texte), sans descendre dedans
 function Get-PageCard($Root, [string]$Page, $List) {
@@ -47,6 +47,9 @@ function Update-CardVisibility([string]$Page) {
             [void]$cm.Items.Add($m2)
             $m3 = [Windows.Controls.MenuItem]::new(); $m3.Header = 'Ordre des cartes par défaut (cet onglet)'; $m3.Tag = $Page; $m3.Add_Click({ param($s, $e) Reset-CardOrder "$($s.Tag)" })
             [void]$cm.Items.Add($m3)
+            # « Ordre par défaut » proposé seulement si l'ordre de l'onglet a été changé (disposition enregistrée)
+            $cm.Tag = @{ Reset = $m3; Page = $Page }
+            $cm.Add_Opened({ param($s, $e) $v = @((Get-RegValue $CardRegKey "CartesOrdre_$($s.Tag.Page)") | Where-Object { $_ }); $s.Tag.Reset.Visibility = $(if ($v.Count) { 'Visible' } else { 'Collapsed' }) })
             $c.El.ContextMenu = $cm
             Enable-CardMove $c
         }
@@ -104,14 +107,26 @@ function Enable-CardMove($C) {
     $el.Add_DragOver({ param($s, $e) Update-CardDrop $s $e })
     $el.Add_Drop({ param($s, $e) $e.Handled = $true; Complete-CardDrag })
 }
-function New-CardGhostBlock([double]$H) {
+# image de la carte prise avant le déplacement (une fois masquée, une copie dynamique VisualBrush ne montre plus rien :
+# seul « Déposer ici » restait visible) ; résolution de l'écran respectée
+function Get-CardSnapshot($El) {
+    $w = [math]::Max([double]1, $El.ActualWidth); $h = [math]::Max([double]1, $El.ActualHeight)
+    $dpi = try { [Windows.Media.VisualTreeHelper]::GetDpi($El) } catch { $null }
+    $sx = $(if ($dpi) { $dpi.DpiScaleX } else { 1.0 }); $sy = $(if ($dpi) { $dpi.DpiScaleY } else { 1.0 })
+    $rt = [Windows.Media.Imaging.RenderTargetBitmap]::new([int][math]::Ceiling($w * $sx), [int][math]::Ceiling($h * $sy), 96 * $sx, 96 * $sy, [Windows.Media.PixelFormats]::Pbgra32)
+    $dv = [Windows.Media.DrawingVisual]::new(); $dc = $dv.RenderOpen()
+    try { $dc.DrawRectangle([Windows.Media.VisualBrush]::new($El), $null, [Windows.Rect]::new(0, 0, $w, $h)) } finally { $dc.Close() }
+    $rt.Render($dv); $rt.Freeze(); $rt
+}
+function New-CardGhostBlock([double]$H, $Img) {
     $b = [Windows.Controls.Border]::new(); $b.Height = [math]::Max([double]60, $H); $b.Margin = New-Thickness 0 0 0 14; $b.CornerRadius = [Windows.CornerRadius]::new(10)
     $b.BorderThickness = New-Thickness 2 2 2 2; $b.AllowDrop = $true
     $b.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'AccentBrush')
     $dash = [Windows.Shapes.Rectangle]::new(); $dash.StrokeDashArray = [Windows.Media.DoubleCollection]::new([double[]](6, 4)); $dash.StrokeThickness = 2; $dash.RadiusX = 10; $dash.RadiusY = 10
     $dash.SetResourceReference([Windows.Shapes.Shape]::StrokeProperty, 'AccentBrush')
     $b.BorderThickness = New-Thickness 0 0 0 0; $g = [Windows.Controls.Grid]::new(); [void]$g.Children.Add($dash)
-    $t = New-Text 'Déposer ici'; $t.HorizontalAlignment = 'Center'; $t.VerticalAlignment = 'Center'; $t.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'AccentBrush'); [void]$g.Children.Add($t)
+    # aperçu estompé de la carte à l'emplacement où elle sera déposée
+    if ($Img) { $im = [Windows.Controls.Image]::new(); $im.Source = $Img; $im.Stretch = 'Fill'; $im.Opacity = 0.35; $im.IsHitTestVisible = $false; $g.Children.Insert(0, $im) }
     $b.Child = $g; $b.Background = [Windows.Media.Brushes]::Transparent
     $b.Add_DragOver({ param($s, $e) $e.Effects = 'Move'; $e.Handled = $true })
     $b.Add_Drop({ param($s, $e) $e.Handled = $true; Complete-CardDrag })
@@ -124,11 +139,12 @@ function Start-CardDrag($Src, $Handle) {
     # même si la préparation échoue (sinon la carte restait masquée derrière le bloc)
     $blk = $null; $pop = $null; $cols = @(); $fb = $null
     try {
-        $blk = New-CardGhostBlock $el.ActualHeight
+        $img = $null; try { $img = Get-CardSnapshot $el } catch { Write-Ignored 'Aperçu de la carte' $_ }
+        $blk = New-CardGhostBlock $el.ActualHeight $img
         $p.Children.Insert($p.Children.IndexOf($el), $blk); $el.Visibility = 'Collapsed'
         # copie semi-transparente qui suit le pointeur
         $pop = [Windows.Controls.Primitives.Popup]::new(); $pop.AllowsTransparency = $true; $pop.Placement = 'Absolute'; $pop.IsHitTestVisible = $false
-        $vb = [Windows.Media.VisualBrush]::new($el.Child); $r = [Windows.Shapes.Rectangle]::new(); $r.Width = $el.ActualWidth; $r.Height = $el.ActualHeight; $r.Fill = $vb; $r.Opacity = 0.75; $r.IsHitTestVisible = $false
+        $r = [Windows.Shapes.Rectangle]::new(); $r.Width = $el.ActualWidth; $r.Height = $el.ActualHeight; $r.Fill = $(if ($img) { [Windows.Media.ImageBrush]::new($img) } else { [Windows.Media.VisualBrush]::new($el.Child) }); $r.Opacity = 0.85; $r.IsHitTestVisible = $false
         $fr = [Windows.Controls.Border]::new(); $fr.CornerRadius = [Windows.CornerRadius]::new(10); $fr.Child = $r; $fr.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'PanelBrush'); $fr.Opacity = 0.9
         $sh = [Windows.Media.Effects.DropShadowEffect]::new(); $sh.BlurRadius = 18; $sh.ShadowDepth = 4; $sh.Opacity = 0.35; $fr.Effect = $sh
         $pop.Child = $fr
@@ -179,7 +195,7 @@ function Complete-CardDrag { if ($CardMove.Drag) { $CardMove.Drag.Done = $true }
 function Save-CardOrder([string]$Page) {
     $cols = @(Get-CardColumn $Page); $l = [Collections.Generic.List[string]]::new()
     foreach ($c in (Get-AllPageCard $Page)) { $p = $c.El.Parent; $ci = [array]::IndexOf($cols, $p); if ($ci -ge 0) { $l.Add(('{0}|{1}|{2}' -f $c.Key, $ci, $p.Children.IndexOf($c.El))) } }
-    try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue("CartesOrdre_$Page", [string[]]$l, [Microsoft.Win32.RegistryValueKind]::MultiString) } finally { $k.Close() } } catch { Write-UiLog "Disposition des cartes : $($_.Exception.Message)" 'WARN' }
+    try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue("CartesOrdre_$Page", [string[]]$l, [Microsoft.Win32.RegistryValueKind]::MultiString) } finally { $k.Close() } } catch { Write-FileLog "Disposition des cartes : $($_.Exception.Message)" 'WARN' }
 }
 # disposition enregistrée réappliquée une fois par construction de l'onglet (cartes construites à la demande)
 # disposition d'origine (celle construite par l'application) relevée avant toute remise en ordre : bouton « Ordre par défaut »
@@ -220,17 +236,6 @@ function Reset-CardOrder([string]$Page, [switch]$Quiet) {
 }
 # une place plus haut / plus bas dans l'onglet (ordre de lecture : colonne par colonne) ; en haut d'une colonne, la carte
 # passe en bas de la colonne précédente, en bas d'une colonne, en haut de la suivante
-function Move-CardStep($C, [int]$Dir) {
-    $cols = @(Get-CardColumn $C.Page); $el = $C.El; $p = $el.Parent; $ci = [array]::IndexOf($cols, $p); if ($ci -lt 0) { return }
-    $cards = @(Get-AllPageCard $C.Page | Where-Object { $_.El.Parent -eq $p } | ForEach-Object { $_.El })
-    $k = [array]::IndexOf($cards, $el)
-    if ($Dir -lt 0 -and $k -gt 0) { $p.Children.Remove($el); $p.Children.Insert($p.Children.IndexOf($cards[$k - 1]), $el) }
-    elseif ($Dir -gt 0 -and $k -lt $cards.Count - 1) { $p.Children.Remove($el); $p.Children.Insert($p.Children.IndexOf($cards[$k + 1]) + 1, $el) }
-    elseif ($Dir -lt 0 -and $ci -gt 0) { $p.Children.Remove($el); [void]$cols[$ci - 1].Children.Add($el) }
-    elseif ($Dir -gt 0 -and $ci -lt $cols.Count - 1) { $p.Children.Remove($el); $cols[$ci + 1].Children.Insert(0, $el) }
-    else { return }
-    Save-CardOrder $C.Page
-}
 function Hide-Card($C) {
     [void]$HiddenCards.Add($C.Key); Save-HiddenCard; Set-CardShown $C $false
     Write-UiLog ('Carte « {0} » masquée (réaffichage : Paramètres > Onglets et cartes affichés).' -f $C.Title) 'APP'
@@ -265,68 +270,166 @@ function Undo-CardHide {
     Write-UiLog ('Carte « {0} » réaffichée.' -f $c.Title) 'APP'
 }
 
-# Paramètres > Onglets et cartes affichés : une case par carte, groupées par onglet (pages construites si besoin)
-# Paramètres > Onglets et cartes affichés : nombre de cartes masquées, bouton d'ouverture de la fenêtre de choix
+# Paramètres > Onglets et cartes : résumé (onglets et cartes masqués) et bouton d'ouverture de la fenêtre de personnalisation
 function Update-CardSetting {
     $b = $SetUI.CardsBody; if (-not $b) { return }
     $b.Children.Clear()
-    $bar = [Windows.Controls.WrapPanel]::new(); $bar.Margin = New-Thickness 38 0 10 14
-    $pk = New-Button 'Choisir les cartes affichées...' 'PrimaryBtn'; $pk.Height = 30; $pk.Margin = New-Thickness 0 0 8 0; $pk.Add_Click({ Show-CardPicker })
+    $bar = [Windows.Controls.WrapPanel]::new(); $bar.Margin = New-Thickness 46 4 10 14
+    $pk = New-Button 'Personnaliser les onglets et les cartes...' 'PrimaryBtn'; $pk.Height = 30; $pk.Margin = New-Thickness 0 0 8 0; $pk.Add_Click({ Show-CardPicker })
     $all = New-Button 'Tout réafficher'; $all.Height = 30; $all.Margin = New-Thickness 0 0 8 0; $all.Add_Click({ Show-AllCard })
     $SetUI.CardsCount = New-Text '' 'Muted'; $SetUI.CardsCount.VerticalAlignment = 'Center'; $SetUI.CardsCount.Margin = New-Thickness 6 0 0 0
     [void]$bar.Children.Add($pk); [void]$bar.Children.Add($all); [void]$bar.Children.Add($SetUI.CardsCount)
     [void]$b.Children.Add($bar)
     Update-CardCount
 }
+# tout réafficher : onglets et cartes
 function Show-AllCard {
     foreach ($p in $CardPages.Keys) { foreach ($c in (Get-AllPageCard $p)) { Set-CardShown $c $true } }
-    $HiddenCards.Clear(); Save-HiddenCard; Update-CardCount; Write-UiLog 'Toutes les cartes réaffichées.' 'APP'
+    $HiddenCards.Clear(); Save-HiddenCard
+    $HiddenTabs.Clear(); Save-HiddenTab; Update-TabVisibility
+    Update-CardCount; Write-UiLog 'Tous les onglets et toutes les cartes réaffichés.' 'APP'
 }
-# fenêtre de choix : une colonne par onglet, une case par carte (cochée = affichée), appliqué tout de suite
+# fenêtre de personnalisation : une colonne par onglet (case de l'onglet en tête, puis ses cartes dans l'ordre affiché).
+# Case = affiché / masqué ; carte glissée par sa ligne : la liste se réorganise en direct pendant le déplacement, l'onglet
+# suit au lâcher. Bandeaux fixes (cadenas) grisés, ni masquables ni déplaçables.
 function Show-CardPicker {
     if ($ToolsUI.UndoPop) { $ToolsUI.UndoPop.IsOpen = $false }
     if (-not $Lazy.Done) { New-DeferredPage }
     if (-not $ToolsUI.Built) { New-ToolsPage }
-    # disposition enregistrée appliquée à tous les onglets avant affichage : la liste suit l'ordre réel des cartes
     foreach ($p in $CardPages.Keys) { try { Restore-CardOrder $p } catch { Write-Ignored 'Disposition des cartes' $_ } }
     $wrap = [Windows.Controls.WrapPanel]::new(); $CardMove.PickWrap = $wrap
     Update-CardPickerList
-    $sv = [Windows.Controls.ScrollViewer]::new(); $sv.VerticalScrollBarVisibility = 'Auto'; $sv.MaxHeight = 520; $sv.Content = $wrap
-    $v = Show-Dialog "Cartes affichées`n`nDécocher une carte la masque dans son onglet, la cocher la réaffiche. Flèches : monter ou descendre la carte dans son onglet (ordre de lecture, colonne par colonne). Tout est appliqué tout de suite." 'Info' @(@{ T = 'Ordre par défaut'; V = 'order' }, @{ T = 'Tout réafficher'; V = 'all' }, @{ T = 'Fermer'; V = 'ok'; C = $true }) $null $null 980 $sv
+    $sv = [Windows.Controls.ScrollViewer]::new(); $sv.VerticalScrollBarVisibility = 'Auto'; $sv.MaxHeight = 540; $sv.Content = $wrap
+    # « Ordre par défaut » seulement si l'ordre d'au moins un onglet a été changé
+    $chg = @($CardPages.Keys | Where-Object { @((Get-RegValue $CardRegKey "CartesOrdre_$_") | Where-Object { $_ }).Count }).Count
+    $btns = @($(if ($chg) { @{ T = 'Ordre par défaut'; V = 'order' } }) + @(@{ T = 'Tout réafficher'; V = 'all' }, @{ T = 'Fermer'; V = 'ok'; C = $true }) | Where-Object { $_ })
+    $v = Show-Dialog "Onglets et cartes`n`nCase d'un onglet : onglet affiché dans la barre ou masqué. Case d'une carte : carte affichée ou masquée dans son onglet. Glisser une carte par sa ligne pour la déplacer : la liste se réorganise en direct, l'onglet suit au lâcher. Tout est appliqué tout de suite." 'Info' $btns $null $null 1040 $sv
     if ($sv.Parent) { $sv.Parent.Content = $null }
     if ($v -eq 'all') { Show-AllCard; Show-CardPicker }
     elseif ($v -eq 'order') { foreach ($p in $CardPages.Keys) { Reset-CardOrder $p -Quiet }; Write-UiLog 'Ordre des cartes par défaut rétabli dans tous les onglets.' 'APP'; Show-CardPicker }
 }
-# liste de la fenêtre : un bloc par onglet, cartes dans l'ordre affiché, case + flèches haut / bas
+# carte placée juste avant / après une autre carte du même onglet (même colonne ou autre colonne)
+function Move-CardTo($C, $Target, [bool]$After) {
+    $el = $C.El; $tp = $Target.El.Parent
+    if ($el -eq $Target.El -or $tp -isnot [Windows.Controls.Panel] -or $el.Parent -isnot [Windows.Controls.Panel]) { return }
+    $el.Parent.Children.Remove($el)
+    $i = $tp.Children.IndexOf($Target.El) + $(if ($After) { 1 } else { 0 })
+    if ($i -lt 0) { $i = 0 }; if ($i -gt $tp.Children.Count) { $i = $tp.Children.Count }
+    $tp.Children.Insert($i, $el)
+}
+# déplacement en direct dans la liste : ligne glissée insérée avant / après la ligne survolée (jamais au-dessus des bandeaux fixes)
+function Move-PickRow($Row, $Target, [bool]$After) {
+    $l = $Row.Parent; if ($Target.Parent -ne $l -or $Row -eq $Target) { return }
+    $want = $l.Children.IndexOf($Target) + $(if ($After) { 1 } else { 0 })
+    $cur = $l.Children.IndexOf($Row); if ($cur -lt $want) { $want-- }
+    if ($cur -eq $want) { return }
+    $l.Children.Remove($Row); $l.Children.Insert($want, $Row)
+}
+# lâcher : place de la carte dans l'onglet déduite de ses voisines dans la liste, ordre enregistré
+function Complete-PickDrag($Row) {
+    $l = $Row.Parent; if ($l -isnot [Windows.Controls.Panel]) { return }
+    $rows = @($l.Children | Where-Object { $_.Tag -is [hashtable] -and $_.Tag.Movable })
+    $k = [array]::IndexOf($rows, $Row); $c = $Row.Tag.C
+    if ($k -lt $rows.Count - 1) { Move-CardTo $c $rows[$k + 1].Tag.C $false } elseif ($k -gt 0) { Move-CardTo $c $rows[$k - 1].Tag.C $true } else { return }
+    Save-CardOrder $c.Page
+    Write-UiLog ('{0} : carte « {1} » déplacée.' -f $CardPages[$c.Page], $c.Title) 'APP'
+}
 function Update-CardPickerList {
     $wrap = $CardMove.PickWrap; if (-not $wrap) { return }
     $wrap.Children.Clear()
-    foreach ($p in $CardPages.Keys) {
-        # bandeaux fixes en tête, cartes déplaçables ensuite (flèches limitées à celles-ci)
-        $all = @(Get-AllPageCard $p); if (-not $all.Count) { continue }
+    # colonnes : Accueil puis les onglets de la barre, dans l'ordre de la barre
+    $pages = [ordered]@{ Info = 'Accueil' }; foreach ($k in $TabLabels.Keys) { $pages[$k] = $(if ($CardPages.Contains($k)) { $CardPages[$k] } else { $TabLabels[$k] }) }
+    foreach ($p in $pages.Keys) {
+        $col = [Windows.Controls.StackPanel]::new(); $col.Width = 240; $col.Margin = New-Thickness 0 0 12 14
+        # en-tête : case de l'onglet (Accueil toujours affiché)
+        $hd = [Windows.Controls.StackPanel]::new()
+        $tc = New-HoverCheck $hd '' $null $null
+        $tt = New-Text $pages[$p]; $tt.FontWeight = [Windows.FontWeights]::SemiBold; $tt.FontSize = 14; $tc.Content = $tt
+        $tc.IsChecked = $p -eq 'Info' -or -not $HiddenTabs.Contains($p)
+        if ($p -eq 'Info') { $tc.IsEnabled = $false; $tc.ToolTip = 'Accueil toujours affiché' } else { $tc.ToolTip = 'Onglet affiché dans la barre' }
+        $sep = [Windows.Controls.Border]::new(); $sep.Height = 1; $sep.Margin = New-Thickness 6 2 6 4; $sep.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'LineBrush'); [void]$hd.Children.Add($sep)
+        [void]$col.Children.Add($hd)
+        $list = [Windows.Controls.StackPanel]::new(); $list.Background = [Windows.Media.Brushes]::Transparent; $list.AllowDrop = $true
+        $list.Opacity = $(if ($tc.IsChecked) { 1 } else { 0.45 })
+        $tc.Tag = @{ Page = $p; List = $list }
+        $tc.Add_Checked({ param($s, $e) $k = $s.Tag.Page; [void]$HiddenTabs.Remove($k); Save-HiddenTab; Update-TabVisibility; $s.Tag.List.Opacity = 1; Update-CardCount; Write-UiLog "Onglet « $($TabLabels[$k]) » affiché." 'APP' })
+        $tc.Add_Unchecked({ param($s, $e) $k = $s.Tag.Page; [void]$HiddenTabs.Add($k); Save-HiddenTab; Update-TabVisibility; $s.Tag.List.Opacity = 0.45; Update-CardCount; Write-UiLog "Onglet « $($TabLabels[$k]) » masqué." 'APP' })
+        $all = @($(if ($CardPages.Contains($p)) { Get-AllPageCard $p }))
+        if (-not $all.Count) { $t = New-Text 'Pas de cartes dans cet onglet' 'Muted'; $t.Margin = New-Thickness 12 2 0 0; [void]$list.Children.Add($t) }
         $cards = @(@($all | Where-Object { Test-CardFixed $_ }) + @($all | Where-Object { -not (Test-CardFixed $_) }))
-        $nFix = @($all | Where-Object { Test-CardFixed $_ }).Count
-        $col = [Windows.Controls.StackPanel]::new(); $col.Width = 300; $col.Margin = New-Thickness 0 0 14 14
-        $h = New-Text $CardPages[$p]; $h.FontWeight = [Windows.FontWeights]::SemiBold; $h.FontSize = 14; $h.Margin = New-Thickness 8 0 0 4; [void]$col.Children.Add($h)
-        for ($i = 0; $i -lt $cards.Count; $i++) {
-            $c = $cards[$i]
+        foreach ($c in $cards) {
+            $fixed = Test-CardFixed $c
+            $movable = -not $fixed -and "$($c.El.Tag)" -like 'card:*' -and $c.El.Parent -is [Windows.Controls.Panel]
+            $row = [Windows.Controls.Border]::new(); $row.CornerRadius = [Windows.CornerRadius]::new(6); $row.BorderThickness = New-Thickness 1 1 1 1
+            $row.BorderBrush = [Windows.Media.Brushes]::Transparent; $row.Background = [Windows.Media.Brushes]::Transparent; $row.Margin = New-Thickness 0 1 0 1
+            $row.Tag = @{ C = $c; Movable = $movable }; $row.AllowDrop = $true
             $g = [Windows.Controls.Grid]::new()
-            foreach ($w in '*', 'Auto', 'Auto') { $cd = [Windows.Controls.ColumnDefinition]::new(); $cd.Width = $(if ($w -eq '*') { [Windows.GridLength]::new(1, 'Star') } else { [Windows.GridLength]::Auto }); [void]$g.ColumnDefinitions.Add($cd) }
-            # case cochée = carte affichée ; gestionnaires posés après l'état initial (clic sur la case ou sur la ligne)
+            foreach ($w in 'Auto', '*') { $cd = [Windows.Controls.ColumnDefinition]::new(); $cd.Width = $(if ($w -eq '*') { [Windows.GridLength]::new(1, 'Star') } else { [Windows.GridLength]::Auto }); [void]$g.ColumnDefinitions.Add($cd) }
+            $gr = New-Text ([string][char]$(if ($movable) { 0xE76F } else { 0xE72E })); $gr.FontFamily = [Windows.Media.FontFamily]::new('Segoe MDL2 Assets'); $gr.FontSize = 12
+            $gr.VerticalAlignment = 'Center'; $gr.Margin = New-Thickness 6 0 2 0; $gr.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'MutedBrush')
+            [void]$g.Children.Add($gr)
+            $hc = [Windows.Controls.Grid]::new(); [Windows.Controls.Grid]::SetColumn($hc, 1); [void]$g.Children.Add($hc)
             $ct = New-Text $c.Title; $ct.TextWrapping = 'Wrap'
-            $cb = New-HoverCheck $g '' $null $null; $cb.Content = $ct
+            $cb = New-HoverCheck $hc '' $null $null; $cb.Content = $ct
             $cb.Tag = $c; $cb.IsChecked = -not $HiddenCards.Contains($c.Key)
-            $cb.Add_Checked({ param($s, $e) [void]$HiddenCards.Remove($s.Tag.Key); Save-HiddenCard; Set-CardShown $s.Tag $true; Update-CardCount })
-            $cb.Add_Unchecked({ param($s, $e) [void]$HiddenCards.Add($s.Tag.Key); Save-HiddenCard; Set-CardShown $s.Tag $false; Update-CardCount })
-            $movable = -not (Test-CardFixed $c) -and "$($c.El.Tag)" -like 'card:*' -and $c.El.Parent -is [Windows.Controls.Panel]
-            $up = New-ToolIconButton 0xE70E 'Monter' $c { param($s, $e) Move-CardStep $s.Tag -1; Update-CardPickerList }; $up.IsEnabled = $movable -and $i -gt $nFix; [Windows.Controls.Grid]::SetColumn($up, 1); [void]$g.Children.Add($up)
-            $dn = New-ToolIconButton 0xE70D 'Descendre' $c { param($s, $e) Move-CardStep $s.Tag 1; Update-CardPickerList }; $dn.IsEnabled = $movable -and $i -lt $cards.Count - 1; [Windows.Controls.Grid]::SetColumn($dn, 2); [void]$g.Children.Add($dn)
-            [void]$col.Children.Add($g)
+            if ($fixed) {
+                # bandeau fixe (cadenas) : grisé, ni masquable ni déplaçable
+                if ($HiddenCards.Remove($c.Key)) { Save-HiddenCard; Set-CardShown $c $true }
+                $cb.IsChecked = $true; $cb.IsEnabled = $false; $row.Opacity = 0.5; $row.ToolTip = 'Bandeau fixe en haut de l''onglet : toujours affiché, non déplaçable'
+            } else {
+                $cb.Add_Checked({ param($s, $e) [void]$HiddenCards.Remove($s.Tag.Key); Save-HiddenCard; Set-CardShown $s.Tag $true; Update-CardCount })
+                $cb.Add_Unchecked({ param($s, $e) [void]$HiddenCards.Add($s.Tag.Key); Save-HiddenCard; Set-CardShown $s.Tag $false; Update-CardCount })
+            }
+            $row.Child = $g
+            if ($movable) {
+                $row.Cursor = [Windows.Input.Cursors]::SizeAll; $row.ToolTip = 'Glisser pour déplacer la carte'
+                $row.Add_PreviewMouseLeftButtonDown({ param($s, $e) $CardMove.PickSrc = $s; $CardMove.PickPt = $e.GetPosition($s) })
+                $row.Add_PreviewMouseLeftButtonUp({ $CardMove.PickSrc = $null })
+                $row.Add_PreviewMouseMove({ param($s, $e)
+                    if ($CardMove.PickSrc -ne $s -or $e.LeftButton -ne 'Pressed') { return }
+                    $d = $e.GetPosition($s) - $CardMove.PickPt; if ([math]::Abs($d.X) -lt 6 -and [math]::Abs($d.Y) -lt 6) { return }
+                    $CardMove.PickSrc = $null; $CardMove.PickDrag = $s
+                    # ligne en cours de déplacement : surlignée (bord et fond d'accent), elle se déplace dans la liste sous le pointeur
+                    $s.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'AccentBrush'); $s.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'HoverBrush')
+                    $r = [Windows.DragDropEffects]::None
+                    try { $r = [Windows.DragDrop]::DoDragDrop($s, [Windows.DataObject]::new('OlivMPick', 'x'), [Windows.DragDropEffects]::Move) }
+                    finally {
+                        $CardMove.PickDrag = $null; $s.BorderBrush = [Windows.Media.Brushes]::Transparent; $s.Background = [Windows.Media.Brushes]::Transparent
+                        # lâché dans la liste : place appliquée à l'onglet ; annulé (Échap, hors de la liste) : liste remise dans l'ordre réel
+                        if ($r -eq [Windows.DragDropEffects]::Move) { try { Complete-PickDrag $s } catch { Write-UiLog "Déplacement de la carte : $($_.Exception.Message)" 'ERROR' } }
+                        [void]$CardMove.PickWrap.Dispatcher.BeginInvoke([Action]{ Update-CardPickerList }, [Windows.Threading.DispatcherPriority]::Background)
+                    }
+                })
+            }
+            $row.Add_DragOver({ param($s, $e)
+                $e.Handled = $true; $src = $CardMove.PickDrag
+                if (-not $src -or $src.Parent -ne $s.Parent) { $e.Effects = 'None'; return }
+                $e.Effects = 'Move'
+                if ($s -eq $src -or -not $s.Tag.Movable) { return }
+                Move-PickRow $src $s ($e.GetPosition($s).Y -gt $s.ActualHeight / 2)
+            })
+            $row.Add_Drop({ param($s, $e) $e.Handled = $true; $e.Effects = 'Move' })
+            [void]$list.Children.Add($row)
         }
+        # espace libre sous la liste : la carte va en fin d'onglet
+        $list.Add_DragOver({ param($s, $e)
+            $e.Handled = $true; $src = $CardMove.PickDrag
+            if (-not $src -or $src.Parent -ne $s) { $e.Effects = 'None'; return }
+            $e.Effects = 'Move'
+            $last = @($s.Children | Where-Object { $_.Tag -is [hashtable] -and $_.Tag.Movable })[-1]
+            if ($last -and $last -ne $src -and $e.GetPosition($last).Y -gt $last.ActualHeight) { Move-PickRow $src $last $true }
+        })
+        $list.Add_Drop({ param($s, $e) $e.Handled = $true; $e.Effects = 'Move' })
+        $list.MinHeight = 40
+        [void]$col.Children.Add($list)
         [void]$wrap.Children.Add($col)
     }
 }
-function Update-CardCount { if ($SetUI.CardsCount) { $SetUI.CardsCount.Text = $(if ($HiddenCards.Count) { '{0} carte(s) masquée(s)' -f $HiddenCards.Count } else { 'Aucune carte masquée.' }) } }
+function Update-CardCount {
+    if (-not $SetUI.CardsCount) { return }
+    $n = $HiddenCards.Count; $o = $HiddenTabs.Count
+    $SetUI.CardsCount.Text = $(if (-not $n -and -not $o) { 'Tous les onglets et toutes les cartes sont affichés.' } else { (@($(if ($o) { '{0} {1}' -f $o, $(if ($o -gt 1) { 'onglets masqués' } else { 'onglet masqué' }) }), $(if ($n) { '{0} {1}' -f $n, $(if ($n -gt 1) { 'cartes masquées' } else { 'carte masquée' }) })) | Where-Object { $_ }) -join ', ' })
+}
 
 # Onglets masqués (Paramètres > Onglets et cartes affichés) : HKCU\Software\Oliv_Maintenance\Affichage\OngletsMasques,
 # conservés d'une version à l'autre. Accueil et Paramètres toujours accessibles ; onglet affiché masqué = retour à l'Accueil.
