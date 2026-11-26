@@ -1,5 +1,17 @@
 # Oliv_Maintenance – sources
 
+## Lancer l'application en une commande
+
+Dans PowerShell (Windows 10 / 11, sans droits administrateur pour la commande ; Windows demande l'autorisation au lancement) :
+
+```powershell
+irm https://raw.githubusercontent.com/adoftgggg/Oliv_Maintenance/main/lancer.ps1 | iex
+```
+
+Le script `lancer.ps1` lit la dernière version publiée, télécharge l'exe dans le dossier Téléchargements sous le nom
+`Oliv_Maintenance.exe`, vérifie son empreinte SHA-256 par rapport à celle de la publication (fichier rejeté sinon),
+puis le lance. Téléchargement manuel : https://github.com/adoftgggg/Oliv_Maintenance/releases/latest
+
 Outil de maintenance Windows (PowerShell 5.1 + WPF) livré en un seul fichier `Oliv_Maintenance.cmd`
 (polyglotte CMD / PowerShell). Le livrable est **assemblé** à partir des sources de `src\` : on ne modifie jamais
 le `.cmd` à la main.
@@ -7,6 +19,7 @@ le `.cmd` à la main.
 ## Arborescence
 
 ```
+lancer.ps1           lancement en une commande (irm ... | iex) : dernière version publiée, SHA-256 vérifié
 build.ps1            assemblage + contrôles + tests -> dist\Oliv_Maintenance.cmd et dist\Oliv_Maintenance_<version>.exe
 VERSION              version courante (0.x.y)
 src\NN-nom.ps1       sources, concaténées dans l'ordre du préfixe NN
