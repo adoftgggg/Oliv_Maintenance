@@ -97,6 +97,7 @@ function Get-CloseWarning {
     if ($Sync.OemInstalling) {
         if ($head) { $more += "Des mises à jour constructeur sont aussi en cours d'installation." }
         else { $head = "Des mises à jour constructeur sont en cours d'installation, $q" }
+        $more += 'L''installation en cours (BIOS, micrologiciel, pilote) se poursuit en arrière-plan jusqu''à sa fin : ne pas éteindre ni redémarrer le PC avant. Les mises à jour constructeur suivantes ne seront pas installées.'
     }
     if ($TreeUI.DelJob) {
         if ($head) { $more += "Une suppression est aussi en cours dans l'analyseur d'espace disque." }

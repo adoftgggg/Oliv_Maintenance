@@ -77,13 +77,23 @@ function Exit-FromTray {
 # (pas d'invite UAC au démarrage), action = exe stable.
 $StableExe = Join-Path $env:ProgramData 'Oliv_Maintenance\Oliv_Maintenance.exe'
 $StartLnk = Join-Path $UserProfilePath 'AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Oliv_Maintenance.lnk'
+# L'exe en cours est souvent dans un dossier modifiable sans élévation (Téléchargements) et n'est plus verrouillé (le
+# lanceur se termine aussitôt) : copié d'abord dans le dossier protégé, sa copie n'est retenue que si son empreinte est
+# celle que le lanceur a calculée sur sa propre image au démarrage ($env:_OLIVM_EXE_SHA256). Fichier remplacé entre-temps
+# par un autre programme : copie refusée, exe stable inchangé.
 function Sync-StableExe {
-    $cur = "$env:_OLIVM_EXE"
+    $cur = "$env:_OLIVM_EXE"; $want = "$env:_OLIVM_EXE_SHA256"
     if (-not $cur -or -not (Test-Path -LiteralPath $cur)) { return (Test-Path -LiteralPath $StableExe) }
     if ([string]::Equals([IO.Path]::GetFullPath($cur), $StableExe, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if ($want -notmatch '^[0-9A-Fa-f]{64}$' -or -not $AppDirSafe) { Write-FileLog 'Exe stable non mis à jour : empreinte du lanceur absente ou dossier de l''application non sécurisé.' 'WARN'; return (Test-Path -LiteralPath $StableExe) }
     try {
-        $same = (Test-Path -LiteralPath $StableExe) -and ((Get-FileHash -LiteralPath $StableExe -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $cur -Algorithm SHA256).Hash)
-        if (-not $same) { Copy-Item -LiteralPath $cur -Destination $StableExe -Force -ErrorAction Stop }
+        if ((Test-Path -LiteralPath $StableExe) -and (Get-FileHash -LiteralPath $StableExe -Algorithm SHA256).Hash -eq $want) { return $true }
+        $tmp = $StableExe + '.' + $PID + '.tmp'
+        try {
+            Copy-Item -LiteralPath $cur -Destination $tmp -Force -ErrorAction Stop
+            if ((Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash -ne $want) { throw 'exe modifié depuis son lancement (empreinte différente) : copie refusée' }
+            Move-Item -LiteralPath $tmp -Destination $StableExe -Force -ErrorAction Stop
+        } finally { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }
         $true
     } catch { Write-Ignored 'Copie de l''exe dans ProgramData' $_; Test-Path -LiteralPath $StableExe }
 }

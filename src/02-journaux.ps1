@@ -34,6 +34,48 @@ function Write-Ignored([string]$What, $Err) {
         $EarlyWarn.Add("$What : $m")
     }
 }
+# Écriture atomique : texte écrit dans <fichier>.tmp puis substitué d'un coup (File.Replace) ; une coupure pendant l'écriture
+# laisse l'ancien fichier intact, jamais un fichier tronqué. Version précédente gardée en <fichier>.bak (sauf -NoBackup),
+# relue par Read-JsonState si le fichier devient illisible. Droits et attributs du fichier remplacé conservés.
+function Write-FileAtomic([string]$Path, [string]$Text, [Text.Encoding]$Encoding = $null, [switch]$NoBackup) {
+    if (-not $Encoding) { $Encoding = [Text.UTF8Encoding]::new($false) }
+    $tmp = $Path + '.tmp'
+    [IO.File]::WriteAllText($tmp, $Text, $Encoding)
+    try {
+        # sans sauvegarde : [NullString]::Value (un $null passé à une méthode .NET devient une chaîne vide, refusée par Replace)
+        if (-not [IO.File]::Exists($Path)) { [IO.File]::Move($tmp, $Path) }
+        elseif ($NoBackup) { [IO.File]::Replace($tmp, $Path, [NullString]::Value) }
+        else { [IO.File]::Replace($tmp, $Path, $Path + '.bak') }
+    } catch { try { [IO.File]::Delete($tmp) } catch { $null = $_ }; throw }
+}
+# Lecture d'un fichier d'état JSON : le fichier, sinon sa version précédente (.bak, dernière écriture réussie). Fichier
+# illisible (tronqué, corrompu) : copie gardée en <fichier>.illisible, signalée au fichier journal. Résultat :
+#   Ok   = vrai si rien n'est perdu (fichier absent, ou contenu lu) ; faux si un fichier existe mais qu'aucun n'est lisible :
+#          l'appelant ne doit alors pas le réécrire avec un contenu partiel
+#   Data = objet lu (ConvertFrom-Json), $null sinon
+function Read-JsonState([string]$Path, [string]$What) {
+    $found = $false
+    foreach ($f in $Path, ($Path + '.bak')) {
+        if (-not [IO.File]::Exists($f)) { continue }
+        $found = $true
+        try {
+            $t = [IO.File]::ReadAllText($f, [Text.Encoding]::UTF8)
+            $d = $null; if ($t.Trim()) { $d = ConvertFrom-Json -InputObject $t -ErrorAction Stop }
+            return @{ Ok = $true; Data = $d; From = $f }
+        } catch {
+            Write-Ignored $What $_
+            try { [IO.File]::Copy($f, $f + '.illisible', $true) } catch { $null = $_ }
+        }
+    }
+    @{ Ok = -not $found; Data = $null; From = $null }
+}
+# copie en table de hachage d'un état en mémoire : table (résultat d'un runspace) ou objet relu d'un fichier JSON
+# (ConvertFrom-Json : PSCustomObject, « @{} + objet » lève une erreur). Premier niveau seulement.
+function ConvertTo-StateTable($Obj) {
+    if ($Obj -is [hashtable]) { return (@{} + $Obj) }
+    $h = @{}; if ($null -ne $Obj) { foreach ($p in $Obj.PSObject.Properties) { $h[$p.Name] = $p.Value } }
+    $h
+}
 if ($NativeErr) { Write-Ignored 'Code natif (fenêtres, mesures, analyse disque)' $NativeErr }
 # cache de DLL des versions antérieures à la 0.104 (code natif désormais embarqué dans le script) : supprimé
 $OldCache = Join-Path $LogDir '_etat\cache'

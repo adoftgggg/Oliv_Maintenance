@@ -494,6 +494,7 @@ function Set-SoftRowMode($E) {
 }
 # Modifier / réparer : commande de modification de l'éditeur (clé de désinstallation : ModifyPath), sinon réparation
 # Windows Installer (msiexec /fa), application du Store : Paramètres > Applications installées (Options avancées > Réparer)
+# entrée de désinstallation (clé ouverte, nom) ; User = clé du profil (HKCU), modifiable par l'utilisateur sans élévation
 function Get-SoftArpKey($App) {
     $id = "$(Get-SoftLocalId $App)"
     $cand = [Collections.Generic.List[object]]::new()
@@ -501,13 +502,13 @@ function Get-SoftArpKey($App) {
         $root = $(if ($Matches[1] -eq 'User') { 'HKCU\Software' } elseif ($Matches[2] -eq 'X86' -and [Environment]::Is64BitOperatingSystem) { 'HKLM\SOFTWARE\WOW6432Node' } else { 'HKLM\SOFTWARE' })
         $cand.Add(@{ R = $root + '\Microsoft\Windows\CurrentVersion\Uninstall'; N = $Matches[3] })
     }
-    foreach ($c in $cand) { $k = Open-RegKey ($c.R + '\' + $c.N); if ($k) { return @{ Key = $k; Name = $c.N } } }
+    foreach ($c in $cand) { $k = Open-RegKey ($c.R + '\' + $c.N); if ($k) { return @{ Key = $k; Name = $c.N; User = $c.R.StartsWith('HKCU') } } }
     foreach ($root in 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall', 'HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall') {
         $k = Open-RegKey $root; if (-not $k) { continue }
         try {
             foreach ($n in $k.GetSubKeyNames()) {
                 $sk = $k.OpenSubKey($n); if (-not $sk) { continue }
-                if ("$($sk.GetValue('DisplayName'))" -eq "$($App.Name)") { return @{ Key = $sk; Name = $n } }
+                if ("$($sk.GetValue('DisplayName'))" -eq "$($App.Name)") { return @{ Key = $sk; Name = $n; User = $root.StartsWith('HKCU') } }
                 $sk.Close()
             }
         } finally { $k.Close() }
@@ -540,6 +541,13 @@ function Invoke-SoftModify($App) {
             $arg = $(if ($noMod -and -not $noRep) { "/fa $guid" } else { "/i $guid" })
             Start-Process "$env:windir\System32\msiexec.exe" $arg
             Write-UiLog ('{0} : {1} (msiexec {2}).' -f $nm, $(if ($arg -like '/fa*') { 'réparation lancée' } else { 'maintenance lancée' }), $arg) 'INFO'
+        }
+        elseif ($mp -and -not $noMod -and $a.User) {
+            # commande lue dans le profil (HKCU) : écrite sans élévation, jamais lancée par l'application (administrateur) ;
+            # modification depuis Paramètres, sous le compte de l'utilisateur
+            Start-Process 'ms-settings:appsfeatures'
+            Write-UiLog "$nm : modification depuis Paramètres > Applications installées (programme installé dans le profil, non lancé en administrateur)." 'INFO'
+            Show-Info "$nm est installé dans le profil de l'utilisateur : sa modification se fait depuis Paramètres > Applications installées, menu ... de $nm > Modifier (l'application ne lance pas en administrateur un programme déclaré par le profil)."
         }
         elseif ($mp -and -not $noMod) {
             $x = Split-SoftCommand $mp

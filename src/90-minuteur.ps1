@@ -95,10 +95,16 @@ function Watch-Oem {
     }
 }
 
+# fenêtre réduite ou dans la zone de notification, sans tâche en cours : 1 passage du minuteur sur 4
+function Test-TimerIdle { ($Window.WindowState -eq 'Minimized' -or -not $Window.IsVisible) -and -not $Sync.Running }
+# passage qui relève les tâches de fond terminées : 1 sur 4 ; au repos, sur le seul passage traité (Tick multiple de 4).
+# Auparavant toujours au 2e : au repos, aucune tâche de fond n'était jamais terminée (nouvelle version jamais signalée,
+# vérification suivante bloquée, fins de BitLocker, du DNS et des téléchargements perdues)
+function Test-BgJobTick([int]$Tick, [bool]$Idle) { if ($Idle) { $Tick % 4 -eq 0 } else { $Tick % 4 -eq 2 } }
 # rafraîchissements périodiques : 1 s pour l'essentiel, page visible seulement, rien si la fenêtre est réduite
 function Update-Periodic {
     $t = $Sync.Tick; $min = $Window.WindowState -eq 'Minimized'
-    if ($t % 4 -eq 2 -and ($BgJobs.Count -or $BgOrphans.Count)) { Invoke-TickStep 'tâches de fond' { Close-BgJob } }
+    if ((Test-BgJobTick $t (Test-TimerIdle)) -and ($BgJobs.Count -or $BgOrphans.Count)) { Invoke-TickStep 'tâches de fond' { Close-BgJob } }
     if ($t % 4 -eq 1 -and $GpRows.Count) { Invoke-TickStep 'stratégies de groupe' { Update-GpRow } }
     if ($t % 4 -eq 0 -and -not $min) { Invoke-TickStep 'points de restauration' { Update-RestoreLast } }
     if ($t % 4 -eq 0) { Invoke-TickStep 'logiciels' { Update-SoftCard } }
@@ -161,7 +167,7 @@ $Timer.Add_Tick({
     if ($AppShowEvent.WaitOne(0)) { Invoke-TickStep 'ouverture de la fenêtre' { Show-MainWindow } }
     # autre version lancée, fermeture acceptée : fermeture normale (avertissement si une tâche tourne)
     if ($AppQuitEvent.WaitOne(0)) { Invoke-TickStep 'fermeture pour une autre version' { Write-UiLog 'Fermeture demandée par une autre version de l''application.' 'APP'; $Tray.Quit = $true; Show-MainWindow; $Window.Close(); if ($Window.IsVisible) { $Tray.Quit = $false } } }
-    if (($Window.WindowState -eq 'Minimized' -or -not $Window.IsVisible) -and -not $Sync.Running -and $Sync.Tick % 4) { return }
+    if ((Test-TimerIdle) -and $Sync.Tick % 4) { return }
     Invoke-TickStep 'journal' { Receive-LogQueue }
     Invoke-TickStep 'informations du poste' { Watch-InfoRequest }
     Update-BgResult

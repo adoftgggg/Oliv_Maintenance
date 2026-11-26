@@ -210,6 +210,17 @@ $Sync.WgRunning = $false
 '@
 $SoftUI = @{ Sel = @{}; Filter = 'Upd' }
 $SoftFile = Join-Path (Get-LogPath 'Etat') 'logiciels.json'
+# inventaire enregistré (logiciels.json, écriture atomique) : $Sync.WgResult est une table après une recherche, un objet
+# relu du fichier sinon. « @{} + objet » échouait sur ce dernier : après une mise à jour, une désinstallation ou le retrait
+# d'une entrée lancés depuis la liste en cache, le fichier n'était plus réécrit et les logiciels réapparaissaient.
+function Save-SoftInventory([string]$What = 'Enregistrement de l''inventaire des logiciels') {
+    $r = $Sync.WgResult; if (-not $r) { return }
+    try {
+        $o = ConvertTo-StateTable $r
+        $o.Stamp = ([DateTime]$r.Stamp).ToString('o')
+        Write-FileAtomic $SoftFile (ConvertTo-Json -InputObject $o -Depth 4)
+    } catch { Write-Ignored $What $_ }
+}
 $SoftExclFile = Join-Path (Get-LogPath 'Etat') 'logiciels-exclus.json'
 $SoftExcl = @{}
 try {
@@ -270,13 +281,7 @@ function Update-SoftCard {
     if (-not $Sync.WgRunning -and $r -and $r.Stamp -and "$($r.Stamp)" -ne "$($SoftUI.Shown)") {
         $SoftUI.Shown = $r.Stamp
         if ($SoftUI.Fresh) {
-            try {
-                $o = @{} + $r
-                $o.Stamp = ([DateTime]$r.Stamp).ToString('o')
-                ConvertTo-Json -InputObject $o -Depth 4 | Set-Content -LiteralPath $SoftFile -Encoding UTF8
-            } catch {
-                Write-Ignored 'Enregistrement de l''inventaire des logiciels' $_
-            }
+            Save-SoftInventory
             # actualisation de la liste (Mes applications) : enregistrée, sans nouveau bilan d'inventaire dans le journal
             if (-not $r.ListMerge) {
                 $up = @(Get-SoftUpdate)

@@ -177,7 +177,12 @@ function Exit-App([int]$Code = 0) {
     try { if ($TreeUI.Job) { [_OlivM.DirScan]::Cancel = $true } } catch {}
     $keep = @()
     foreach ($v in $Sync.ChildPid, $Sync.RelaunchPid) { if ($v) { $keep += [int]$v } }
-    if ($Sync.OemInstalling -and $Sync.OemChildPid) { $keep += [int]$Sync.OemChildPid }
+    # mise à jour prête (94-mise-a-jour) : script de remplacement lancé maintenant que la fenêtre est fermée, jamais arrêté
+    try { if ($Sync.UpdHelper) { $up = Start-UpdHelper; if ($up) { $keep += [int]$up } } } catch {}
+    # installation constructeur en cours (BIOS, micrologiciel, pilotes : installeurs lancés par le module ou l'outil du
+    # constructeur, sans PID connu) : aucun processus enfant arrêté, l'installeur en cours va jusqu'à sa fin (un flash du
+    # BIOS interrompu peut rendre le PC inutilisable) ; seules les tâches de fond de l'application sont arrêtées
+    if ($Sync.OemInstalling) { [Environment]::Exit($Code) }
     try {
         foreach ($c in @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$PID" -ErrorAction Stop)) {
             if ([int]$c.ProcessId -in $keep) { continue }

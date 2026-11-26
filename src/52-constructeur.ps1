@@ -47,6 +47,24 @@ function Invoke-Native([string]$FilePath, [string[]]$ArgumentList) {
             $p.ExitCode -eq 0
         } catch { Write-TaskLog "Installation de $Name : $($_.Exception.Message)" 'ERROR'; $false }
     }
+    # HP Image Assistant hors de Program Files (C:\HPIA, C:\SWSetup : modifiables par tout utilisateur avec les droits par
+    # défaut de C:\ ; WinGet du profil) : dossier de l'outil copié dans C:\ProgramData\Oliv_Maintenance\Outils\HPIA
+    # (écriture réservée aux administrateurs), exécuté depuis cette copie seulement si l'outil porte la signature de HP et
+    # chacun de ses programmes et bibliothèques une signature valide. Un fichier déposé ou remplacé par un utilisateur
+    # standard n'est jamais exécuté en administrateur.
+    function Get-SafeHpia([string]$Exe) {
+        foreach ($r in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) { if ($r -and $Exe.StartsWith($r.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return $Exe } }
+        $dst = Join-Path $env:ProgramData 'Oliv_Maintenance\Outils\HPIA'
+        if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Recurse -Force -ErrorAction Stop }
+        [void][IO.Directory]::CreateDirectory($dst)
+        Copy-Item -Path (Join-Path (Split-Path $Exe) '*') -Destination $dst -Recurse -Force -ErrorAction Stop
+        $copy = Join-Path $dst (Split-Path $Exe -Leaf)
+        $sig = Get-AuthenticodeSignature -LiteralPath $copy
+        if ("$($sig.Status)" -ne 'Valid' -or "$($sig.SignerCertificate.Subject)" -notmatch 'O="?HP Inc') { throw "HP Image Assistant ($Exe) : signature HP absente ou invalide, outil non exécuté." }
+        $bad = @(Get-ChildItem -LiteralPath $dst -Recurse -File -Force | Where-Object { $_.Extension -in '.exe', '.dll' -and "$((Get-AuthenticodeSignature -LiteralPath $_.FullName).Status)" -ne 'Valid' })
+        if ($bad.Count) { throw ('HP Image Assistant ({0}) : {1} fichier(s) sans signature valide ({2}...), outil non exécuté.' -f $Exe, $bad.Count, (@($bad | Select-Object -First 3 | ForEach-Object { $_.Name }) -join ', ')) }
+        $copy
+    }
     function Get-WuDriverItem([int]$Step, [int]$Steps) {
         Write-TaskLog 'Pilotes proposés par Windows Update (mises à jour facultatives, serveurs Microsoft)...'
         Set-JobStep 'Oem' $Step $Steps 'recherche des pilotes Windows Update'
@@ -132,6 +150,7 @@ function Invoke-Native([string]$FilePath, [string[]]$ArgumentList) {
                     $res.ToolName = 'HP Image Assistant'
                     throw 'HP Image Assistant absent (HPImageAssistant.exe introuvable).'
                 }
+                $hpia = Get-SafeHpia $hpia
                 $res.Tool = 'HP Image Assistant (/Operation:Analyze /Action:List)'
                 Set-JobStep 'Oem' 2 4 'analyse HP Image Assistant'
                 $rc = Invoke-Native $hpia @('/Operation:Analyze', '/Action:List', '/Category:All', '/Selection:All', '/Silent', "/ReportFolder:$dir")

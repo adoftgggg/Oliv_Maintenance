@@ -136,8 +136,10 @@ try {
         'enable' {
             $tpm = Get-Tpm -ErrorAction Stop
             if (-not ($tpm.TpmPresent -and $tpm.TpmReady)) { throw 'puce TPM absente ou non prête (activer le TPM dans le BIOS / UEFI).' }
-            [void](Enable-BitLocker -MountPoint $vol -TpmProtector -UsedSpaceOnly -SkipHardwareTest -ErrorAction Stop)
+            # mot de passe de récupération ajouté AVANT l'activation : l'ordre inverse lançait le chiffrement avec le TPM seul, et un
+            # échec de l'ajout laissait le volume se chiffrer sans aucune clé de récupération. Ajout en échec : rien n'est activé
             [void](Add-BitLockerKeyProtector -MountPoint $vol -RecoveryPasswordProtector -WarningAction SilentlyContinue -ErrorAction Stop)
+            [void](Enable-BitLocker -MountPoint $vol -TpmProtector -UsedSpaceOnly -SkipHardwareTest -ErrorAction Stop)
             $kp = @((Get-BitLockerVolume -MountPoint $vol -ErrorAction Stop).KeyProtector | Where-Object { "$($_.KeyProtectorType)" -eq 'RecoveryPassword' })
             # sauvegarde de la clé : Entra ID (poste joint) puis Active Directory (domaine), chacune tentée si possible
             $bk = @()

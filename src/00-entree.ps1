@@ -3,6 +3,7 @@
 set "_OLIVM_SELF=%~f0"
 set "_OLIVM_HIDDEN=1"
 set "_OLIVM_EXE="
+set "_OLIVM_EXE_SHA256="
 start "" /min "%windir%\System32\conhost.exe" "%windir%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$global:_OlivMScriptPath=$env:_OLIVM_SELF; Invoke-Expression ([IO.File]::ReadAllText($env:_OLIVM_SELF, [Text.Encoding]::UTF8))"
 exit /b
 #>
@@ -101,9 +102,34 @@ function Get-DirAclState([string]$Path) {
     })
     Test-AclSafe $acl.AreAccessRulesProtected "$($acl.GetOwner([Security.Principal.SecurityIdentifier]))" $rules
 }
+# Liens (jonctions, liens symboliques) : attributs du lien lui-même, cible jamais suivie. Une jonction posée à la place du
+# dossier par un utilisateur standard (création libre dans ProgramData) faisait appliquer takeown / icacls à sa cible
+# (C:\Windows...) puis écrire dans un dossier contrôlé par cet utilisateur. Même règle dans le lanceur.
+function Test-PathLink([string]$Path) {
+    try { ([IO.File]::GetAttributes($Path) -band [IO.FileAttributes]::ReparsePoint) -ne 0 }
+    catch [IO.FileNotFoundException] { $false }
+    catch [IO.DirectoryNotFoundException] { $false }
+}
+# lien supprimé sans toucher à sa cible (sur une jonction, Directory.Delete non récursif ne retire que le lien)
+function Remove-PathLink([string]$Path) {
+    if (([IO.File]::GetAttributes($Path) -band [IO.FileAttributes]::Directory) -ne 0) { [IO.Directory]::Delete($Path, $false) } else { [IO.File]::Delete($Path) }
+}
+# liens du dossier supprimés sans suivre leur cible : à toute profondeur (-Deep) ou au premier niveau ; renvoie leur nombre
+function Remove-DirLink([string]$Path, [switch]$Deep) {
+    $n = 0
+    foreach ($e in [IO.Directory]::GetFileSystemEntries($Path)) {
+        $a = [IO.File]::GetAttributes($e)
+        if (($a -band [IO.FileAttributes]::ReparsePoint) -ne 0) { Remove-PathLink $e; $n++ }
+        elseif ($Deep -and ($a -band [IO.FileAttributes]::Directory) -ne 0) { $n += Remove-DirLink $e -Deep }
+    }
+    $n
+}
 function Protect-AppDir([string]$Path) {
+    if (Test-PathLink $Path) { Remove-PathLink $Path }
     [void][IO.Directory]::CreateDirectory($Path)
-    if ($(try { Get-DirAclState $Path } catch { $false })) { return 'ok' }
+    if ($(try { Get-DirAclState $Path } catch { $false })) { [void](Remove-DirLink $Path); return 'ok' }
+    # droits non conformes : liens supprimés à toute profondeur avant takeown / icacls (qui les suivraient)
+    [void](Remove-DirLink $Path -Deep)
     $sys32 = [Environment]::GetFolderPath('System')
     $null | & (Join-Path $sys32 'takeown.exe') /F $Path /A /R 2>&1 | Out-Null
     $sec = [Security.AccessControl.DirectorySecurity]::new()
@@ -118,7 +144,7 @@ function Protect-AppDir([string]$Path) {
     }
     $cache = Join-Path $Path 'Maintenance\_etat\cache'
     if (Test-Path -LiteralPath $cache) { Remove-Item -LiteralPath $cache -Recurse -Force -ErrorAction SilentlyContinue }
-    if (Get-DirAclState $Path) { 'fixed' } else { 'unsafe' }
+    if ((Get-DirAclState $Path) -and -not (Test-PathLink $Path)) { 'fixed' } else { 'unsafe' }
 }
 $AppDirState = try { Protect-AppDir (Join-Path $env:ProgramData 'Oliv_Maintenance') } catch { "unsafe : $($_.Exception.Message)" }
 $AppDirSafe  = $AppDirState -in 'ok', 'fixed'

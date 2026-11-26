@@ -1,7 +1,9 @@
 # ---------- Mises à jour de l'application : dernière version publiée sur GitHub (Releases du dépôt public)
 # Recherche au lancement (Paramètres > Mises à jour de l'application, activée par défaut) puis bandeau « Version X
 # disponible » : Mettre à jour = téléchargement de l'exe publié (pièce jointe de la version, sinon branche « binaires »
-# du dépôt) dans le dossier de l'exe en cours, contrôle de la taille et de l'empreinte SHA-256 publiées, puis relance sur la nouvelle version (ancien exe supprimé après fermeture).
+# du dépôt) dans le dossier protégé C:\ProgramData\Oliv_Maintenance\MiseAJour, contrôle de la taille et de l'empreinte
+# SHA-256 publiées, puis relance sur la nouvelle version par l'exe stable (copie pour l'utilisateur à côté de l'exe en
+# cours, ancien exe supprimé après fermeture).
 # Choix enregistré dans HKCU\Software\Oliv_Maintenance\Affichage\MajAuLancement (conservé d'une version à l'autre).
 $UpdRepo = 'adoftgggg/Oliv_Maintenance'
 $UpdUI = @{ Info = $null; Dismissed = $false; Checked = $null }
@@ -56,6 +58,7 @@ try {
         $rq = [Net.HttpWebRequest]::Create($p.Url); $rq.UserAgent = 'Oliv_Maintenance'; $rq.Timeout = 20000
         $rs = $rq.GetResponse()
     }
+    [void][IO.Directory]::CreateDirectory((Split-Path $p.Dest))
     $part = $p.Dest + '.part'
     $tot = [long]$rs.ContentLength; $in = $rs.GetResponseStream()
     $out = [IO.File]::Create($part); $buf = New-Object byte[] 65536; $done = 0L
@@ -67,6 +70,8 @@ try {
         if ($got -ne $want) { throw 'empreinte SHA-256 différente de celle publiée : fichier rejeté' }
         $st.Hash = $true
     }
+    # empreinte du fichier reçu : recontrôlée par le script de remplacement juste avant la copie et le lancement
+    $st.Sha = (Get-FileHash -LiteralPath $part -Algorithm SHA256).Hash
     if (Test-Path -LiteralPath $p.Dest) { Remove-Item -LiteralPath $p.Dest -Force }
     Move-Item -LiteralPath $part -Destination $p.Dest
     $st.Ok = $true
@@ -110,16 +115,23 @@ function Show-UpdBar {
     $Ui.UpdText.Text = 'Oliv_Maintenance {0} est disponible (installée : {1}){2}' -f (Get-UpdVersion $r.Tag), $AppVersion, $(if ($r.Size) { '  ·  {0:N1} Mo' -f ($r.Size / 1MB) } else { '' })
     $Ui.UpdGo.IsEnabled = $true; $Ui.UpdProg.Visibility = 'Collapsed'; $Ui.UpdBar.Visibility = 'Visible'
 }
-# téléchargement à côté de l'exe en cours (sinon dans Téléchargements), puis bascule
+# téléchargement dans le dossier protégé de l'application (C:\ProgramData\Oliv_Maintenance\MiseAJour, écriture réservée
+# aux administrateurs : le fichier vérifié ne peut pas être remplacé avant son lancement en administrateur), puis bascule ;
+# copie pour l'utilisateur à côté de l'exe en cours (sinon dans Téléchargements), jamais lancée par l'application
+$UpdDlDir = Join-Path $env:ProgramData 'Oliv_Maintenance\MiseAJour'
 function Start-UpdInstall {
     $r = $UpdUI.Info; if (-not $r -or $BgJobs.ContainsKey('UpdDl')) { return }
     if ($Sync.Running) { Show-Info 'Une tâche est en cours. Mettre à jour une fois terminée.'; return }
+    if (-not $AppDirSafe) {
+        Write-UiLog 'Mise à jour impossible : dossier de l''application non sécurisé (C:\ProgramData\Oliv_Maintenance).' 'ERROR'
+        Show-Info "Mise à jour impossible : les droits du dossier C:\ProgramData\Oliv_Maintenance n'ont pas pu être sécurisés.`n`nFermer puis relancer l'application pour les remettre en conformité." 'Error'; return
+    }
     $exe = "$env:_OLIVM_EXE"
     $dir = $(if ($exe -and (Test-Path -LiteralPath $exe)) { Split-Path -Parent $exe } else { Join-Path $UserProfilePath 'Downloads' })
     # nom fixe sur le poste (Oliv_Maintenance.exe), sans numéro de version : version et logo portés par le fichier lui-même.
-    # Téléchargé à côté (.new), substitué après la fermeture (l'exe en cours ne peut pas être remplacé)
-    $Sync.UpdDl = [hashtable]::Synchronized(@{ Url = $r.Url; Size = $r.Size; Digest = $r.Digest; Dest = (Join-Path $dir 'Oliv_Maintenance.exe.new'); Target = (Join-Path $dir 'Oliv_Maintenance.exe'); Old = $exe; Repo = $UpdRepo })
-    $Sync.UpdDlState = [hashtable]::Synchronized(@{ Pct = 0; Ok = $false; Msg = ''; Hash = $false })
+    # Téléchargé dans le dossier protégé (.new), substitué après la fermeture
+    $Sync.UpdDl = [hashtable]::Synchronized(@{ Url = $r.Url; Size = $r.Size; Digest = $r.Digest; Dest = (Join-Path $UpdDlDir 'Oliv_Maintenance.exe.new'); Target = (Join-Path $dir 'Oliv_Maintenance.exe'); Old = $exe; Repo = $UpdRepo })
+    $Sync.UpdDlState = [hashtable]::Synchronized(@{ Pct = 0; Ok = $false; Msg = ''; Hash = $false; Sha = '' })
     $Ui.UpdGo.IsEnabled = $false; $Ui.UpdProg.Value = 0; $Ui.UpdProg.Visibility = 'Visible'; $Ui.UpdText.Text = 'Téléchargement de la version {0}...' -f (Get-UpdVersion $r.Tag)
     Write-UiLog ('Mise à jour : téléchargement de {0}.' -f $r.Url) 'APP'
     Start-BgJob 'UpdDl' $UpdDlScript
@@ -136,34 +148,56 @@ $BgJobDone['UpdDl'] = {
     }
     if ($st.Retarget) { Write-UiLog ('Mise à jour : la version annoncée a été remplacée sur le dépôt, version {0} téléchargée à la place.' -f $st.Retarget) 'APP' }
     Write-UiLog ('Mise à jour téléchargée : {0}{1}.' -f $p.Target, $(if ($st.Hash) { ' (empreinte SHA-256 vérifiée)' } else { ' (empreinte non publiée : taille vérifiée)' })) 'OK'
-    # lancé par l'exe : remplacé par la nouvelle version sous le nom Oliv_Maintenance.exe puis relancé ; sinon fichier
-    # renommé et dossier ouvert
+    # lancé par le fichier .cmd : nouvel exe copié pour l'utilisateur (Téléchargements) et dossier ouvert, lancement par
+    # l'utilisateur (invite UAC)
     if (-not $p.Old) {
-        try { Move-Item -LiteralPath $p.Dest -Destination $p.Target -Force -ErrorAction Stop } catch { Write-UiLog "Mise à jour : renommage impossible ($($_.Exception.Message))." 'WARN'; $p.Target = $p.Dest }
+        try { Copy-Item -LiteralPath $p.Dest -Destination $p.Target -Force -ErrorAction Stop; Remove-Item -LiteralPath $p.Dest -Force -ErrorAction SilentlyContinue }
+        catch { Write-UiLog "Mise à jour : copie dans $(Split-Path $p.Target) impossible ($($_.Exception.Message))." 'WARN'; $p.Target = $p.Dest }
         Start-Process explorer.exe -ArgumentList ('/select,"{0}"' -f $p.Target); $Ui.UpdBar.Visibility = 'Collapsed'; return
     }
     if (-not (Confirm-Action "Mise à jour prête.`n`nL'application se ferme puis s'ouvre dans sa nouvelle version (quelques secondes).")) { $Ui.UpdBar.Visibility = 'Collapsed'; return }
-    $stable = [string]::Equals($p.Old, $StableExe, [StringComparison]::OrdinalIgnoreCase)
-    # lancé par l'exe stable (raccourci, ouverture de session) : copie à jour aussi dans le dossier d'origine du téléchargement
-    # et exe stable remplacé, raccourcis inchangés ; sinon ancien exe (Oliv_Maintenance_1.x.y.exe) supprimé, nouveau sous
-    # le nom fixe. Substitution répétée jusqu'à 30 s (exe encore verrouillé le temps de la fermeture)
+    # script de remplacement (administrateur) : empreinte du fichier du dossier protégé recontrôlée, exe stable
+    # (C:\ProgramData\Oliv_Maintenance\Oliv_Maintenance.exe, raccourcis et ouverture de session) remplacé puis lancé ;
+    # copie pour l'utilisateur sous le nom fixe à côté de l'ancien exe (Oliv_Maintenance_1.x.y.exe supprimé), jamais
+    # lancée : un fichier d'un dossier modifiable sans élévation n'est pas exécuté en administrateur. Empreinte différente :
+    # rien n'est remplacé, exe stable (ancienne version) relancé. Substitution répétée jusqu'à 30 s (exe stable encore
+    # verrouillé le temps de la fermeture)
     $q = { param($s) "'" + ($s -replace "'", "''") + "'" }
-    $ps = "`$n = $(& $q $p.Dest); `$t = $(& $q $p.Target); `$o = $(& $q $p.Old); `$s = $(& $q $StableExe); `$st = `$$stable" + @'
+    $ps = "`$n = $(& $q $p.Dest); `$t = $(& $q $p.Target); `$o = $(& $q $p.Old); `$s = $(& $q $StableExe); `$h = $(& $q $Sync.UpdDlState.Sha)" + @'
 
-for ($i = 0; $i -lt 60; $i++) {
-    try {
-        if ($st) { Copy-Item -LiteralPath $n -Destination $s -Force -ErrorAction Stop }
-        Move-Item -LiteralPath $n -Destination $t -Force -ErrorAction Stop
-        if (-not $st -and $o -ne $t -and (Test-Path -LiteralPath $o)) { Remove-Item -LiteralPath $o -Force -ErrorAction SilentlyContinue }
-        break
-    } catch { Start-Sleep -Milliseconds 500 }
+$ok = $h -and (Test-Path -LiteralPath $n) -and ((Get-FileHash -LiteralPath $n -Algorithm SHA256).Hash -eq $h)
+if ($ok) {
+    for ($i = 0; $i -lt 60; $i++) {
+        try { Copy-Item -LiteralPath $n -Destination $s -Force -ErrorAction Stop; break } catch { Start-Sleep -Milliseconds 500 }
+    }
+    if ($t -ne $s) {
+        try {
+            Copy-Item -LiteralPath $n -Destination $t -Force -ErrorAction Stop
+            if ($o -ne $t -and $o -ne $s -and (Test-Path -LiteralPath $o)) { Remove-Item -LiteralPath $o -Force -ErrorAction SilentlyContinue }
+        } catch { $null = $_ }
+    }
 }
-Start-Process -FilePath $(if ($st) { $s } elseif (Test-Path -LiteralPath $t) { $t } else { $o })
+Remove-Item -LiteralPath $n -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $s) { Start-Process -FilePath $s }
 '@
-    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($ps))
-    Start-Process -FilePath (Join-Path $env:windir 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) -WindowStyle Hidden
+    # script lancé par Exit-App, une fois la fenêtre réellement fermée (Start-UpdHelper) : lancé ici, il remplaçait l'exe et
+    # ouvrait une 2e instance même si la fermeture était annulée ; son PID est gardé par Exit-App (arrêt des processus enfants)
+    $Sync.UpdHelper = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($ps))
     Write-UiLog 'Fermeture pour mise à jour.' 'APP'
     $Tray.Quit = $true; $Window.Close()
+    # fermeture annulée (tâche en cours, réponse Non) : rien n'est remplacé, la croix réduit de nouveau la fenêtre
+    if ($Window.IsVisible) {
+        $Tray.Quit = $false; $Sync.UpdHelper = $null
+        Write-UiLog 'Mise à jour reportée : fermeture annulée. Bouton Mettre à jour pour la relancer.' 'WARN'
+        Show-UpdBar
+    }
+}
+# script de remplacement de la mise à jour prête ; PID renvoyé (gardé par Exit-App), $null si rien à lancer
+function Start-UpdHelper {
+    if (-not $Sync.UpdHelper) { return $null }
+    $enc = $Sync.UpdHelper; $Sync.UpdHelper = $null
+    $p = Start-Process -FilePath (Join-Path $env:windir 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) -WindowStyle Hidden -PassThru
+    $p.Id
 }
 function Show-UpdNote {
     $r = $UpdUI.Info; if (-not $r) { return }

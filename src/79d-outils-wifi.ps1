@@ -48,7 +48,16 @@ function Update-WifiCard($R) {
     $n = New-Text ('{0} réseau(x) enregistré(s). Mot de passe en clair visible uniquement ici (droits administrateur).' -f $items.Count) 'Muted'; $n.FontSize = 12; $n.TextWrapping = 'Wrap'; $n.Margin = New-Thickness 40 6 10 12
     [void]$b.Children.Add($n)
 }
+# nom transmissible à netsh : « * » y désigne tous les profils (« Oublier » les effaçait tous) et un guillemet coupe
+# l'argument (Windows PowerShell 5.1 ne l'échappe pas pour un programme externe)
+function Test-WifiNameSafe([string]$Name) { $Name.Trim() -ne '' -and $Name.IndexOfAny([char[]]'*?"') -lt 0 }
 function Remove-WifiProfile([string]$Name) {
+    if (-not (Test-WifiNameSafe $Name)) {
+        Write-UiLog "Réseau Wi-Fi « $Name » : suppression refusée ici (nom contenant * ? ou un guillemet, mal compris par netsh)." 'WARN'
+        Start-Process 'ms-settings:network-wifisettings'
+        Show-Info "Le nom du réseau « $Name » contient un caractère que netsh interprète (* ? ou guillemet) : le supprimer ici risquerait d'effacer d'autres réseaux.`n`nParamètres Windows vient de s'ouvrir : Wi-Fi > Gérer les réseaux connus > $Name > Oublier."
+        return
+    }
     if (-not (Confirm-Action "Oublier le réseau Wi-Fi « $Name » ?`n`nLe PC ne s'y connecte plus automatiquement ; il faudra ressaisir le mot de passe.")) { return }
     $out = & (Join-Path $env:windir 'System32\netsh.exe') wlan delete profile name="$Name" 2>&1
     if ($LASTEXITCODE -eq 0) { Write-UiLog "Réseau Wi-Fi « $Name » oublié." 'OK'; Add-SessionEvent 'Réglages' 'Réseau Wi-Fi oublié' $Name 'ok' }

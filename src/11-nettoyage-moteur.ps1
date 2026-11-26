@@ -184,12 +184,24 @@ function Get-RestoreUsed {
     $st = @(Get-CimInstance Win32_ShadowStorage -ErrorAction SilentlyContinue | Where-Object { "$($_.Volume.DeviceID)" -eq $vol })
     $u = [double]0; foreach ($x in $st) { $u += [double]$x.UsedSpace }; $u
 }
+# cible, ou l'un de ses dossiers parents, qui est un lien (jonction, lien symbolique) : refusée. Un utilisateur standard
+# pouvait remplacer un dossier de son profil (AppData\Local\CrashDumps, Temp...) par une jonction vers un dossier qu'il ne
+# peut pas modifier, vidé ensuite par le nettoyage avec les droits administrateur. Attributs illisibles : refusée aussi.
+function Test-CleanLinkPath([string]$Path) {
+    $p = $Path
+    while ($p) {
+        try { if (([IO.File]::GetAttributes($p) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true } } catch { return $true }
+        $p = [IO.Path]::GetDirectoryName($p)
+    }
+    $false
+}
 function Resolve-CleanTarget($Item) {
     $src = $(if ($Item.Paths) { $Item.Paths } else { & $Item.Targets })
     foreach ($t in @($src)) {
         if (-not $t) { continue }
         $kind = $t.Substring(0, 1); $path = $t.Substring(2)
         foreach ($o in @(Get-Item -Path $path -Force -ErrorAction SilentlyContinue)) {
+            if (Test-CleanLinkPath $o.FullName) { continue }
             if ($kind -eq 'D' -and $o.PSIsContainer) { [pscustomobject]@{ Kind = 'D'; Path = $o.FullName; Len = 0 } }
             elseif ($kind -eq 'F' -and -not $o.PSIsContainer) { [pscustomobject]@{ Kind = 'F'; Path = $o.FullName; Len = [double]$o.Length } }
         }

@@ -321,8 +321,9 @@ function Test-TreeProtected([string]$Path) {
     foreach ($d in $deny) { if ($d -and $p -ieq $d.TrimEnd('\')) { return $true } }
     if ($p -like "$env:windir\*") { return $true }
     if ($p -match ('^' + [regex]::Escape("$sys\Users") + '\\[^\\]+$')) { return $true }
-    # tout lecteur : dossiers et fichiers système à la racine (corbeille, points de restauration, fichiers d'échange)
-    if ($p -match '(?i)^[a-z]:\\(System Volume Information|\$Recycle\.Bin|Recovery|pagefile\.sys|hiberfil\.sys|swapfile\.sys)$') { return $true }
+    # tout lecteur : dossiers et fichiers système à la racine (corbeille, points de restauration, fichiers d'échange,
+    # démarrage : bootmgr et BOOTNXT sur un PC sans partition réservée au système, EFI, environnement de récupération)
+    if ($p -match '(?i)^[a-z]:\\(System Volume Information|\$Recycle\.Bin|Recovery|pagefile\.sys|hiberfil\.sys|swapfile\.sys|bootmgr|BOOTNXT|EFI|Boot|\$WinREAgent)$') { return $true }
     # profil : AppData et ses 3 dossiers (paramètres de tous les logiciels du compte), magasin des applications, données de Windows
     if ($p -match ('(?i)^' + [regex]::Escape("$sys\Users") + '\\[^\\]+\\AppData(\\(Local|Roaming|LocalLow))?$')) { return $true }
     foreach ($d in @("$env:ProgramFiles\WindowsApps", "$env:ProgramData\Microsoft", "$env:ProgramFiles\Common Files", "${env:ProgramFiles(x86)}\Common Files")) { if ($d -and $p -ieq $d) { return $true } }

@@ -24,6 +24,10 @@ function Write-TaskLog {
     }
 }
 function V($x) { if ($null -eq $x -or "$x" -eq '') { 'n/d' } else { $x } }
+# valeur brute d'un attribut SMART ATA : 32 bits de poids faible (certains disques rangent d'autres données dans les octets
+# hauts : heures de fonctionnement Seagate...). 0xFFFFFFFFL : 0xFFFFFFFF vaut [int]-1 sous Windows PowerShell 5.1 et ne
+# masquait rien
+function Get-SmartLow($Raw) { if ($null -eq $Raw) { return $null }; [uint64]$Raw -band 0xFFFFFFFFL }
 # espace libre en octets (pas d'arrondi en Go : un gain de quelques Mo doit rester visible)
 function Get-FreeSpace { try { [double]([IO.DriveInfo]::new($SysLetter).AvailableFreeSpace) } catch { [double]0 } }
 # jamais « 0 Ko » : $Zero pour une taille nulle, octets sous 1 Ko
@@ -47,6 +51,8 @@ function Remove-TreeSafe([string]$Dir) {
 function Clear-Folder {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return [double]0 }
+    # dossier atteint par un lien (jonction posée dans un profil) : jamais vidé, sa cible peut être un dossier protégé
+    if (Test-CleanLinkPath $Path) { Write-TaskLog "Dossier ignoré : $Path passe par une jonction ou un lien (jamais suivi par le nettoyage)." 'WARN'; return [double]0 }
     $before = Get-DirSize $Path
     foreach ($item in Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue) {
         try {
@@ -329,15 +335,15 @@ function Invoke-Task_Smart {
             $t194 = & $a 194; if ($null -ne $t194) { & $l 'Température actuelle (°C)' ([int]($t194 -band 0xFF)) }
             if ($r -and $r.TemperatureMax) { & $l 'Température maximale (°C)' $r.TemperatureMax }
             if ($r -and $null -ne $r.Wear) { & $l 'Usure (%)' $r.Wear }
-            $h9 = & $a 9; if ($null -ne $h9) { & $l 'Heures de fonctionnement' ('{0:N0} h' -f ($h9 -band 0xFFFFFFFF)) }
+            $h9 = & $a 9; if ($null -ne $h9) { & $l 'Heures de fonctionnement' ('{0:N0} h' -f (Get-SmartLow $h9)) }
             foreach ($p in @(@(12, 'Cycles d''alimentation'), @(5, 'Secteurs réalloués (05)'), @(197, 'Secteurs en attente de réallocation (C5)'),
                              @(198, 'Secteurs non corrigeables (C6)'), @(187, 'Erreurs non corrigées signalées (BB)'), @(199, 'Erreurs CRC interface (C7)'),
                              @(192, 'Arrêts non sécurisés (C0)'))) {
-                $v = & $a $p[0]; if ($null -ne $v) { & $l $p[1] ('{0:N0}' -f ($v -band 0xFFFFFFFF)) }
+                $v = & $a $p[0]; if ($null -ne $v) { & $l $p[1] ('{0:N0}' -f (Get-SmartLow $v)) }
             }
             foreach ($id in 5, 197, 198, 187) {
-                $v = & $a $id
-                if ($v -gt 0) { $alerts += ('attribut SMART {0:X2} = {1}' -f $id, ($v -band 0xFFFFFFFF)) }
+                $v = Get-SmartLow (& $a $id)
+                if ($v -gt 0) { $alerts += ('attribut SMART {0:X2} = {1}' -f $id, $v) }
             }
             $t = & $a 194; if ($null -ne $t -and ($t -band 0xFF) -ge 60) { $alerts += "température élevée : $($t -band 0xFF) °C" }
         }

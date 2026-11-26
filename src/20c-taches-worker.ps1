@@ -385,8 +385,14 @@ function Invoke-Task_SoftUpgrade {
         $i++; $Sync.TaskPct = [int](100 * ($i - 1) / $nAll)
         $Sync.SoftRun.Index = $i; $Sync.SoftRun.Cur = "$($x.Id)"; Set-SoftItem "$($x.Id)" @{ State = 'run'; Phase = 'préparation'; Pct = -1 }
         Write-TaskLog $(if ($x.Install) { 'Installation de {0} ({1})' -f $x.Name, $x.Id } else { '{0} ({1}) : {2} > {3}' -f $x.Name, $x.Src, $x.From, $x.To }) 'STEP'
+        # winget testé avant toute fermeture de programme : sans lui, rien n'est installé et les programmes de l'utilisateur
+        # (travail non enregistré) restent ouverts
+        if (-not $wg) {
+            Write-TaskLog 'winget introuvable : logiciel non mis à jour.' 'ERROR'
+            $Sync.SoftRun.Fail++; Set-SoftItem "$($x.Id)" @{ State = 'fail'; Phase = 'winget introuvable'; Pct = -1; End = [DateTime]::Now }
+            continue
+        }
         if ($x.Lock) { $cl = @(Find-SoftLocker $x.Lock); if ($cl.Count) { Close-SoftProc $cl } }
-        if (-not $wg) { Write-TaskLog 'winget introuvable.' 'ERROR'; continue }
         if ($x.Mode) { Invoke-SoftRemoveItem $x $wg; continue }
         # rattaché par correspondance de nom : winget ne le connaît pas comme installé, « install » pose la nouvelle version par-dessus ;
         # version installée illisible (Battle.net...) : « upgrade » ne peut pas comparer, dernière version posée par-dessus (--force)

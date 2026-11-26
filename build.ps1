@@ -22,7 +22,7 @@
     N'exécute pas l'analyse statique PSScriptAnalyzer (tools\PSScriptAnalyzerSettings.psd1).
 
 .PARAMETER Version
-    Nouvelle version (0.x.y). Mise à jour du fichier VERSION avant l'assemblage.
+    Nouvelle version (x.y.z). Mise à jour du fichier VERSION avant l'assemblage.
 
 .PARAMETER SignOnly
     Signe dist\Oliv_Maintenance_<version>.exe déjà construit (aucun assemblage, aucun test) : exe livré sans signature.
@@ -34,7 +34,7 @@
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
     powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -SignOnly
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 0.100.0
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.19.0
 #>
 [CmdletBinding()]
 param([string]$Version, [switch]$SkipTests, [switch]$SkipLint, [switch]$SignOnly, [string]$CertThumbprint)
@@ -73,7 +73,7 @@ if ($SignOnly) {
 # ---------- version et date
 $verFile = Join-Path $root 'VERSION'
 if ($Version) {
-    if ($Version -notmatch '^0\.\d+\.\d+$') { throw "Version invalide : $Version (format attendu 0.x.y)" }
+    if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Version invalide : $Version (format attendu x.y.z)" }
     [IO.File]::WriteAllText($verFile, $Version + "`n", $utf8)
 }
 $ver = [IO.File]::ReadAllText($verFile, $utf8).Trim()
@@ -154,12 +154,13 @@ $bad = @{}
 foreach ($ch in $code.ToCharArray()) { $c = [int]$ch; if (($c -gt 0x7FF -and $c -lt 0xD800) -or ($c -ge 0xE000 -and $c -le 0xFFFF) -or ($c -ge 0x2010 -and $c -le 0x201F)) { $bad[('U+{0:X4}' -f $c)] = 1 } }
 if ($bad.Count) { $errors.Add('Caractères interdits : ' + (@($bad.Keys | Sort-Object) -join ', ')) }
 # édition personnelle (dépôt public) : aucune mention de l'édition professionnelle ni de ses outils dans le script ni dans
-# aucun fichier texte du projet (sources, lanceur, outils, tests, README)
+# aucun fichier texte du projet (sources, lanceur, outils, tests, README). CLAUDE.md (consignes locales, jamais publié, exclu
+# par .gitignore) n'est pas contrôlé : citer la règle ne doit pas bloquer le livrable
 $perso = '(?i)4\s?sys|dat{2}o'
 foreach ($chk in @(@('script', $code), @('lanceur', [IO.File]::ReadAllText((Join-Path $root 'launcher\Lanceur.cs'), $utf8)))) {
     if ($chk[1] -match $perso) { $errors.Add("Édition personnelle : mention « $($Matches[0]) » trouvée dans le $($chk[0]) (interdit).") }
 }
-foreach ($f in @(Get-ChildItem -LiteralPath $root -Recurse -File -Include *.ps1, *.psd1, *.md, *.cs, *.txt, *.rc, *.json, *.xml | Where-Object { $_.FullName -notmatch '[\\/](dist|\.git)[\\/]' })) {
+foreach ($f in @(Get-ChildItem -LiteralPath $root -Recurse -File -Include *.ps1, *.psd1, *.md, *.cs, *.txt, *.rc, *.json, *.xml | Where-Object { $_.FullName -notmatch '[\\/](dist|\.git)[\\/]' -and $_.FullName -ne (Join-Path $root 'CLAUDE.md') })) {
     if ([IO.File]::ReadAllText($f.FullName) -match $perso) { $errors.Add("Édition personnelle : mention « $($Matches[0]) » dans $($f.FullName.Substring($root.Length + 1)) (interdit).") }
 }
 # [math]::Min / Max avec un entier littéral et une valeur décimale : PowerShell choisit la surcharge Int32 (3,7 -> 4,
@@ -181,8 +182,15 @@ if (-not $SkipLint) {
         # contenu passé lu en UTF-8 (-ScriptDefinition) : avec -Path, Windows PowerShell 5.1 lit les sources sans BOM en
         # ANSI (« à » final devenait « Ã » + espace insécable : fausse alerte d'espace en fin de ligne)
         $set = Join-Path (Join-Path $root 'tools') 'PSScriptAnalyzerSettings.psd1'
-        # PSScriptAnalyzer lève parfois une NullReferenceException interne (cache des commandes) : une nouvelle tentative
-        $lintRun = { param($Code) try { @(Invoke-ScriptAnalyzer -ScriptDefinition $Code -Settings $set -ErrorAction Stop) } catch { @(Invoke-ScriptAnalyzer -ScriptDefinition $Code -Settings $set -ErrorAction Stop) } }
+        # PSScriptAnalyzer lève au hasard une NullReferenceException interne (cache des commandes, 1.25.0 : 7 fichiers sur 80
+        # au premier essai, deux échecs de suite constatés) : jusqu'à 5 essais, puis échec signalé comme plantage de l'outil
+        $lintRun = {
+            param($Code)
+            for ($k = 1; ; $k++) {
+                try { return @(Invoke-ScriptAnalyzer -ScriptDefinition $Code -Settings $set -ErrorAction Stop) }
+                catch { if ($k -ge 5) { throw "PSScriptAnalyzer : plantage de l'outil après $k essais ($($_.Exception.Message)) - relancer le build" } }
+            }
+        }
         foreach ($f in $files) {
             foreach ($l in @(& $lintRun ([IO.File]::ReadAllText($f.FullName, $utf8)))) {
                 if ($f.Name -eq '00-entree.ps1' -and $l.RuleName -in 'PSAvoidUsingWriteHost', 'PSAvoidGlobalVars', 'PSAvoidUsingInvokeExpression') { continue }
@@ -253,7 +261,7 @@ $manifest = Join-Path $obj 'app.manifest'
   </compatibility>
 </assembly>
 "@, $utf8)
-# nom versionné (Oliv_Maintenance_0.x.y.exe) : versions précédentes du lanceur retirées de dist
+# nom versionné (Oliv_Maintenance_x.y.z.exe) : versions précédentes du lanceur retirées de dist
 $exeOut = Join-Path $dist "Oliv_Maintenance_$ver.exe"
 Get-ChildItem -LiteralPath $dist -Filter 'Oliv_Maintenance*.exe' -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -ne $exeOut } | Remove-Item -Force -ErrorAction SilentlyContinue
 if ($PSVersionTable.PSEdition -ne 'Core') {

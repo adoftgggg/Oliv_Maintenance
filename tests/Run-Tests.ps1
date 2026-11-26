@@ -300,7 +300,167 @@ Test-Eq 'Rapport en direct : tâche en cours'     $re[1].Result 'en cours (37 %)
 Test-Eq 'Rapport en direct : tâche en attente'   $re[2].Result 'en attente'
 Test-Eq 'Rapport final : tâches terminées seules' @(Get-RunEvent).Count 1
 
-# ---------- bilan
+# ---------- liens (jonctions) : détectés et supprimés sans suivre leur cible (dossier de l'application, nettoyage)
+Import-SrcFunction 'Test-PathLink', 'Remove-PathLink', 'Remove-DirLink', 'Test-CleanLinkPath'
+$lk = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-' + [guid]::NewGuid().ToString('N'))
+$lkT = Join-Path $lk 'cible'; $lkR = Join-Path $lk 'app'
+[void][IO.Directory]::CreateDirectory((Join-Path $lkT 'sous')); [void][IO.Directory]::CreateDirectory((Join-Path $lkR 'reel'))
+[IO.File]::WriteAllText((Join-Path $lkT 'garder.txt'), 'x')
+& cmd.exe /d /c mklink /J (Join-Path $lkR 'lien') $lkT | Out-Null
+& cmd.exe /d /c mklink /J (Join-Path $lkR 'reel\lien2') $lkT | Out-Null
+try {
+    Test-Eq 'Lien : jonction détectée'             (Test-PathLink (Join-Path $lkR 'lien')) $true
+    Test-Eq 'Lien : dossier réel'                  (Test-PathLink (Join-Path $lkR 'reel')) $false
+    Test-Eq 'Lien : chemin absent'                 (Test-PathLink (Join-Path $lkR 'absent')) $false
+    Test-Eq 'Nettoyage : cible réelle acceptée'    (Test-CleanLinkPath (Join-Path $lkR 'reel')) $false
+    Test-Eq 'Nettoyage : jonction refusée'         (Test-CleanLinkPath (Join-Path $lkR 'reel\lien2')) $true
+    Test-Eq 'Nettoyage : dossier sous jonction'    (Test-CleanLinkPath (Join-Path $lkR 'lien\sous')) $true
+    Test-Eq 'Liens : premier niveau seulement'     (Remove-DirLink $lkR) 1
+    Test-Eq 'Liens : lien profond conservé'        (Test-PathLink (Join-Path $lkR 'reel\lien2')) $true
+    Test-Eq 'Liens : toute profondeur'             (Remove-DirLink $lkR -Deep) 1
+    Test-Eq 'Liens : cible intacte'                ([IO.File]::Exists((Join-Path $lkT 'garder.txt'))) $true
+    & cmd.exe /d /c mklink /J (Join-Path $lk 'racine-lien') $lkT | Out-Null
+    Remove-PathLink (Join-Path $lk 'racine-lien')
+    Test-Eq 'Lien à la place du dossier : retiré'  ([IO.Directory]::Exists((Join-Path $lk 'racine-lien'))) $false
+    Test-Eq 'Lien à la place du dossier : cible'   ([IO.File]::Exists((Join-Path $lkT 'garder.txt'))) $true
+} finally { try { [void](Remove-DirLink $lk -Deep); [IO.Directory]::Delete($lk, $true) } catch { $null = $_ } }
+
+# ---------- Wi-Fi : noms que netsh interprète (« * » = tous les profils) refusés
+Import-SrcFunction 'Test-WifiNameSafe'
+Test-Eq 'Wi-Fi : nom ordinaire'               (Test-WifiNameSafe 'Livebox-1234') $true
+Test-Eq 'Wi-Fi : nom accentué et espaces'     (Test-WifiNameSafe 'Café de la gare') $true
+Test-Eq 'Wi-Fi : étoile refusée'              (Test-WifiNameSafe '*') $false
+Test-Eq 'Wi-Fi : guillemet refusé'            (Test-WifiNameSafe 'a"b') $false
+Test-Eq 'Wi-Fi : nom vide refusé'             (Test-WifiNameSafe ' ') $false
+
+# ---------- entrée de désinstallation : clé du profil (HKCU) signalée, sa commande n'est pas lancée en administrateur
+Import-SrcFunction 'Get-SoftArpKey'
+function global:Get-SoftLocalId($App) { $App.Id }
+function global:Open-RegKey([string]$Path) { if ($Path -like '*\Uninstall\Foo') { [pscustomobject]@{ P = $Path } } else { $null } }
+Test-Eq 'Désinstallation : entrée HKCU'       (Get-SoftArpKey @{ Id = 'ARP\User\X64\Foo'; Name = 'Foo' }).User $true
+Test-Eq 'Désinstallation : entrée HKLM'       (Get-SoftArpKey @{ Id = 'ARP\Machine\X64\Foo'; Name = 'Foo' }).User $false
+Remove-Item function:global:Get-SoftLocalId, function:global:Open-RegKey
+
+# ---------- exe stable : copié seulement si son empreinte est celle calculée par le lanceur
+Import-SrcFunction 'Sync-StableExe'
+function global:Write-FileLog([string]$Message, [string]$Level) { $null = $Message, $Level }
+$sx = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-' + [guid]::NewGuid().ToString('N')); [void][IO.Directory]::CreateDirectory($sx)
+$StableExe = Join-Path $sx 'stable.exe'; $AppDirSafe = $true; $curExe = Join-Path $sx 'telecharge.exe'
+$oldExe = $env:_OLIVM_EXE; $oldSha = $env:_OLIVM_EXE_SHA256
+try {
+    [IO.File]::WriteAllText($curExe, 'version lancée'); $env:_OLIVM_EXE = $curExe
+    $env:_OLIVM_EXE_SHA256 = (Get-FileHash -LiteralPath $curExe -Algorithm SHA256).Hash
+    Test-Eq 'Exe stable : copie conforme'          (Sync-StableExe) $true
+    Test-Eq 'Exe stable : contenu copié'           ([IO.File]::ReadAllText($StableExe)) 'version lancée'
+    [IO.File]::WriteAllText($curExe, 'remplacé après le lancement')
+    [void](Sync-StableExe)
+    Test-Eq 'Exe stable : exe remplacé refusé'     ([IO.File]::ReadAllText($StableExe)) 'version lancée'
+    Test-Eq 'Exe stable : aucun fichier temporaire' @(Get-ChildItem -LiteralPath $sx -Filter '*.tmp').Count 0
+    $env:_OLIVM_EXE_SHA256 = ''; [IO.File]::Delete($StableExe)
+    Test-Eq 'Exe stable : empreinte absente'       (Sync-StableExe) $false
+} finally {
+    $env:_OLIVM_EXE = $oldExe; $env:_OLIVM_EXE_SHA256 = $oldSha
+    try { [IO.Directory]::Delete($sx, $true) } catch { $null = $_ }
+}
+
+# ---------- écriture atomique et lecture des fichiers d'état (version précédente .bak, fichier illisible jamais écrasé)
+Import-SrcFunction 'Write-FileAtomic', 'Read-JsonState', 'Read-LastRunState', 'Get-LastRun', 'Save-LastRun'
+$wf = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-' + [guid]::NewGuid().ToString('N')); [void][IO.Directory]::CreateDirectory($wf)
+try {
+    $af = Join-Path $wf 'etat.json'
+    Write-FileAtomic $af 'un'
+    Test-Eq 'Écriture atomique : création'         ([IO.File]::ReadAllText($af)) 'un'
+    Write-FileAtomic $af 'deux'
+    Test-Eq 'Écriture atomique : remplacement'     ([IO.File]::ReadAllText($af)) 'deux'
+    Test-Eq 'Écriture atomique : version .bak'     ([IO.File]::ReadAllText("$af.bak")) 'un'
+    Test-Eq 'Écriture atomique : pas de .tmp'      ([IO.File]::Exists("$af.tmp")) $false
+    $nb = Join-Path $wf 'sans-bak.txt'; Write-FileAtomic $nb 'a' -NoBackup; Write-FileAtomic $nb 'b' -NoBackup
+    Test-Eq 'Écriture atomique : -NoBackup'        ([IO.File]::Exists("$nb.bak")) $false
+    Test-Eq 'Écriture atomique : encodage ANSI'    ([IO.File]::ReadAllText($nb, [Text.Encoding]::Default)) 'b'
+    # lecture : absent, tableau JSON (piège 5.1 : un seul objet), fichier corrompu relu depuis .bak, aucun lisible
+    $js = Join-Path $wf 'attente.json'
+    $r0 = Read-JsonState $js 'test'
+    Test-Eq 'État JSON : fichier absent (Ok)'      $r0.Ok $true
+    Write-FileAtomic $js '[{"Key":"A"},{"Key":"B"}]'
+    $r1 = Read-JsonState $js 'test'
+    Test-Eq 'État JSON : tableau de 2 entrées'     @($r1.Data).Count 2
+    Test-Eq 'État JSON : 2e entrée'                @($r1.Data)[1].Key 'B'
+    Write-FileAtomic $js '[{"Key":"A"},{"Key":"B"},{"Key":"C"}]'
+    [IO.File]::WriteAllText($js, '[{"Key":"A"},{"Ke')
+    $r2 = Read-JsonState $js 'test'
+    Test-Eq 'État JSON : corrompu, .bak relu'      ($r2.Ok -and @($r2.Data).Count -eq 2 -and $r2.From -like '*.bak') $true
+    Test-Eq 'État JSON : copie .illisible'         ([IO.File]::Exists("$js.illisible")) $true
+    [IO.File]::WriteAllText("$js.bak", '{oups')
+    Test-Eq 'État JSON : rien de lisible'          (Read-JsonState $js 'test').Ok $false
+    # dernières exécutions : fichier illisible jamais réécrit avec la seule nouvelle date
+    $LastRunFile = Join-Path $wf 'dernieres-actions.json'
+    Save-LastRun 'Optimize' 'ok'; Save-LastRun 'NetReset' 'ok'
+    Test-Eq 'Derniers passages : 2 dates'          (Get-LastRun).Count 2
+    [IO.File]::WriteAllText($LastRunFile, '{"Optimize":{"Ti'); [IO.File]::WriteAllText("$LastRunFile.bak", 'x')
+    Save-LastRun 'TimeSync' 'ok'
+    Test-Eq 'Derniers passages : illisible gardé'  ([IO.File]::ReadAllText($LastRunFile)) '{"Optimize":{"Ti'
+} finally { try { [IO.Directory]::Delete($wf, $true) } catch { $null = $_ } }
+
+# ---------- fichier hosts : lecture impossible = erreur, jamais un contenu vide (réécriture avec la seule nouvelle entrée)
+Import-SrcFunction 'Read-HostsFile'
+$HostsFile = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-hosts-' + [guid]::NewGuid().ToString('N'))
+Test-Eq 'Hosts : fichier absent = vide'       (Read-HostsFile) ''
+[IO.File]::WriteAllText($HostsFile, "127.0.0.1`tnas.maison")
+$lockFs = [IO.File]::Open($HostsFile, 'Open', 'ReadWrite', 'None')
+try { $hr = 'lu'; try { [void](Read-HostsFile) } catch { $hr = 'erreur' }; Test-Eq 'Hosts : fichier verrouillé = erreur' $hr 'erreur' }
+finally { $lockFs.Dispose(); [IO.File]::Delete($HostsFile) }
+
+# ---------- analyseur d'espace disque : fichiers de démarrage protégés sur tout lecteur
+Import-SrcFunction 'Test-TreeProtected'
+Test-Eq 'Protégé : C:\bootmgr'                (Test-TreeProtected "$env:SystemDrive\bootmgr") $true
+Test-Eq 'Protégé : BOOTNXT'                   (Test-TreeProtected "$env:SystemDrive\BOOTNXT") $true
+Test-Eq 'Protégé : D:\EFI'                    (Test-TreeProtected 'D:\EFI') $true
+Test-Eq 'Protégé : $WinREAgent'               (Test-TreeProtected "$env:SystemDrive\`$WinREAgent") $true
+Test-Eq 'Non protégé : dossier de données'    (Test-TreeProtected 'D:\Photos\EFI') $false
+
+# ---------- inventaire des logiciels relu du fichier (PSCustomObject) : réenregistré après une modification (B1)
+Import-SrcFunction 'ConvertTo-StateTable', 'Save-SoftInventory'
+$si = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-' + [guid]::NewGuid().ToString('N')); [void][IO.Directory]::CreateDirectory($si)
+try {
+    $SoftFile = Join-Path $si 'logiciels.json'
+    $Sync = @{ WgResult = @{ Stamp = [DateTime]'2026-11-20 10:00'; Apps = @(@{ Id = 'A'; From = '1.0'; To = '2.0' }, @{ Id = 'B'; From = '3.0'; To = $null }) } }
+    Save-SoftInventory
+    Test-Eq 'Inventaire : enregistré (table)'      ([IO.File]::Exists($SoftFile)) $true
+    # comme au démarrage (87c) : inventaire relu du fichier, puis logiciel A mis à jour et B désinstallé
+    $Sync.WgResult = Get-Content -LiteralPath $SoftFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    Test-Eq 'Inventaire relu : objet, pas une table' ($Sync.WgResult -is [hashtable]) $false
+    foreach ($a in @($Sync.WgResult.Apps | Where-Object { $_.Id -eq 'A' })) { $a.From = '2.0'; $a.To = $null }
+    $Sync.WgResult.Apps = @($Sync.WgResult.Apps | Where-Object { $_.Id -ne 'B' })
+    Save-SoftInventory
+    $back = Get-Content -LiteralPath $SoftFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    Test-Eq 'Inventaire relu : réenregistré'       (@($back.Apps).Count) 1
+    Test-Eq 'Inventaire relu : version reportée'   (@($back.Apps)[0].From) '2.0'
+    Test-Eq 'Inventaire relu : date conservée'     ([DateTime]$back.Stamp).ToString('yyyy-MM-dd HH:mm') '2026-11-20 10:00'
+    Test-Eq 'Table d''état : copie d''une table'    (ConvertTo-StateTable @{ X = 1 }).X 1
+    Test-Eq 'Table d''état : objet vide'            (ConvertTo-StateTable $null).Count 0
+} finally { $Sync = $null; try { [IO.Directory]::Delete($si, $true) } catch { $null = $_ } }
+
+# ---------- minuteur : tâches de fond relevées aussi quand la fenêtre est réduite (B2)
+Import-SrcFunction 'Test-BgJobTick'
+Test-Eq 'Minuteur au repos : tâches relevées'  @(1..8 | Where-Object { $_ % 4 -eq 0 } | Where-Object { Test-BgJobTick $_ $true }).Count 2
+Test-Eq 'Minuteur actif : 1 passage sur 4'     @(1..8 | Where-Object { Test-BgJobTick $_ $false }).Count 2
+
+# ---------- SMART ATA : 32 bits de poids faible (0xFFFFFFFF vaut -1 sous Windows PowerShell 5.1) (B6)
+Import-SrcFunction 'Get-SmartLow'
+Test-Eq 'SMART : octets hauts ignorés'         (Get-SmartLow ([uint64]0x123400000064)) 100
+Test-Eq 'SMART : valeur simple'                (Get-SmartLow 5) 5
+Test-Eq 'SMART : 32 bits pleins'               (Get-SmartLow ([uint64]4294967295)) 4294967295
+Test-Eq 'SMART : absent'                       ($null -eq (Get-SmartLow $null)) $true
+
+# ---------- libellé des boutons de copie : genre et nombre (B7)
+Import-SrcFunction 'Get-CopyDone'
+Test-Eq 'Copie : les lignes'                   (Get-CopyDone 'Copier les lignes') 'Lignes copiées'
+Test-Eq 'Copie : les 3 erreurs'                (Get-CopyDone 'Copier les 3 erreurs') 'Erreurs copiées'
+Test-Eq 'Copie : le nom'                       (Get-CopyDone 'Copier le nom') 'Nom copié'
+Test-Eq 'Copie : la version'                   (Get-CopyDone 'Copier la version') 'Version copiée'
+Test-Eq 'Copie : l''adresse'                   (Get-CopyDone 'Copier l''adresse') 'Adresse copiée'
+Test-Eq 'Copie : les identifiants'             (Get-CopyDone 'Copier les identifiants') 'Identifiants copiés'
+
 # ---------- nom court du fabricant (ligne Constructeur des mises à jour constructeur)
 $OemBrands = Get-SrcValue 'OemBrands'
 

@@ -21,7 +21,7 @@ le `.cmd` à la main.
 ```
 lancer.ps1           lancement en une commande (irm ... | iex) : dernière version publiée, SHA-256 vérifié
 build.ps1            assemblage + contrôles + tests -> dist\Oliv_Maintenance.cmd et dist\Oliv_Maintenance_<version>.exe
-VERSION              version courante (0.x.y)
+VERSION              version courante (x.y.z)
 src\NN-nom.ps1       sources, concaténées dans l'ordre du préfixe NN
 launcher\Lanceur.cs  lanceur exe (C# 5) : script embarqué compressé, manifeste requireAdministrator
 native\*.cs          code natif (C# 5) : compilé en une DLL embarquée dans le script, chargée en mémoire

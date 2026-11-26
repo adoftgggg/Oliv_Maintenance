@@ -27,23 +27,20 @@ Update-RepairButton
 
 $LastRunFile = Join-Path (Get-LogPath 'Etat') 'dernieres-actions.json'
 $LastRunIds  = [ordered]@{ Optimize = 'OptimizeStatus'; WuReset = 'WuResetStatus'; NetReset = 'NetResetStatus'; SpoolReset = 'SpoolResetStatus'; TimeSync = 'TimeSyncStatus'; StoreReset = 'StoreResetStatus'; GpuReset = 'GpuResetStatus'; NetCheck = 'NetCheckStatus'; GpForce = 'GpForceStatus' }
-function Get-LastRun {
-    $h = @{}
-    if (Test-Path -LiteralPath $LastRunFile) {
-        try {
-            $j = Get-Content -LiteralPath $LastRunFile -Raw -Encoding UTF8 | ConvertFrom-Json
-            foreach ($p in $j.PSObject.Properties) { $h[$p.Name] = $p.Value }
-        } catch {
-            Write-Ignored 'Lecture des derniers passages' $_
-        }
-    }
-    $h
+# dates lues dans le fichier, sinon sa version précédente (.bak) ; Ok faux si aucun n'est lisible
+function Read-LastRunState {
+    $st = Read-JsonState $LastRunFile 'Lecture des derniers passages'
+    $h = @{}; if ($st.Data) { foreach ($p in $st.Data.PSObject.Properties) { $h[$p.Name] = $p.Value } }
+    @{ Ok = $st.Ok; Runs = $h }
 }
+function Get-LastRun { (Read-LastRunState).Runs }
+# fichier illisible : pas de réécriture avec la seule nouvelle date (toutes les autres auraient été perdues)
 function Save-LastRun([string]$Id, [string]$Status) {
-    $h = Get-LastRun
+    $st = Read-LastRunState; if (-not $st.Ok) { return }
+    $h = $st.Runs
     $h[$Id] = [pscustomobject]@{ Time = [DateTime]::Now.ToString('o'); Status = $Status }
     try {
-        ConvertTo-Json -InputObject ([pscustomobject]$h) | Set-Content -LiteralPath $LastRunFile -Encoding UTF8
+        Write-FileAtomic $LastRunFile (ConvertTo-Json -InputObject ([pscustomobject]$h))
     } catch {
         Write-Ignored 'Enregistrement des derniers passages' $_
     }

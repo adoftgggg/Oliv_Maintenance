@@ -103,7 +103,8 @@ function Set-ClipText([string]$Text, [string]$Done) {
 }
 # libellé de confirmation accordé depuis l'intitulé d'un menu « Copier ... » (genre et nombre du nom copié)
 function Get-CopyDone([string]$Head) {
-    $h = $Head -replace '^Copier\s+', '' -replace '^(le|la|les|l'')\s*', '' -replace '^\d+\s+', ''
+    # « les » essayé avant « le » (sinon « Copier les lignes » donnait « S lignes copiés »)
+    $h = $Head -replace '^Copier\s+', '' -replace '^(les|le|la)\s+|^l''\s*', '' -replace '^\d+\s+', ''
     $fem = $h -match '^(erreur|version|ligne|clé|cle|adresse|valeur|commande|taille)'
     $plu = $Head -match '^Copier\s+les\s'
     $mot = $h.Substring(0, 1).ToUpper() + $h.Substring(1)

@@ -112,7 +112,7 @@ function Remove-SoftOrphan($Items) {
     }
     if ($done.Count -and $Sync.WgResult) {
         $Sync.WgResult.Apps = @($Sync.WgResult.Apps | Where-Object { $done -notcontains "$($_.Id)" })
-        try { $o = @{} + $Sync.WgResult; $o.Stamp = ([DateTime]$Sync.WgResult.Stamp).ToString('o'); ConvertTo-Json -InputObject $o -Depth 4 | Set-Content -LiteralPath $SoftFile -Encoding UTF8 } catch { Write-Ignored 'Enregistrement de l''inventaire des logiciels' $_ }
+        Save-SoftInventory
         $SoftUI.CacheStamp = $null; Update-SoftView
     }
 }

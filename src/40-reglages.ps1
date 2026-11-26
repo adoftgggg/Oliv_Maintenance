@@ -433,17 +433,14 @@ function Get-RefTime {
         Boot     = $(if ($BootTime) { $BootTime } else { $min })
     }
 }
+# fichier illisible (tronqué, verrouillé) : version précédente (.bak) relue ; aucune lisible : $PendingReadOk faux, le
+# fichier n'est pas réécrit au démarrage (copie gardée en .illisible), réglages en attente et valeurs d'avant conservés
 function Read-PendingStore {
     $h = @{}
-    if (Test-Path -LiteralPath $PendingFile) {
-        try {
-            # parenthèses : sous Windows PowerShell 5.1, ConvertFrom-Json renvoie le tableau en un seul objet (sinon une seule
-            # entrée, le tableau entier, et les modifications en attente de redémarrage étaient perdues dès 2 entrées)
-            foreach ($o in @((Get-Content -LiteralPath $PendingFile -Raw -Encoding UTF8 | ConvertFrom-Json))) { if ($o.Key) { $h[$o.Key] = $o } }
-        } catch {
-            Write-Ignored 'Lecture des réglages en attente' $_
-        }
-    }
+    $st = Read-JsonState $PendingFile 'Lecture des réglages en attente'
+    $script:PendingReadOk = $st.Ok
+    # Data : tableau JSON gardé tel quel par Read-JsonState (un seul objet sous Windows PowerShell 5.1), éléments énumérés ici
+    foreach ($o in @($st.Data)) { if ($o -and $o.Key) { $h[$o.Key] = $o } }
     $ref = Get-RefTime
     foreach ($k in @($h.Keys)) {
         $o = $h[$k]
@@ -456,7 +453,7 @@ function Read-PendingStore {
 }
 function Save-PendingStore {
     try {
-        ConvertTo-Json -InputObject @($PendingStore.Values) -Depth 3 | Set-Content -LiteralPath $PendingFile -Encoding UTF8
+        Write-FileAtomic $PendingFile (ConvertTo-Json -InputObject @($PendingStore.Values) -Depth 3)
     } catch {
         Write-Ignored 'Enregistrement des réglages en attente' $_
     }
@@ -478,7 +475,8 @@ function Restore-PendingRow($R, [string]$Key) {
     Set-Badge $R 'pending'
 }
 $PendingStore = Read-PendingStore
-Save-PendingStore
+# entrées périmées retirées du fichier ; jamais après une lecture en échec (le fichier aurait été vidé)
+if ($PendingReadOk) { Save-PendingStore }
 
 function Get-StartupEntry {
     $list = [System.Collections.ArrayList]::new()
@@ -750,5 +748,6 @@ $DnsJobDone = {
     # Outils : carte du fichier hosts (état du blocage par le DNS AdGuard)
     try { if ($ToolsUI.Built -and $ToolsUI.HostsBody) { Update-HostsCard } } catch { Write-Ignored 'Carte du fichier hosts' $_ }
     # ligne du réglage : valeur relue et état final
-    if ($DnsUI.Row) { $R = $DnsUI.Row; $DnsUI.Row = $null; $now = try { Get-DnsProvider } catch { $null }; if ($r -and -not $r.Error) { Complete-TweakChange $R $key $now } else { $R.Current = $now; Set-RowDisplay $R $now; Set-Badge $R 'error' }; Update-PendingBar }
+    # $row et non $R : PowerShell ne distingue pas la casse, $R écrasait le résultat $r (échec traité comme une réussite)
+    if ($DnsUI.Row) { $row = $DnsUI.Row; $DnsUI.Row = $null; $now = try { Get-DnsProvider } catch { $null }; if ($r -and -not $r.Error) { Complete-TweakChange $row $key $now } else { $row.Current = $now; Set-RowDisplay $row $now; Set-Badge $row 'error' }; Update-PendingBar }
 }

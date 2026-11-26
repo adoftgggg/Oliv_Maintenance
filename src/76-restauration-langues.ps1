@@ -194,7 +194,11 @@ $OfficeLangScript = @'
 $p = $Sync.OffLangReq; $st = $Sync.OffLang
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    $dir = Join-Path $env:TEMP 'Oliv_Maintenance_ODT'; [void][IO.Directory]::CreateDirectory($dir)
+    # dossier protégé de l'application (écriture réservée aux administrateurs), vidé avant le téléchargement : dans %TEMP%,
+    # un programme sans élévation pouvait déposer une DLL chargée par setup.exe ou le remplacer après le contrôle de signature
+    $dir = Join-Path $env:ProgramData 'Oliv_Maintenance\Outils\ODT'
+    if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction Stop }
+    [void][IO.Directory]::CreateDirectory($dir)
     $exe = Join-Path $dir 'setup.exe'; $cfg = Join-Path $dir 'retrait-langue.xml'
     $st.Phase = 'téléchargement de l''outil de déploiement d''Office'
     (New-Object Net.WebClient).DownloadFile('https://officecdn.microsoft.com/pr/wsus/setup.exe', $exe)

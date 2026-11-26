@@ -40,6 +40,10 @@ namespace _OlivM
         {
             try
             {
+                // empreinte de l'exe lancé, calculée dès le démarrage : l'application ne recopie l'exe dans ProgramData (exe
+                // stable, lancé en administrateur par les raccourcis et l'ouverture de session) que si sa copie a cette empreinte
+                string self = Assembly.GetExecutingAssembly().Location;
+                string selfSha = Sha256(self);
                 string data = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
                 string root = Path.Combine(data, "Oliv_Maintenance");
                 string app = Path.Combine(root, "App");
@@ -79,7 +83,8 @@ namespace _OlivM
                 psi.WorkingDirectory = app;
                 psi.EnvironmentVariables["_OLIVM_SELF"] = ps1;
                 psi.EnvironmentVariables["_OLIVM_HIDDEN"] = "1";
-                psi.EnvironmentVariables["_OLIVM_EXE"] = Assembly.GetExecutingAssembly().Location;
+                psi.EnvironmentVariables["_OLIVM_EXE"] = self;
+                psi.EnvironmentVariables["_OLIVM_EXE_SHA256"] = selfSha;
                 Process.Start(psi);
                 return 0;
             }
@@ -133,10 +138,55 @@ namespace _OlivM
             }
         }
 
+        // lien (jonction, lien symbolique) : attributs du lien lui-même (GetAttributes ne suit pas la cible)
+        static bool IsLink(string path)
+        {
+            try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0; }
+            catch (FileNotFoundException) { return false; }
+            catch (DirectoryNotFoundException) { return false; }
+        }
+
+        // lien supprimé sans toucher à sa cible (RemoveDirectory sur une jonction : seul le lien disparaît)
+        static void DeleteLink(string path)
+        {
+            if ((File.GetAttributes(path) & FileAttributes.Directory) != 0) Directory.Delete(path, false); else File.Delete(path);
+        }
+
+        // liens du dossier supprimés sans suivre leur cible : à toute profondeur (Deep) ou au premier niveau seulement
+        static void RemoveLinks(string dir, bool deep)
+        {
+            foreach (string e in Directory.GetFileSystemEntries(dir))
+            {
+                FileAttributes a = File.GetAttributes(e);
+                if ((a & FileAttributes.ReparsePoint) != 0) DeleteLink(e);
+                else if (deep && (a & FileAttributes.Directory) != 0) RemoveLinks(e, true);
+            }
+        }
+
+        // empreinte SHA-256 (hexadécimal majuscule, comme Get-FileHash) ; vide si le fichier est illisible
+        static string Sha256(string path)
+        {
+            try
+            {
+                using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                using (System.Security.Cryptography.SHA256 h = System.Security.Cryptography.SHA256.Create())
+                {
+                    return BitConverter.ToString(h.ComputeHash(fs)).Replace("-", "");
+                }
+            }
+            catch { return ""; }
+        }
+
+        // Jonction ou lien posé à la place du dossier par un utilisateur standard (création libre dans ProgramData) : suivi,
+        // il faisait appliquer takeown / icacls à sa cible (C:\Windows...) puis écrire le script dans un dossier contrôlé par
+        // cet utilisateur. Lien supprimé et vrai dossier recréé ; droits non conformes : liens supprimés à toute profondeur
+        // avant takeown / icacls ; droits conformes : premier niveau contrôlé (liens antérieurs à la mise en conformité).
         static bool Protect(string root)
         {
+            if (IsLink(root)) DeleteLink(root);
             Directory.CreateDirectory(root);
-            if (IsSafe(root)) return true;
+            if (IsSafe(root)) { RemoveLinks(root, false); return true; }
+            RemoveLinks(root, true);
             Run("takeown.exe", "/F \"" + root + "\" /A /R");
             DirectorySecurity sec = new DirectorySecurity();
             sec.SetOwner(Admins);
@@ -149,7 +199,7 @@ namespace _OlivM
             if (Directory.GetFileSystemEntries(root).Length > 0) Run("icacls.exe", "\"" + Path.Combine(root, "*") + "\" /reset /T /C /Q");
             string cache = Path.Combine(root, @"Maintenance\_etat\cache");
             if (Directory.Exists(cache)) { try { Directory.Delete(cache, true); } catch { } }
-            return IsSafe(root);
+            return IsSafe(root) && !IsLink(root);
         }
     }
 }

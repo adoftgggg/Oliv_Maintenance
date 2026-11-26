@@ -2,7 +2,18 @@
 # blocage par liste (versions précédentes, entre 2 repères) détecté et retiré sur demande, remplacé par le DNS AdGuard
 # hosts lu et réécrit en ANSI (page de code du système, lecture de Windows) : octets des lignes de l'utilisateur gardés à
 # l'identique (avant : lecture UTF-8 puis écriture ASCII, tout caractère accentué d'un commentaire devenait « ? »)
-function Read-HostsFile { try { [IO.File]::ReadAllText($HostsFile, [Text.Encoding]::Default) } catch { '' } }
+# fichier absent : contenu vide ; illisible (verrouillé par l'antivirus ou le service Client DNS, droits) : erreur levée,
+# jamais un contenu vide (une modification réécrivait alors le fichier avec la seule nouvelle entrée, toutes les autres perdues)
+function Read-HostsFile { if (-not [IO.File]::Exists($HostsFile)) { return '' }; [IO.File]::ReadAllText($HostsFile, [Text.Encoding]::Default) }
+# contenu découpé pour une modification ; lecture impossible : message, Journal, $null (aucune modification)
+function Read-HostsPart {
+    try { Split-HostsContent (Read-HostsFile) }
+    catch {
+        Write-UiLog "Fichier hosts illisible : $($_.Exception.Message)" 'ERROR'
+        Show-Info "Lecture du fichier hosts impossible (fichier ouvert par l'antivirus ou le service Client DNS ?) : aucune modification faite. Réessayer dans un instant.`n`n$($_.Exception.Message)" 'Error'
+        $null
+    }
+}
 # contenu hors bloc de blocage, et bloc (lignes) séparés
 function Split-HostsContent([string]$Text) {
     $own = [Collections.Generic.List[string]]::new(); $blk = [Collections.Generic.List[string]]::new(); $in = $false
@@ -19,8 +30,9 @@ function Write-HostsFile([string]$Own, [string[]]$Block) {
     $txt = $Own.TrimEnd() + "`r`n" + $(if ($Block -and $Block.Count) { "`r`n" + ($Block -join "`r`n").TrimEnd() + "`r`n" } else { '' })
     # fichier momentanément ouvert par le service Client DNS (relecture après modification) ou l'antivirus : nouvel essai
     # toutes les 250 ms, 15 s au plus, avant de signaler l'échec
+    # écriture atomique (fichier temporaire substitué, droits du fichier conservés) : une coupure ne laisse jamais un hosts tronqué
     for ($k = 0; ; $k++) {
-        try { [IO.File]::WriteAllText($HostsFile, $txt, [Text.Encoding]::Default); break }
+        try { Write-FileAtomic $HostsFile $txt ([Text.Encoding]::Default) -NoBackup; break }
         catch [IO.IOException] { if ($k -ge 60) { throw 'fichier hosts occupé par un autre programme depuis 15 s (service Client DNS ou antivirus) : réessayer dans un instant.' }; Start-Sleep -Milliseconds 250 }
     }
     # vidage du cache DNS sans attendre (Clear-DnsClientCache bloquait l'interface pendant la relecture du fichier par le service)
@@ -67,7 +79,7 @@ function Switch-HostsToAdGuard {
     if ($BgJobs.ContainsKey('Dns')) { Show-Info 'Un changement de DNS est déjà en cours.'; return }
     $dom = try { [bool](Get-CimInstance Win32_ComputerSystem -Property PartOfDomain -ErrorAction Stop).PartOfDomain } catch { $false }
     if ($dom) { Show-Info 'Poste joint à un domaine : ses serveurs DNS doivent rester ceux du domaine (DNS AdGuard refusé).' 'Warn'; return }
-    $p = Split-HostsContent (Read-HostsFile); $old = $p.Block.Count -gt 0
+    $p = Read-HostsPart; if (-not $p) { return }; $old = $p.Block.Count -gt 0
     $msg = "Régler le DNS AdGuard ?`n`nLes serveurs DNS de toutes les cartes réseau actives passent sur AdGuard (94.140.14.14), qui bloque les pubs, traqueurs et sites malveillants connus pour tout le PC. Retour possible dans Sécurité > Réseau > Serveurs DNS (Automatique)." +
         $(if ($old) { "`n`nL'ancien blocage par liste est aussi retiré du fichier hosts (vos entrées personnelles sont gardées) : coupure réseau possible une dernière fois (environ 5 minutes), le service Client DNS de Windows relit le fichier." } else { '' }) +
         "`n`nUn navigateur réglé sur son propre DNS sécurisé (DoH) contourne AdGuard : le laisser sur « Automatique » ou le désactiver."
@@ -89,7 +101,13 @@ function Switch-HostsToAdGuard {
 }
 function Update-HostsCard {
     $b = $ToolsUI.HostsBody; $b.Children.Clear()
-    $p = Split-HostsContent (Read-HostsFile)
+    $p = try { Split-HostsContent (Read-HostsFile) } catch {
+        # illisible : rien d'affiché comme « aucune entrée » (trompeur), aucun bouton de modification ; relecture sur demande
+        $w = New-Text ("Fichier hosts illisible pour l'instant (ouvert par l'antivirus ou le service Client DNS ?) : $($_.Exception.Message)")
+        $w.TextWrapping = 'Wrap'; $w.Margin = New-Thickness 46 6 18 6; $w.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'WarnFgBrush'); [void]$b.Children.Add($w)
+        [void]$b.Children.Add((New-ToolBar @(New-ToolButton 'Relire' $null { Update-HostsCard })))
+        return
+    }
     $nb = 0; foreach ($x in $p.Block) { if ($x.StartsWith('0.0.0.0 ') -or $x.StartsWith("0.0.0.0`t")) { $nb += @($x.Trim() -split '\s+').Count - 1 } }
     # blocage des pubs et traqueurs : par le DNS AdGuard (Sécurité > Réseau > Serveurs DNS), plus par le fichier hosts
     $dns = try { Get-DnsProvider } catch { '' }
@@ -126,12 +144,12 @@ function Add-HostsEntry {
     $ipo = $null
     if ($n -notmatch '^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$') { Show-Info 'Nom invalide : lettres, chiffres, tirets et points uniquement.' 'Warn'; return }
     if (-not [Net.IPAddress]::TryParse($ip, [ref]$ipo)) { Show-Info 'Adresse IP invalide.' 'Warn'; return }
-    $p = Split-HostsContent (Read-HostsFile)
+    $p = Read-HostsPart; if (-not $p) { return }
     $new = $p.Own.TrimEnd() + "`r`n" + ("{0}`t{1}{2}" -f $ip, $n, $(if ($cm) { "`t# $cm" } else { '' }))
     if (Confirm-HostsChange $p.Own $new 'Ajouter cette entrée ?') { Save-HostsOwn $new $p.Block "ajout de $n" }
 }
 function Remove-HostsEntry($E) {
-    $p = Split-HostsContent (Read-HostsFile)
+    $p = Read-HostsPart; if (-not $p) { return }
     $ls = [Collections.Generic.List[string]]::new([string[]]($p.Own -split "`r?`n"))
     if ($E.Line -ge $ls.Count) { Update-HostsCard; return }
     $ls.RemoveAt($E.Line); $new = $ls -join "`r`n"
@@ -153,12 +171,13 @@ function Remove-HostsLegacyTask {
 [void]$Window.Dispatcher.BeginInvoke([Action]{ Remove-HostsLegacyTask }, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
 function Remove-HostsLegacyBlock {
     if (-not (Confirm-Action "Retirer l'ancien blocage des pubs et traqueurs du fichier hosts ?`n`nVos entrées personnelles sont gardées.`n`nCoupure réseau possible une dernière fois (environ 5 minutes) : le service Client DNS de Windows doit relire le fichier.")) { return }
-    try { $p = Split-HostsContent (Read-HostsFile); Write-HostsFile $p.Own @(); Write-UiLog 'Fichier hosts : ancien blocage des pubs et traqueurs retiré.' 'OK'; Show-Toast 'Ancien blocage retiré du fichier hosts' }
+    $p = Read-HostsPart; if (-not $p) { return }
+    try { Write-HostsFile $p.Own @(); Write-UiLog 'Fichier hosts : ancien blocage des pubs et traqueurs retiré.' 'OK'; Show-Toast 'Ancien blocage retiré du fichier hosts' }
     catch { Write-UiLog "Fichier hosts : $($_.Exception.Message)" 'ERROR'; Show-Info "Écriture du fichier hosts impossible.`n`n$($_.Exception.Message)" 'Error' }
     Update-HostsCard
 }
 function Edit-HostsFile {
-    $p = Split-HostsContent (Read-HostsFile)
+    $p = Read-HostsPart; if (-not $p) { return }
     $v = Read-ToolInput "Fichier hosts : mes entrées (texte)`n`nUne entrée par ligne : adresse IP, espace, nom (ex. 192.168.1.20 nas.maison ; 0.0.0.0 site-a-bloquer.com). Lignes commençant par # = commentaires. La liste de blocage, si elle est active, est conservée à part. Récapitulatif des changements avant enregistrement." @(@{ V = $p.Own; M = $true; H = 380 }) 'Suivant' 860
     if (-not $v) { return }
     $new = "$($v[0])"
