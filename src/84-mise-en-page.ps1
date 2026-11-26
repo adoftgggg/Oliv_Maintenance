@@ -29,6 +29,9 @@ $Window.Add_SourceInitialized({
     try { [Windows.Interop.HwndSource]::FromHwnd([Windows.Interop.WindowInteropHelper]::new($Window).Handle).AddHook($script:MaxHook) } catch { Write-Ignored 'Agrandissement de la fenêtre' $_ }
     # coins arrondis comme les fenêtres de Windows 11 (sans effet sur Windows 10)
     try { [void][_OlivM.WinPlace]::RoundCorners([Windows.Interop.WindowInteropHelper]::new($Window).Handle) } catch { Write-Ignored 'Coins arrondis de la fenêtre' $_ }
+    # épinglage à la barre des tâches : l'épingle ouvre la copie fixe ProgramData\Oliv_Maintenance\Oliv_Maintenance.exe (mise à
+    # jour à chaque lancement), jamais l'exe téléchargé qui change de nom ou disparaît à la mise à jour
+    try { if (Sync-StableExe) { [void][_OlivM.Shell]::SetRelaunch([Windows.Interop.WindowInteropHelper]::new($Window).Handle, 'Oliv.Maintenance', ('"{0}"' -f $StableExe), 'Oliv_Maintenance', "$StableExe,0") } } catch { Write-Ignored 'Épinglage à la barre des tâches' $_ }
 })
 function Update-MaxState {
     if ($Window.WindowState -eq 'Maximized') {

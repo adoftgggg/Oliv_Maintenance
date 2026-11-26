@@ -14,6 +14,26 @@ public static class Shell {
     // chaîne indirecte « @%SystemRoot%\system32\input.dll,-5000 » (noms traduits des claviers) ; null si introuvable
     [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)] static extern int SHLoadIndirectString(string src, StringBuilder buf, int cch, IntPtr res);
     public static string Indirect(string s) { StringBuilder b = new StringBuilder(512); return SHLoadIndirectString(s, b, 512, IntPtr.Zero) == 0 ? b.ToString() : null; }
+    // Propriétés de relance de la fenêtre (épinglage à la barre des tâches) : sans elles, Windows épingle l'exe lancé
+    // (copie du dossier Téléchargements, renommée ou supprimée à la mise à jour : épingle périmée). Avec elles, l'épingle
+    // ouvre la copie fixe de ProgramData, tenue à jour à chaque lancement. PKEY_AppUserModel_* {9F4C2855-...} : 5 ID,
+    // 2 RelaunchCommand, 3 RelaunchIconResource, 4 RelaunchDisplayNameResource (chaînes VT_LPWSTR).
+    [StructLayout(LayoutKind.Sequential, Pack = 4)] struct PKey { public Guid F; public uint P; public PKey(uint p) { F = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"); P = p; } }
+    [StructLayout(LayoutKind.Sequential)] struct PVar { public ushort Vt; public ushort R1, R2, R3; public IntPtr P; public IntPtr P2; }
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IPropStore { int GetCount(out uint c); int GetAt(uint i, out PKey k); int GetValue(ref PKey k, out PVar v); int SetValue(ref PKey k, ref PVar v); int Commit(); }
+    [DllImport("shell32.dll")] static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, out IPropStore store);
+    [DllImport("ole32.dll")] static extern int PropVariantClear(ref PVar v);
+    static void SetStr(IPropStore s, uint pid, string val) {
+        PKey k = new PKey(pid); PVar v = new PVar(); v.Vt = 31; v.P = Marshal.StringToCoTaskMemUni(val);
+        try { s.SetValue(ref k, ref v); } finally { PropVariantClear(ref v); }
+    }
+    public static bool SetRelaunch(IntPtr hwnd, string appId, string command, string name, string icon) {
+        Guid g = typeof(IPropStore).GUID; IPropStore s;
+        if (SHGetPropertyStoreForWindow(hwnd, ref g, out s) != 0 || s == null) return false;
+        try { SetStr(s, 5, appId); SetStr(s, 2, command); SetStr(s, 4, name); SetStr(s, 3, icon); s.Commit(); return true; }
+        finally { Marshal.ReleaseComObject(s); }
+    }
 }
 public static class Perf {
     [DllImport("kernel32.dll")] static extern bool GetSystemTimes(out long idle, out long kernel, out long user);
