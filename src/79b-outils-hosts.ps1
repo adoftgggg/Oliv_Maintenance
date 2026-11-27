@@ -141,8 +141,19 @@ function Update-HostsCard {
     }
     $nb = 0; foreach ($x in $p.Block) { if ($x.StartsWith('0.0.0.0 ') -or $x.StartsWith("0.0.0.0`t")) { $nb += @($x.Trim() -split '\s+').Count - 1 } }
     # blocage des pubs et traqueurs : par le DNS AdGuard (Sécurité > Réseau > Serveurs DNS), plus par le fichier hosts
+    # « actif » seulement s'il est constaté : chaque carte reliée à Internet réglée sur AdGuard ET un domaine publicitaire
+    # (doubleclick.net) résolu en 0.0.0.0 par le DNS (fichier hosts ignoré). Avant : réglage lu sur une seule carte, affiché
+    # actif sans vérifier que Windows passait vraiment par AdGuard. Vérification en arrière-plan (Test-AdGuardBlock)
     $dns = try { Get-DnsProvider } catch { '' }
-    [void](Add-KV $b 'Blocage pubs et traqueurs' $(if ($dns -eq 'AdGuard') { 'actif : DNS AdGuard' } else { 'inactif (DNS AdGuard non réglé)' }) $(if ($dns -eq 'AdGuard') { 'OkFgBrush' } else { '' }))
+    $ck = $HostsUI.AdgCheck
+    if ($dns -ne 'AdGuard' -and -not ($ck -and $ck.Cards.Count -and -not $ck.Other.Count)) { $txt = 'inactif (DNS AdGuard non réglé)'; $br = '' }
+    elseif (-not $ck -or $BgJobs.ContainsKey('AdgCheck')) { $txt = 'DNS AdGuard réglé  ·  vérification en cours...'; $br = 'MutedBrush' }
+    elseif ($ck.Other.Count) { $txt = 'partiel : carte(s) hors AdGuard (' + ($ck.Other -join ', ') + ')'; $br = 'WarnFgBrush' }
+    elseif ($ck.Blocked -eq $true) { $txt = 'actif : DNS AdGuard (vérifié, pubs bloquées)'; $br = 'OkFgBrush' }
+    elseif ($ck.Blocked -eq $false) { $txt = 'DNS AdGuard réglé mais blocage non constaté (domaine de test non bloqué : cache DNS, VPN ou DNS forcé ?)'; $br = 'WarnFgBrush' }
+    else { $txt = 'DNS AdGuard réglé, blocage non vérifiable (' + "$($ck.Error)" + ')'; $br = 'WarnFgBrush' }
+    [void](Add-KV $b 'Blocage pubs et traqueurs' $txt $br)
+    if (-not $ck -or ([DateTime]::Now - $ck.Time).TotalSeconds -gt 60) { Start-AdGuardCheck }
     if ($nb) {
         # ancien blocage par liste (versions précédentes) : relu à chaque démarrage par le service Client DNS (mesuré sur un poste :
         # 140 s de processeur, session inutilisable et sans réseau ~3 min)
@@ -224,3 +235,36 @@ function Restore-HostsFile {
     Update-HostsCard
 }
 
+
+# ---------- Vérification réelle du blocage AdGuard (arrière-plan) : cartes reliées à Internet (passerelle) et leurs DNS IPv4,
+# puis résolution de doubleclick.net par le DNS seul (-NoHostsFile : un 0.0.0.0 du fichier hosts ne compte pas).
+# AdGuard DNS répond 0.0.0.0 pour un domaine bloqué
+$HostsUI = @{ AdgCheck = $null }
+$AdgCheckScript = @'
+$r = @{ Cards = @(); Other = @(); Blocked = $null; Error = ''; Time = [DateTime]::Now }
+$adg = @('94.140.14.14', '94.140.15.15')
+try {
+    foreach ($c in @(Get-NetIPConfiguration -ErrorAction Stop | Where-Object { $_.IPv4DefaultGateway })) {
+        $sv = @((Get-DnsClientServerAddress -InterfaceIndex $c.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses | Where-Object { $_ })
+        $r.Cards += $c.InterfaceAlias
+        if (-not $sv.Count -or @($sv | Where-Object { $_ -notin $adg }).Count) { $r.Other += $c.InterfaceAlias }
+    }
+} catch { $r.Error = $_.Exception.Message }
+try {
+    Clear-DnsClientCache -ErrorAction SilentlyContinue
+    $ips = @(Resolve-DnsName -Name 'doubleclick.net' -Type A -DnsOnly -NoHostsFile -QuickTimeout -ErrorAction Stop | Where-Object { "$($_.Type)" -eq 'A' } | ForEach-Object { "$($_.IPAddress)" })
+    $r.Blocked = $ips.Count -gt 0 -and -not @($ips | Where-Object { $_ -ne '0.0.0.0' }).Count
+} catch { if (-not $r.Error) { $r.Error = $_.Exception.Message } }
+$Sync.AdgCheck = $r
+'@
+function Start-AdGuardCheck {
+    if ($BgJobs.ContainsKey('AdgCheck')) { return }
+    $Sync.AdgCheck = $null
+    $BgJobDone['AdgCheck'] = {
+        $r = $Sync.AdgCheck
+        $HostsUI.AdgCheck = $(if ($r) { $r } else { @{ Cards = @(); Other = @(); Blocked = $null; Error = 'vérification interrompue'; Time = [DateTime]::Now } })
+        if ($HostsUI.AdgCheck.Error) { Write-FileLog "Vérification du blocage AdGuard : $($HostsUI.AdgCheck.Error)" 'WARN' }
+        try { if ($ToolsUI.Built -and $ToolsUI.HostsBody) { Update-HostsCard } } catch { Write-Ignored 'Carte du fichier hosts' $_ }
+    }
+    Start-BgJob 'AdgCheck' $AdgCheckScript
+}

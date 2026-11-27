@@ -694,8 +694,12 @@ $DnsProviders = [ordered]@{
 }
 # fournisseur en vigueur : DNS IPv4 de la 1re carte active ; DHCP (aucun serveur fixé dans le registre de la carte) = Auto
 function Get-DnsProvider {
-    # carte active (Ethernet ou Wi-Fi) lue par .NET : instantané, Get-NetAdapter (CIM) figeait l'interface
-    $a = @([Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | Where-Object { "$($_.OperationalStatus)" -eq 'Up' -and "$($_.NetworkInterfaceType)" -in 'Ethernet', 'Wireless80211' -and $_.Description -notmatch '(?i)virtual|hyper-v|vpn|tap|loopback' })[0]
+    # carte active (Ethernet ou Wi-Fi) lue par .NET : instantané, Get-NetAdapter (CIM) figeait l'interface. Celle qui a une
+    # passerelle d'abord : carte vEthernet d'un commutateur virtuel Hyper-V comprise (elle porte l'IP et les DNS, la carte
+    # physique reliée au commutateur n'en a pas)
+    $c = @([Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | Where-Object { "$($_.OperationalStatus)" -eq 'Up' -and "$($_.NetworkInterfaceType)" -in 'Ethernet', 'Wireless80211' -and $_.Description -notmatch '(?i)vpn|tap|loopback' })
+    $a = @($c | Where-Object { try { @($_.GetIPProperties().GatewayAddresses | Where-Object { "$($_.Address)" -notin '0.0.0.0', '::' }).Count -gt 0 } catch { $false } })[0]
+    if (-not $a) { $a = @($c | Where-Object { $_.Description -notmatch '(?i)virtual|hyper-v' })[0] }
     if (-not $a) { return 'Auto' }
     $static = "$(Get-RegValue "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\$($a.Id)" 'NameServer')".Trim()
     if (-not $static) { return 'Auto' }
@@ -709,8 +713,15 @@ function Get-DnsProvider {
 $DnsScript = @'
 $q = $Sync.DnsReq; $r = @{ Done = @(); Warn = @(); Prev = @() }
 try {
-    $ad = @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { "$($_.Status)" -eq 'Up' })
-    if (-not $ad.Count) { throw 'aucune carte réseau active.' }
+    # cartes visées : actives ET dotées d'une configuration DNS (pile IP liée). Une carte physique reliée à un commutateur
+    # virtuel Hyper-V (WSL, Docker, machines virtuelles) est active mais sans IP : Set-DnsClientServerAddress échouait
+    # (« aucun objet MSFT_DNSClientServerAddress ») et tout le changement était refusé. Sa carte vEthernet, qui porte l'IP
+    # et la passerelle, est retenue à sa place ; cartes virtuelles sans passerelle (réseau interne WSL) ignorées.
+    $dnsIdx = @(Get-DnsClient -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.InterfaceIndex })
+    $gwIdx = @(Get-NetIPConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.IPv4DefaultGateway -or $_.IPv6DefaultGateway } | ForEach-Object { [int]$_.InterfaceIndex })
+    $phyIdx = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.ifIndex })
+    $ad = @(Get-NetAdapter -ErrorAction Stop | Where-Object { "$($_.Status)" -eq 'Up' -and [int]$_.ifIndex -in $dnsIdx -and ([int]$_.ifIndex -in $gwIdx -or ([int]$_.ifIndex -in $phyIdx -and -not $gwIdx.Count)) })
+    if (-not $ad.Count) { throw 'aucune carte réseau active avec une configuration IP.' }
     if ($q.Key -ne 'Auto' -and $q.Build -ge 22000) {
         $Sync.DnsStep = 'chiffrement (DNS over HTTPS)'
         foreach ($ip in @($q.V4) + @($q.V6)) {
@@ -720,8 +731,11 @@ try {
             } catch { $r.Warn += "chiffrement $ip : $($_.Exception.Message)" }
         }
     }
+    $fail = @()
     foreach ($a in $ad) {
         $Sync.DnsStep = "carte $($a.Name)"
+        # une carte en échec n'empêche pas les autres : signalée, le changement n'échoue que si aucune carte n'a pu être réglée
+        try {
         # serveurs d'avant notés dans le journal (DNS fixé à la main, Pi-hole, serveur interne : retrouvables pour revenir en arrière)
         try { $old = @((Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ErrorAction Stop) | ForEach-Object { $_.ServerAddresses } | Where-Object { $_ }); $r.Prev += ('{0} : {1}' -f $a.Name, $(if ($old.Count) { $old -join ', ' } else { 'aucun' })) } catch { $null = $_ }
         $v6 = $false; try { $v6 = [bool](Get-NetAdapterBinding -Name $a.Name -ComponentID ms_tcpip6 -ErrorAction Stop).Enabled } catch { $v6 = $false }
@@ -733,7 +747,10 @@ try {
             else { $r.Warn += "IPv6 désactivé sur $($a.Name) : DNS IPv4 seulement" }
         }
         $r.Done += $a.Name
+        } catch { $fail += "$($a.Name) : $($_.Exception.Message)" }
     }
+    if (-not $r.Done.Count) { throw ($fail -join ' ; ') }
+    foreach ($f in $fail) { $r.Warn += "carte ignorée, $f" }
     $Sync.DnsStep = 'vidage du cache DNS'
     Clear-DnsClientCache -ErrorAction SilentlyContinue
 } catch { $r.Error = $_.Exception.Message }
@@ -782,7 +799,7 @@ $DnsJobDone = {
     # Accueil : carte Réseau relue tout de suite (serveurs DNS affichés par carte)
     try { Update-InfoFast -Force } catch { Write-Ignored 'Accueil (réseau)' $_ }
     # Outils : carte du fichier hosts (état du blocage par le DNS AdGuard)
-    try { if ($ToolsUI.Built -and $ToolsUI.HostsBody) { Update-HostsCard } } catch { Write-Ignored 'Carte du fichier hosts' $_ }
+    try { $HostsUI.AdgCheck = $null; if ($ToolsUI.Built -and $ToolsUI.HostsBody) { Update-HostsCard } } catch { Write-Ignored 'Carte du fichier hosts' $_ }
     # ligne du réglage : valeur relue et état final
     # $row et non $R : PowerShell ne distingue pas la casse, $R écrasait le résultat $r (échec traité comme une réussite)
     if ($DnsUI.Row) { $row = $DnsUI.Row; $DnsUI.Row = $null; $now = try { Get-DnsProvider } catch { $null }; if ($r -and -not $r.Error) { Complete-TweakChange $row $key $now } else { $row.Current = $now; Set-RowDisplay $row $now; Set-Badge $row 'error' }; Update-PendingBar }
