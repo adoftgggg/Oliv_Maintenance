@@ -311,10 +311,83 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <!-- Menus déroulants (clic sur un bouton « ... » ou clic droit) : même aspect que la liste de choix des réglages
+         (Show-ChoiceMenu) : cadre arrondi avec ombre, lignes arrondies au survol, coche à gauche, sous-menus identiques.
+         Ombre dessinée par le modèle : HasDropShadow laissé à vrai pour garder la fenêtre flottante transparente (coins) -->
     <Style TargetType="ContextMenu">
-      <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
       <Setter Property="Foreground" Value="{DynamicResource FgBrush}"/>
-      <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}"/>
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="HasDropShadow" Value="True"/>
+      <Setter Property="SnapsToDevicePixels" Value="True"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ContextMenu">
+            <Border Margin="0,0,12,12" MinWidth="170" Padding="4" CornerRadius="8" BorderThickness="1"
+                    Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}">
+              <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="3" Opacity="0.25"/></Border.Effect>
+              <ScrollViewer MaxHeight="560" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+              </ScrollViewer>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="MenuItem">
+      <Setter Property="Foreground" Value="{DynamicResource FgBrush}"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="MenuItem">
+            <Grid>
+              <Border x:Name="Bd" Background="Transparent" CornerRadius="5" Padding="8,6,14,6">
+                <DockPanel>
+                  <TextBlock x:Name="Chk" DockPanel.Dock="Left" Width="22" FontFamily="Segoe MDL2 Assets" FontSize="12" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Arrow" DockPanel.Dock="Right" FontFamily="Segoe MDL2 Assets" FontSize="10" Margin="14,0,0,0"
+                             VerticalAlignment="Center" Text="&#xE76C;" Visibility="Collapsed"/>
+                  <ContentPresenter ContentSource="Header" RecognizesAccessKey="False" VerticalAlignment="Center"/>
+                </DockPanel>
+              </Border>
+              <Popup x:Name="PART_Popup" Placement="Right" HorizontalOffset="-4" VerticalOffset="-5" AllowsTransparency="True" Focusable="False"
+                     PopupAnimation="Fade" IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                <Border Margin="0,0,12,12" MinWidth="170" Padding="4" CornerRadius="8" BorderThickness="1"
+                        Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}"
+                        TextElement.FontFamily="Segoe UI" TextElement.FontSize="13">
+                  <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="3" Opacity="0.25"/></Border.Effect>
+                  <ScrollViewer MaxHeight="560" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                  </ScrollViewer>
+                </Border>
+              </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Chk" Property="Text" Value="&#xE73E;"/>
+              </Trigger>
+              <Trigger Property="Role" Value="SubmenuHeader">
+                <Setter TargetName="Arrow" Property="Visibility" Value="Visible"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource DisabledFgBrush}"/>
+                <Setter Property="Cursor" Value="Arrow"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Separator">
+            <Border Height="1" Margin="8,4" Background="{DynamicResource LineBrush}"/>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
     <Style TargetType="ScrollBar">
       <Setter Property="Background" Value="Transparent"/>
