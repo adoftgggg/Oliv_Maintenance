@@ -344,6 +344,8 @@
               <Border x:Name="Bd" Background="Transparent" CornerRadius="5" Padding="8,6,14,6">
                 <DockPanel>
                   <TextBlock x:Name="Chk" DockPanel.Dock="Left" Width="22" FontFamily="Segoe MDL2 Assets" FontSize="12" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Gest" DockPanel.Dock="Right" Margin="24,0,0,0" VerticalAlignment="Center" FontSize="12"
+                             Foreground="{DynamicResource MutedBrush}" Text="{TemplateBinding InputGestureText}"/>
                   <TextBlock x:Name="Arrow" DockPanel.Dock="Right" FontFamily="Segoe MDL2 Assets" FontSize="10" Margin="14,0,0,0"
                              VerticalAlignment="Center" Text="&#xE76C;" Visibility="Collapsed"/>
                   <ContentPresenter ContentSource="Header" RecognizesAccessKey="False" VerticalAlignment="Center"/>

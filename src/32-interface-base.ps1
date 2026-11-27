@@ -576,3 +576,22 @@ function Set-Meter($M, [double]$Percent, [string]$Text) {
     $M.Bar.Value = $Percent; $M.Text.Text = $Text
     $M.Bar.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, $(if ($Percent -ge 90) { 'ErrFgBrush' } elseif ($Percent -ge 80) { 'WarnFgBrush' } else { 'AccentBrush' }))
 }
+
+# Menu Couper / Copier / Coller des champs de saisie : le menu intégré de WPF (classe interne, non stylable) gardait l'aspect
+# Windows d'origine. Menu de l'application (styles ContextMenu / MenuItem, coins arrondis) posé sur chaque champ à son
+# chargement, sauf s'il a déjà son propre menu. Raccourcis affichés à droite (InputGestureText des commandes)
+function New-EditMenu($Box) {
+    $cm = [Windows.Controls.ContextMenu]::new()
+    foreach ($c in @(@('Couper', [Windows.Input.ApplicationCommands]::Cut), @('Copier', [Windows.Input.ApplicationCommands]::Copy), @('Coller', [Windows.Input.ApplicationCommands]::Paste))) {
+        $mi = [Windows.Controls.MenuItem]::new(); $mi.Header = $c[0]; $mi.Command = $c[1]; $mi.CommandTarget = $Box
+        [void]$cm.Items.Add($mi)
+    }
+    $cm.Items.Add([Windows.Controls.Separator]::new()) | Out-Null
+    $mi = [Windows.Controls.MenuItem]::new(); $mi.Header = 'Tout sélectionner'; $mi.Command = [Windows.Input.ApplicationCommands]::SelectAll; $mi.CommandTarget = $Box
+    [void]$cm.Items.Add($mi)
+    $cm
+}
+[Windows.EventManager]::RegisterClassHandler([Windows.Controls.Primitives.TextBoxBase], [Windows.FrameworkElement]::LoadedEvent, [Windows.RoutedEventHandler]{
+    param($s, $e)
+    try { if (-not $s.ContextMenu) { $s.ContextMenu = New-EditMenu $s } } catch { Write-Ignored 'Menu des champs de saisie' $_ }
+})
