@@ -30,7 +30,10 @@ function Set-CardShown($C, [bool]$Show) {
         $el.MaxHeight = 0; $el.Margin = New-Thickness 0 0 0 0; $el.Visibility = 'Collapsed'
     } elseif ($CardState.ContainsKey($id)) {
         $s = $CardState[$id]; $CardState.Remove($id)
-        $el.MaxHeight = [double]::PositiveInfinity; $el.Margin = $s.Margin; $el.Visibility = $s.Vis
+        $el.MaxHeight = [double]::PositiveInfinity; $el.Margin = $s.Margin
+        # visibilité rendue par le code de la carte pendant qu'elle était masquée (carte vide puis remplie) : gardée ; sinon
+        # visibilité d'avant le masquage (avant : toujours celle d'avant, une carte remplie entre-temps restait invisible)
+        if ("$($el.Visibility)" -eq 'Collapsed') { $el.Visibility = $s.Vis }
     }
 }
 # appliqué à chaque affichage d'une page (cartes construites à la demande) ; menu du clic droit ajouté une fois par carte
@@ -442,6 +445,11 @@ function Save-HiddenTab {
 }
 function Update-TabVisibility {
     foreach ($pg in $TabLabels.Keys) { $n = $Ui["Nav$pg"]; if ($n) { $n.Visibility = $(if ($HiddenTabs.Contains($pg)) { 'Collapsed' } else { 'Visible' }) } }
-    if ($HiddenTabs.Contains("$($Sync.LastPage)") -and (Get-Command Show-Page -ErrorAction SilentlyContinue)) { Show-Page 'Info' }
+    # onglet de retour masqué depuis Paramètres : Paramètres reste affiché (fenêtre de personnalisation encore ouverte), le
+    # retour se fera sur l'Accueil ; sinon page masquée affichée = retour à l'Accueil
+    if ($HiddenTabs.Contains("$($Sync.LastPage)")) {
+        if ($Sync.CurPage -eq 'Settings') { $Sync.LastPage = 'Info' }
+        elseif (Get-Command Show-Page -ErrorAction SilentlyContinue) { Show-Page 'Info' }
+    }
 }
 Update-TabVisibility

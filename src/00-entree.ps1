@@ -13,6 +13,16 @@ $BuildDate  = '2026-11-16 10:45'
 
 $SelfPath = if ($PSCommandPath) { $PSCommandPath } elseif ($global:_OlivMScriptPath) { $global:_OlivMScriptPath } else { $null }
 
+# Commande du processus relancé (administrateur, Windows PowerShell 5.1 64 bits, STA). Le script est relu dans son dossier
+# (souvent Téléchargements, modifiable sans élévation) : il n'est exécuté que si son empreinte SHA-256 est celle du fichier
+# lancé, calculée ici avant l'invite UAC (fichier remplacé entre-temps : refusé, avec un message). Chemin entre apostrophes,
+# toutes les formes d'apostrophe doublées : PowerShell traite aussi U+2018 à U+201B comme des apostrophes (un nom de
+# dossier avec une apostrophe typographique coupait la chaîne et le processus administrateur s'arrêtait sans rien afficher).
+function Get-RelaunchCommand([string]$Path) {
+    $sha = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes($Path))).Replace('-', '')
+    $q = [regex]::Replace($Path, ("['" + [char]0x2018 + [char]0x2019 + [char]0x201A + [char]0x201B + ']'), '$0$0')
+    '-NoProfile -STA -ExecutionPolicy Bypass -Command "$env:_OLIVM_HIDDEN=''1''; $global:_OlivMScriptPath=''{0}''; $b=[IO.File]::ReadAllBytes($global:_OlivMScriptPath); if ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($b)).Replace(''-'','''') -ne ''{1}'') {{ [void](New-Object -ComObject WScript.Shell).Popup(''Oliv_Maintenance : le fichier a été modifié depuis son lancement, exécution refusée. Relancer l''''application.'',0,''Oliv_Maintenance'',16); exit 1 }}; Invoke-Expression ([Text.Encoding]::UTF8.GetString($b).TrimStart([char]65279))"' -f $q, $sha
+}
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $need64  = [Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess
 $isCore  = $PSVersionTable.PSEdition -eq 'Core'
@@ -21,8 +31,8 @@ $notSta  = [Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA'
 if (-not $isAdmin -or $need64 -or $isCore -or $notSta) {
     $psExe = if ($need64) { "$env:windir\sysnative\WindowsPowerShell\v1.0\powershell.exe" } else { "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe" }
     if (-not $SelfPath) { Write-Warning 'Lancer Oliv_Maintenance par double-clic sur Oliv_Maintenance.cmd.'; return }
-    $argLine = "-NoProfile -STA -ExecutionPolicy Bypass -Command `"`$env:_OLIVM_HIDDEN='1'; `$global:_OlivMScriptPath='$($SelfPath -replace "'", "''")'; Invoke-Expression ([IO.File]::ReadAllText('$($SelfPath -replace "'", "''")', [Text.Encoding]::UTF8))`""
     try {
+        $argLine = Get-RelaunchCommand $SelfPath
         $con = "$env:windir\System32\conhost.exe"
         if (Test-Path -LiteralPath $con) { $exe = $con; $al = "`"$psExe`" $argLine" } else { $exe = $psExe; $al = $argLine }
         if ($isAdmin) { Start-Process -FilePath $exe -ArgumentList $al -WindowStyle Hidden }
@@ -148,3 +158,22 @@ function Protect-AppDir([string]$Path) {
 }
 $AppDirState = try { Protect-AppDir (Join-Path $env:ProgramData 'Oliv_Maintenance') } catch { "unsafe : $($_.Exception.Message)" }
 $AppDirSafe  = $AppDirState -in 'ok', 'fixed'
+
+# ---------- Modules PowerShell chargés seulement depuis des dossiers réservés aux administrateurs
+# Par défaut, Documents\WindowsPowerShell\Modules du compte passe en premier : un module déposé là par un programme sans
+# élévation (même nom qu'un module de Windows, BitLocker, Storage..., ou que Lenovo.Client.Update) était chargé par
+# l'application en administrateur. Gardés : dossiers sous Windows puis sous Program Files, Windows en premier. Cet ordre
+# diffère aussi de la valeur du registre : Windows PowerShell 5.1 ne rajoute alors plus le dossier Documents à l'ouverture
+# de chaque runspace (vérifié). Valeur reprise par chaque tâche de fond ($Sync.ModulePath, 49-arriere-plan.ps1).
+function Get-SafeModulePath([string]$Value) {
+    $roots = @($env:windir, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432) | Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') + '\' }
+    $keep = @(foreach ($e in @($Value -split ';')) {
+        $x = [Environment]::ExpandEnvironmentVariables($e.Trim()).TrimEnd('\')
+        if ($x -and @($roots | Where-Object { ($x + '\').StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count) { $x }
+    })
+    $win = $env:windir.TrimEnd('\') + '\'
+    $sys = @($keep | Where-Object { ($_ + '\').StartsWith($win, [StringComparison]::OrdinalIgnoreCase) })
+    $oth = @($keep | Where-Object { -not ($_ + '\').StartsWith($win, [StringComparison]::OrdinalIgnoreCase) })
+    (@($sys + $oth) | Select-Object -Unique) -join ';'
+}
+$env:PSModulePath = Get-SafeModulePath $env:PSModulePath

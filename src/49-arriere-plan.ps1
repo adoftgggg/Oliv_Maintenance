@@ -6,7 +6,10 @@ $SpareRs = [Collections.Generic.List[object]]::new()
 # erreurs non bloquantes dans les runspaces : même règle que Write-Ignored (02-journaux.ps1), fichier journal seulement
 $Sync.WarnOnce = $WarnOnce
 $Sync.FileLog = $TweakLog
+# chemins des modules limités aux dossiers réservés aux administrateurs (00-entree.ps1), repris par chaque tâche de fond
+$Sync.ModulePath = $env:PSModulePath
 $IgnoreLib = @'
+if ($Sync.ModulePath) { $env:PSModulePath = $Sync.ModulePath }
 function Write-Ignored([string]$What, $Err) {
     $m = $(if ($Err -is [Management.Automation.ErrorRecord]) { $Err.Exception.Message } elseif ($Err -is [Exception]) { $Err.Message } elseif ($Err) { "$Err" } else { 'erreur inconnue' })
     $k = "$What|$m"

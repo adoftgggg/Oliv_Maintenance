@@ -184,7 +184,7 @@ function Update-TskFilter {
     foreach ($t in $d) {
         $r = $TskUI.Rows[$t.Key]; if (-not $r) { continue }
         $v = -not (($TskUI.Scope -eq 'Other' -and $t.Ms) -or ($TskUI.Scope -eq 'Ms' -and -not $t.Ms) -or ($TskUI.RunOnly -and -not $t.Enabled)) -and
-            (-not $q -or $t.Name -like "*$q*" -or $t.Folder -like "*$q*" -or $t.Author -like "*$q*" -or $t.Act -like "*$q*")
+            (-not $q -or (Test-TextHas "$($t.Name)" $q) -or (Test-TextHas "$($t.Folder)" $q) -or (Test-TextHas "$($t.Author)" $q) -or (Test-TextHas "$($t.Act)" $q))
         $r.Row.Visibility = $(if ($v) { 'Visible' } else { 'Collapsed' }); if ($v) { $n++ }
     }
     $ms = @($d | Where-Object { $_.Ms }).Count
@@ -215,6 +215,8 @@ $BgJobDone['TskAct'] = {
     $b = $TskUI.Busy; $TskUI.Busy = $null
     $Ui.TskProg.Visibility = 'Collapsed'; $Ui.TskRefresh.IsEnabled = $true
     $r = $Sync.TskActRes
+    # tâche de fond terminée sans résultat (runspace en erreur) : échec affiché (avant : état « en cours » effacé sans message)
+    if ($b -and -not $r) { $r = @{ Ok = $false; Msg = 'action interrompue sans résultat (tâche de fond en erreur)' } }
     if ($b -and $r) {
         $row = $TskUI.Rows[$b.Key]
         $v = $(switch ($b.Op) { 'run' { 'lancée' } 'stop' { 'arrêtée' } 'disable' { 'désactivée' } default { 'activée' } })

@@ -27,7 +27,7 @@ function Get-ActiveWork {
     if ($Sync.WuSearching) { $l += 'Recherche des mises à jour Windows' }
     if ($Sync.WgRunning) { $l += 'Recherche des mises à jour des logiciels' }
     if ($TreeUI.Job) { $l += "Analyse de l'espace disque ($($TreeUI.Target))" }
-    if ($TreeUI.DelJob) { $l += "Suppression en cours dans l'analyseur d'espace disque" }
+    if ($TreeUI.DelJob -or $BgJobs.ContainsKey('TreeDel')) { $l += "Suppression en cours dans l'analyseur d'espace disque" }
     , $l
 }
 function Invoke-AppReset {
@@ -61,15 +61,19 @@ function Complete-AppReset {
             try { Remove-Item -LiteralPath $d.FullName -Force -ErrorAction Stop } catch {}
         }
     }
-    # relance : même ligne de commande que l'auto-relance du démarrage (déjà administrateur, donc sans RunAs)
-    if (-not $SelfPath) { return }
-    $psExe = "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe"
-    $q = $SelfPath -replace "'", "''"
-    $argLine = "-NoProfile -STA -ExecutionPolicy Bypass -Command `"`$env:_OLIVM_HIDDEN='1'; `$global:_OlivMScriptPath='$q'; Invoke-Expression ([IO.File]::ReadAllText('$q', [Text.Encoding]::UTF8))`""
-    $con = "$env:windir\System32\conhost.exe"
+    # relance : lancée par l'exe, par l'exe (sinon l'instance relancée se croyait lancée par le .cmd : mise à jour dans
+    # Téléchargements, exe stable non synchronisé) ; sinon même commande que l'auto-relance du démarrage, empreinte du script
+    # comprise (déjà administrateur, donc sans RunAs)
+    $exe = "$env:_OLIVM_EXE"
     try {
-        $np = $(if (Test-Path -LiteralPath $con) { Start-Process -FilePath $con -ArgumentList "`"$psExe`" $argLine" -WindowStyle Hidden -PassThru }
-                else { Start-Process -FilePath $psExe -ArgumentList $argLine -WindowStyle Hidden -PassThru })
+        if ($exe -and (Test-Path -LiteralPath $exe)) { $np = Start-Process -FilePath $exe -PassThru }
+        else {
+            if (-not $SelfPath) { return }
+            $psExe = "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe"; $argLine = Get-RelaunchCommand $SelfPath
+            $con = "$env:windir\System32\conhost.exe"
+            $np = $(if (Test-Path -LiteralPath $con) { Start-Process -FilePath $con -ArgumentList "`"$psExe`" $argLine" -WindowStyle Hidden -PassThru }
+                    else { Start-Process -FilePath $psExe -ArgumentList $argLine -WindowStyle Hidden -PassThru })
+        }
         $Sync.RelaunchPid = $np.Id
     } catch { Write-Ignored 'Relance de l''application' $_ }
 }
@@ -99,7 +103,7 @@ function Get-CloseWarning {
         else { $head = "Des mises à jour constructeur sont en cours d'installation, $q" }
         $more += 'L''installation en cours (BIOS, micrologiciel, pilote) se poursuit en arrière-plan jusqu''à sa fin : ne pas éteindre ni redémarrer le PC avant. Les mises à jour constructeur suivantes ne seront pas installées.'
     }
-    if ($TreeUI.DelJob) {
+    if ($TreeUI.DelJob -or $BgJobs.ContainsKey('TreeDel')) {
         if ($head) { $more += "Une suppression est aussi en cours dans l'analyseur d'espace disque." }
         else { $head = "Une suppression est en cours dans l'analyseur d'espace disque, $q"; $more += 'Elle sera interrompue.' }
     }

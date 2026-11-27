@@ -1,6 +1,10 @@
 # ================= Réseaux Wi-Fi enregistrés (netsh wlan export profile key=clear : XML indépendant de la langue)
 $WifiScript = @'
 $r = @{ Items = @() }
+# profils exportés avec les clés en clair : dossier temporaire du compte administrateur (privé à ce compte ; le dossier de
+# l'application dans ProgramData est lisible par tous les utilisateurs). Restes d'une lecture interrompue (processus
+# arrêté avant la suppression) effacés avant chaque lecture.
+foreach ($old in @([IO.Directory]::GetDirectories($env:TEMP, 'olivm-wifi-*'))) { try { [IO.Directory]::Delete($old, $true) } catch { $null = $_ } }
 $dir = Join-Path $env:TEMP ('olivm-wifi-' + [guid]::NewGuid().ToString('N'))
 try {
     [void][IO.Directory]::CreateDirectory($dir)

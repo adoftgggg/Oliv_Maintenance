@@ -101,6 +101,15 @@ function Set-ClipText([string]$Text, [string]$Done) {
     if ($Done -or -not $ok) { Show-Toast $(if ($ok) { "$Done dans le presse-papiers" } else { 'Copie impossible : presse-papiers occupé par un autre programme' }) $ok }
     $ok
 }
+# texte saisi dans un champ de filtre contenu dans $Text, sans distinction de casse. « -like "*$q*" » levait une erreur de
+# motif dès qu'un [ était tapé (« Erreur interne » dans le Journal, bandeau rouge), et ? ou * y étaient des jokers
+function Test-TextHas([string]$Text, [string]$Q) { $Text.IndexOf($Q, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
+# page web ouverte par l'Explorateur de la session : le navigateur tourne sous le compte de l'utilisateur, sans les droits
+# d'administrateur de l'application (Start-Process sur l'adresse l'ouvrait en administrateur). Adresses https seulement.
+function Open-WebPage([string]$Url) {
+    if ($Url -notmatch '^https://[^\s"]+$') { throw "adresse refusée : $Url" }
+    Start-Process -FilePath (Join-Path $env:windir 'explorer.exe') -ArgumentList ('"{0}"' -f $Url)
+}
 # libellé de confirmation accordé depuis l'intitulé d'un menu « Copier ... » (genre et nombre du nom copié)
 function Get-CopyDone([string]$Head) {
     # « les » essayé avant « le » (sinon « Copier les lignes » donnait « S lignes copiés »)

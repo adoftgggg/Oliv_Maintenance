@@ -1,8 +1,9 @@
 # Tâches du worker, partie 3 : winget, Microsoft Store, logiciels, applications, exécution des tâches
 $WorkerScript += "`n" + @'
-# winget : alias de l'utilisateur, sinon exécutable du paquet App Installer (contexte administrateur où l'alias manque)
+# winget : alias du compte, sinon exécutable du paquet App Installer (contexte administrateur où l'alias manque). Plus de
+# recherche par le PATH : un dossier du PATH modifiable sans élévation, placé avant WindowsApps, faisait lancer un autre
+# winget.exe en administrateur
 function Find-Winget {
-    $c = (Get-Command winget.exe -ErrorAction SilentlyContinue).Source; if ($c -and (Test-Path -LiteralPath $c)) { return $c }
     $c = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'; if (Test-Path -LiteralPath $c) { return $c }
     $pk = Get-AppxPackage -AllUsers -Name Microsoft.DesktopAppInstaller -ErrorAction SilentlyContinue | Sort-Object Version -Descending | Select-Object -First 1
     if ($pk) { $c = Join-Path $pk.InstallLocation 'winget.exe'; if (Test-Path -LiteralPath $c) { return $c } }
@@ -44,9 +45,13 @@ function ConvertFrom-WingetLine([string]$Line) {
     if ($t -match '(?i)install') { return @{ Phase = 'installation'; Pct = -1 } }
     $null
 }
+# ligne de commande : argument vide ou contenant une espace entre guillemets (« --override "--quiet --force" » était
+# passé en 3 arguments, override faux) ; guillemet intérieur retiré, comme pour le lancement sans élévation
+function Join-ProcessArg([string[]]$A) { @($A | ForEach-Object { $x = "$_" -replace '"', ''; if ($x -eq '' -or $x -match '\s') { '"' + $x + '"' } else { $x } }) -join ' ' }
 function Invoke-SoftTool([string]$Exe, [string[]]$A, [string]$Name, [scriptblock]$OnLine) {
-    Write-TaskLog ('> {0} {1}' -f $Name, ($A -join ' ')) 'CMD'
-    $psi = [Diagnostics.ProcessStartInfo]::new($Exe, ($A -join ' ')); $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+    $line = Join-ProcessArg $A
+    Write-TaskLog ('> {0} {1}' -f $Name, $line) 'CMD'
+    $psi = [Diagnostics.ProcessStartInfo]::new($Exe, $line); $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true; $psi.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
     $p = [Diagnostics.Process]::Start($psi)
     $Sync.ChildPid = $p.Id; $Sync.ChildName = $Name.ToUpper()
@@ -174,13 +179,16 @@ function Invoke-SoftRemoveItem($X, $Wg) {
         $rc = & $run @('uninstall', '-e', '--id', "$($X.LocalId)", '--interactive', '--accept-source-agreements') 'désinstallation (fenêtre de l''éditeur)'
     }
     # réinstallation impossible par désinstallation : dernière version installée par-dessus l'existante (install --force)
+    $over = $false
     if ($rc -ne 0 -and $re -and "$($X.Src)" -eq 'winget' -and -not $Sync.Cancel) {
         Write-TaskLog 'Désinstallation en échec : dernière version installée par-dessus l''existante (winget install --force).' 'WARN'
         $rc = & $run @('install', '-e', '--id', $id, '--force', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') 'installation par-dessus'
-        if ($rc -eq 0) { $note = 'réinstallé (par-dessus)'; $Sync.SoftRun.Ok++; Set-SoftItem $id @{ State = 'ok'; Note = $note; NoteBrush = 'OkFgBrush'; Phase = ''; Pct = 100; End = [DateTime]::Now }; Write-TaskLog 'Réinstallé par-dessus l''installation existante.' 'OK'; return }
+        $over = $rc -eq 0
     }
     $note = ''; $state = 'ok'
-    if ($rc -ne 0) {
+    # réussite par-dessus : suite commune (état de la ligne et historique des logiciels, que le « return » d'avant sautait)
+    if ($over) { $note = 'réinstallé (par-dessus)'; Write-TaskLog 'Réinstallé par-dessus l''installation existante.' 'OK' }
+    elseif ($rc -ne 0) {
         $state = 'fail'
         Write-TaskLog ('Désinstallation en échec : code {0} (0x{0:X8}){1}.' -f $rc, $(if ($re) { ', logiciel non réinstallé' } else { '' })) 'WARN'
     } elseif (-not $re) {

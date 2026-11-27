@@ -177,7 +177,9 @@ function Show-SearchResult {
     if ($SearchUI.Shown.Count) { Set-SearchSel 0 }
 }
 # titre avec les mots de la recherche en gras et en couleur d'accent (comparaison sans accents ni majuscules)
-function Get-FlatText([string]$T) { -join ($T.ToCharArray() | ForEach-Object { $d = "$_".Normalize([Text.NormalizationForm]::FormD); "$($d[0])".ToLowerInvariant() }) }
+# un caractère par caractère d'origine (positions identiques) ; moitié d'une paire de substitution (emoji...) gardée telle
+# quelle : Normalize levait une exception sur un caractère isolé et la recherche échouait à chaque frappe
+function Get-FlatText([string]$T) { -join ($T.ToCharArray() | ForEach-Object { if ([char]::IsSurrogate($_)) { "$_" } else { $d = "$_".Normalize([Text.NormalizationForm]::FormD); "$($d[0])".ToLowerInvariant() } }) }
 function Add-SearchRun($Tb, [string]$Text, [string]$Query) {
     $flat = Get-FlatText $Text
     $mark = New-Object bool[] $Text.Length

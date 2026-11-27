@@ -77,12 +77,16 @@ $CleanItems = @(
             @(Get-CimInstance Win32_ShadowStorage -ErrorAction Stop | Where-Object { "$($_.Volume.DeviceID)" -eq $v }).Count -gt 0
         } catch { $true }
     }; Group='Composants Windows'; Label='Anciens points de restauration (le plus récent est conservé)'
-        Tip='Win32_ShadowCopy (ClientAccessible) du volume système, sauf le plus récent. Taille affichée : Win32_ShadowStorage.UsedSpace, espace occupé par tous les points.'
+        Tip='Win32_ShadowCopy (ClientAccessible) du volume système créés avec un point de restauration (Get-ComputerRestorePoint), sauf le plus récent ; autres clichés jamais supprimés. Taille affichée : Win32_ShadowStorage.UsedSpace, espace occupé par tous les points.'
         Targets={ }
         Size={ Get-RestoreUsed }
         Clean={
             $vol = Get-SysVolumeId
-            $sc = @(Get-CimInstance Win32_ShadowCopy -ErrorAction Stop | Where-Object { $_.VolumeName -eq $vol -and $_.ClientAccessible } | Sort-Object InstallDate)
+            # clichés des seuls points de restauration (date de création d'un point de restauration à 5 min près) : les autres
+            # clichés accessibles du volume (logiciel de sauvegarde, versions précédentes) ne sont jamais supprimés.
+            # Liste des points illisible : rien n'est supprimé
+            $pts = @(Get-ComputerRestorePoint -ErrorAction Stop | ForEach-Object { [Management.ManagementDateTimeConverter]::ToDateTime("$($_.CreationTime)") })
+            $sc = @(Select-RestoreShadow @(Get-CimInstance Win32_ShadowCopy -ErrorAction Stop | Where-Object { $_.VolumeName -eq $vol -and $_.ClientAccessible }) $pts | Sort-Object InstallDate)
             if ($sc.Count -le 1) { Write-TaskLog ('{0} point de restauration : rien à supprimer.' -f $sc.Count) 'OK'; return }
             $before = Get-RestoreUsed
             $old = @($sc | Select-Object -First ($sc.Count - 1))
@@ -178,6 +182,13 @@ if (-not $CleanSkipBrowsers) { $CleanItems = @($CleanItems) + @(Get-BrowserItem)
 # VSS, jusqu'à une dizaine de secondes), ligne masquée ensuite par Update-CleanSize
 # ordre fixe des catégories
 $CleanGroupOrder = 'Système', 'Cache des navigateurs', 'Composants Windows'
+# clichés dont la date de création est celle d'un point de restauration (5 min d'écart au plus)
+function Select-RestoreShadow($Shadows, $PointTimes) {
+    foreach ($s in @($Shadows)) {
+        if (-not $s -or -not $s.InstallDate) { continue }
+        foreach ($t in @($PointTimes)) { if ([math]::Abs(([DateTime]$s.InstallDate - [DateTime]$t).TotalMinutes) -le 5) { $s; break } }
+    }
+}
 function Get-SysVolumeId { (Get-CimInstance Win32_Volume -Filter ("DriveLetter='{0}'" -f $env:SystemDrive) -ErrorAction Stop).DeviceID }
 function Get-RestoreUsed {
     $vol = Get-SysVolumeId
@@ -195,12 +206,23 @@ function Test-CleanLinkPath([string]$Path) {
     }
     $false
 }
+# motif pour Get-Item -Path : partie fixe du chemin (avant le 1er dossier qui contient * ou ?) échappée. Avant, les crochets
+# d'un nom de profil (C:\Users\Jean[1]) étaient lus comme des jokers : profil jamais nettoyé ni mesuré. Sans joker : $null
+# (chemin pris tel quel, -LiteralPath)
+function ConvertTo-CleanPattern([string]$Path) {
+    $w = $Path.IndexOfAny([char[]]'*?'); if ($w -lt 0) { return $null }
+    $cut = $Path.LastIndexOf('\', $w)
+    if ($cut -lt 0) { return $Path }
+    [WildcardPattern]::Escape($Path.Substring(0, $cut)) + $Path.Substring($cut)
+}
 function Resolve-CleanTarget($Item) {
     $src = $(if ($Item.Paths) { $Item.Paths } else { & $Item.Targets })
     foreach ($t in @($src)) {
         if (-not $t) { continue }
         $kind = $t.Substring(0, 1); $path = $t.Substring(2)
-        foreach ($o in @(Get-Item -Path $path -Force -ErrorAction SilentlyContinue)) {
+        $pat = ConvertTo-CleanPattern $path
+        $found = $(if ($pat) { @(Get-Item -Path $pat -Force -ErrorAction SilentlyContinue) } else { @(Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue) })
+        foreach ($o in $found) {
             if (Test-CleanLinkPath $o.FullName) { continue }
             if ($kind -eq 'D' -and $o.PSIsContainer) { [pscustomobject]@{ Kind = 'D'; Path = $o.FullName; Len = 0 } }
             elseif ($kind -eq 'F' -and -not $o.PSIsContainer) { [pscustomobject]@{ Kind = 'F'; Path = $o.FullName; Len = [double]$o.Length } }

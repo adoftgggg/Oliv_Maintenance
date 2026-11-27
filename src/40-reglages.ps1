@@ -12,8 +12,12 @@ foreach ($k in @($Sync.TwPreSrc.Keys)) { try { $Sync.TwCache[$k] = [bool](& ([sc
 $Sync.TwPreDone = $true
 '@
 }
+# valeur lue à l'avance utilisée seulement pendant la construction des lignes ($TwUseCache, Add-TweakCard) : arrivée après,
+# elle restait en cache et la 1re relecture après un changement renvoyait l'ancienne valeur (faux « Non appliqué »,
+# mauvaise valeur écrite dans la référence)
+$TwUseCache = $false
 function Get-TweakState($Tw) {
-    if ($Sync.TwCache -and $Sync.TwCache.ContainsKey("$($Tw.Id)")) { $v = $Sync.TwCache["$($Tw.Id)"]; $Sync.TwCache.Remove("$($Tw.Id)"); return $v }
+    if ($TwUseCache -and $Sync.TwCache -and $Sync.TwCache.ContainsKey("$($Tw.Id)")) { $v = $Sync.TwCache["$($Tw.Id)"]; $Sync.TwCache.Remove("$($Tw.Id)"); return $v }
     if ($Tw.Get) { return [bool](& $Tw.Get) }
     $r = $Tw.Reg[0]
     if ($r.T -eq 'Key') { return (Test-RegKey $r.P) }
@@ -169,6 +173,9 @@ function Invoke-TweakChange($R, $Want) {
     $tw = $R.Tweak
     # serveurs DNS : appliqués en arrière-plan, état « en cours » sur la ligne et bandeau d'activité, fin dans $BgJobDone['Dns']
     if ($tw.Id -eq 'DnsProvider') {
+        # changement déjà en cours : demande refusée sans toucher à la ligne suivie ni au bandeau (avant : ligne perdue,
+        # pastille « Erreur » même si le 1er changement réussissait)
+        if ($BgJobs.ContainsKey('Dns')) { $R.Staged = $null; Set-RowDisplay $R $R.Current; Show-Info 'Un changement des serveurs DNS est déjà en cours : attendre sa fin avant d''en demander un autre.'; Update-PendingBar; return }
         try { $R.Staged = $null; $DnsUI.Row = $R; Set-Badge $R 'wait'; Set-DnsProvider "$Want" }
         catch { $DnsUI.Row = $null; Write-UiLog ('{0} : {1}' -f $tw.Label, $_.Exception.Message) 'ERROR'; Set-Badge $R 'error'; Remove-BgActivity 'Dns' }
         Update-PendingBar; return
@@ -341,7 +348,10 @@ function Test-Need([string]$Need) {
                 }
             }
         }
-    } catch { Write-Ignored "Détection préalable ($Need)" $_; $v = $true }
+    } catch {
+        # détection impossible : réglage affiché, sauf Defender (exception = antivirus tiers ou service arrêté, réglages sans effet)
+        Write-Ignored "Détection préalable ($Need)" $_; $v = $Need -ne 'Defender'
+    }
     $NeedCache[$Need] = [bool]$v
     [bool]$v
 }
@@ -357,6 +367,10 @@ function Get-PowerCapability {
     } catch { $null }
 }
 function Add-TweakCard([string]$Page, $LeftPanel, $RightPanel, [string[]]$RightGroups, [string]$OnlyGroup) {
+    $script:TwUseCache = $true
+    try { Add-TweakCardCore $Page $LeftPanel $RightPanel $RightGroups $OnlyGroup } finally { $script:TwUseCache = $false }
+}
+function Add-TweakCardCore([string]$Page, $LeftPanel, $RightPanel, [string[]]$RightGroups, [string]$OnlyGroup) {
     $groups = @($Tweaks | Where-Object { $_.Page -eq $Page } | ForEach-Object { $_.Group } | Select-Object -Unique)
     if ($OnlyGroup) { $groups = @($OnlyGroup) }
     foreach ($grp in $groups) {
@@ -521,24 +535,46 @@ function Set-StartupEntry($Entry, [bool]$Enable) {
 
 $StartupClick = { param($s, $e) Set-Staged $s.DataContext ([bool]$s.IsChecked) }
 
+# ligne d'un fichier .reg pour une valeur de tout type (texte, texte extensible, DWORD, QWORD, binaire, multi-chaîne)
+function ConvertTo-RegExportLine([string]$Name, [string]$Kind, $Data) {
+    $esc = { param($t) "$t".Replace('\', '\\').Replace('"', '\"') }
+    $hex = { param([byte[]]$B) ($B | ForEach-Object { '{0:x2}' -f $_ }) -join ',' }
+    $n = '"{0}"' -f (& $esc $Name)
+    switch ($Kind) {
+        'String'       { '{0}="{1}"' -f $n, (& $esc $Data) }
+        'ExpandString' { '{0}=hex(2):{1}' -f $n, (& $hex ([Text.Encoding]::Unicode.GetBytes("$Data" + [char]0))) }
+        'DWord'        { '{0}=dword:{1:x8}' -f $n, ([uint32]([int64]$Data -band 0xFFFFFFFFL)) }
+        'QWord'        { '{0}=hex(b):{1}' -f $n, (& $hex ([BitConverter]::GetBytes([int64]$Data))) }
+        'MultiString'  { '{0}=hex(7):{1}' -f $n, (& $hex ([Text.Encoding]::Unicode.GetBytes((@($Data) -join [char]0) + [char]0 + [char]0))) }
+        default        { '{0}=hex:{1}' -f $n, (& $hex ([byte[]]$Data)) }
+    }
+}
+# chemin de clé au format .reg (HKCU de l'application = ruche de l'utilisateur ciblé)
+function Get-RegExportPath([string]$Reg) {
+    if ($Reg -like 'HKCU\*' -and $HkuSidOk) { "HKEY_USERS\$UserSid\" + $Reg.Substring(5) } else { $Reg -replace '^HKLM\\', 'HKEY_LOCAL_MACHINE\' -replace '^HKCU\\', 'HKEY_CURRENT_USER\' }
+}
+# Sauvegarde avant suppression : fichier du dossier Démarrage déplacé, ou valeur Run en .reg (tout type de valeur, avant :
+# une valeur non texte était écrite « System.Byte[] »), avec la valeur StartupApproved (état activé / désactivé) supprimée
+# elle aussi : sans elle, une entrée désactivée revenait activée à la restauration. Fichier : état en .etat.reg à côté.
 function Remove-StartupEntry($Entry) {
     $bak = Get-LogPath 'Demarrage'
     [void][IO.Directory]::CreateDirectory($bak)
     $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $safe = ($Entry.Name -replace '[\\/:*?"<>|]', '_')
+    $appr = @()
+    $ak = Open-RegKey $Entry.Approved
+    if ($ak) { try { $av = $ak.GetValue($Entry.ValueName, $null); if ($null -ne $av) { $appr = @('', "[$(Get-RegExportPath $Entry.Approved)]", (ConvertTo-RegExportLine $Entry.ValueName "$($ak.GetValueKind($Entry.ValueName))" $av)) } } finally { $ak.Close() } }
     if ($Entry.File) {
         $dest = Join-Path $bak ('{0}_{1}' -f $stamp, (Split-Path $Entry.File -Leaf))
         Move-Item -LiteralPath $Entry.File -Destination $dest -Force -ErrorAction Stop
         $saved = $dest
+        if ($appr.Count) { Set-Content -LiteralPath "$dest.etat.reg" -Encoding Unicode -Value (@('Windows Registry Editor Version 5.00') + $appr + @('')) }
     } else {
-        $regPath = if ($Entry.Reg -like 'HKCU\*' -and $HkuSidOk) { "HKEY_USERS\$UserSid\" + $Entry.Reg.Substring(5) } else { $Entry.Reg -replace '^HKLM\\', 'HKEY_LOCAL_MACHINE\' -replace '^HKCU\\', 'HKEY_CURRENT_USER\' }
-        $esc = { param($t) $t.Replace('\', '\\').Replace('"', '\"') }
-        if ($Entry.Kind -eq 'ExpandString') {
-            $hex = (([Text.Encoding]::Unicode.GetBytes($Entry.Command + [char]0)) | ForEach-Object { '{0:x2}' -f $_ }) -join ','
-            $line = '"{0}"=hex(2):{1}' -f (& $esc $Entry.ValueName), $hex
-        } else { $line = '"{0}"="{1}"' -f (& $esc $Entry.ValueName), (& $esc $Entry.Command) }
+        $k = Open-RegKey $Entry.Reg
+        if (-not $k) { throw "clé $($Entry.Reg) inaccessible" }
+        try { $raw = $k.GetValue($Entry.ValueName, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); $kind = "$($k.GetValueKind($Entry.ValueName))" } finally { $k.Close() }
         $saved = Join-Path $bak ('{0}_{1}.reg' -f $stamp, $safe)
-        Set-Content -LiteralPath $saved -Encoding Unicode -Value @('Windows Registry Editor Version 5.00', '', "[$regPath]", $line, '')
+        Set-Content -LiteralPath $saved -Encoding Unicode -Value (@('Windows Registry Editor Version 5.00', '', "[$(Get-RegExportPath $Entry.Reg)]", (ConvertTo-RegExportLine $Entry.ValueName $kind $raw)) + $appr + @(''))
         $k = Open-RegKey $Entry.Reg $true
         if (-not $k) { throw "clé $($Entry.Reg) inaccessible en écriture" }
         try { $k.DeleteValue($Entry.ValueName, $true) } finally { $k.Close() }
@@ -549,7 +585,8 @@ function Remove-StartupEntry($Entry) {
 $StartupDeleteClick = {
     param($s, $e)
     $r = $s.DataContext; $en = $r.Entry
-    if (-not (Confirm-Action ("Supprimer « {0} » du démarrage ?`n`n{1}`n{2}`n`nLe programme n'est pas désinstallé. Une sauvegarde .reg est conservée dans {3}." -f $en.Name, $en.Scope, $en.Command, (Get-LogPath 'Demarrage')))) {
+    $what = $(if ($en.File) { 'Le raccourci est déplacé (sauvegarde)' } else { 'Une sauvegarde .reg est conservée' })
+    if (-not (Confirm-Action ("Supprimer « {0} » du démarrage ?`n`n{1}`n{2}`n`nLe programme n'est pas désinstallé. {3} dans {4}." -f $en.Name, $en.Scope, $en.Command, $what, (Get-LogPath 'Demarrage')))) {
         return
     }
     try {
@@ -705,7 +742,8 @@ try {
 $Sync.DnsRes = $r
 '@
 function Set-DnsProvider([string]$Key) {
-    if ($Key -ne 'Auto' -and -not $DnsProviders.Contains($Key)) { return }
+    # fournisseur inconnu (ancien choix retiré, « Autre ») : erreur (avant : retour silencieux, ligne « en cours » sans fin)
+    if ($Key -ne 'Auto' -and -not $DnsProviders.Contains($Key)) { throw "serveurs DNS « $Key » inconnus de cette version." }
     if ($BgJobs.ContainsKey('Dns')) { throw 'changement de DNS déjà en cours.' }
     # poste du domaine : les contrôleurs de domaine doivent rester ses serveurs DNS (sinon ouverture de session, stratégies
     # de groupe et partages du domaine tombent en panne)

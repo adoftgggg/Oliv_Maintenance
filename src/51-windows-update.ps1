@@ -34,9 +34,10 @@ function Invoke-WuSearch($Searcher, [string]$Criteria) {
     if ($Sync.WuCancel) { throw 'recherche annulée' }
     $r
 }
-# winget : alias de l'utilisateur, sinon exécutable du paquet App Installer (contexte administrateur où l'alias manque)
+# winget : alias du compte, sinon exécutable du paquet App Installer (contexte administrateur où l'alias manque). Plus de
+# recherche par le PATH : un dossier du PATH modifiable sans élévation, placé avant WindowsApps, faisait lancer un autre
+# winget.exe en administrateur
 function Find-Winget {
-    $c = (Get-Command winget.exe -ErrorAction SilentlyContinue).Source; if ($c -and (Test-Path -LiteralPath $c)) { return $c }
     $c = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'; if (Test-Path -LiteralPath $c) { return $c }
     $pk = Get-AppxPackage -AllUsers -Name Microsoft.DesktopAppInstaller -ErrorAction SilentlyContinue | Sort-Object Version -Descending | Select-Object -First 1
     if ($pk) { $c = Join-Path $pk.InstallLocation 'winget.exe'; if (Test-Path -LiteralPath $c) { return $c } }
@@ -487,11 +488,16 @@ function Update-RebootCountdown {
     $rest = $(if ($left.TotalHours -ge 1) { '{0} h {1:00}' -f [math]::Floor($left.TotalHours), $left.Minutes } else { '{0}:{1:00}' -f [math]::Floor($left.TotalMinutes), $left.Seconds })
     $RebootUI.Text.Text = 'Redémarrage du poste dans {0} ({1})' -f $rest, $(if ($at.Date -eq [DateTime]::Today) { 'à {0:HH:mm:ss}' -f $at } else { 'le {0:dd/MM à HH:mm}' -f $at })
 }
+# code de retour de shutdown /a lu : 0 = annulé, 1116 = aucun arrêt en cours (déjà annulé ailleurs) ; autre code : le
+# redémarrage reste programmé, compte à rebours gardé et erreur affichée (avant : « annulé » annoncé dans tous les cas)
 function Stop-ScheduledReboot {
-    try {
-        Start-Process -FilePath "$env:windir\System32\shutdown.exe" -ArgumentList '/a' -WindowStyle Hidden -Wait
-    } catch {
-        Write-Ignored 'Annulation du redémarrage programmé (shutdown /a)' $_
+    $rc = -1
+    try { $rc = (Start-Process -FilePath "$env:windir\System32\shutdown.exe" -ArgumentList '/a' -WindowStyle Hidden -Wait -PassThru).ExitCode }
+    catch { Write-Ignored 'Annulation du redémarrage programmé (shutdown /a)' $_ }
+    if ($rc -notin 0, 1116) {
+        Write-UiLog ('Annulation du redémarrage programmé refusée par Windows (code {0}) : le redémarrage reste prévu.' -f $rc) 'ERROR'
+        Show-Info ("Le redémarrage programmé n'a pas pu être annulé (code $rc) : il reste prévu.`n`nEnregistrer le travail en cours.") 'Error'
+        return
     }
     $Sync.RebootAt = $null; $Sync.WuShown = $null; Save-RebootAt; Show-RebootCountdown
     Write-UiLog 'Redémarrage programmé annulé.'
@@ -499,9 +505,12 @@ function Stop-ScheduledReboot {
 }
 # Recherche Windows Update en ligne (bouton Rechercher de la carte, ou « Tout rechercher »)
 function Start-WuOnlineSearch {
-    $Sync.WuOnline = $true
+    # mode en ligne lu par Start-WuSearch : remis à sa valeur d'avant si la recherche ne démarre pas (avant : « recherche
+    # en ligne... » affiché pendant la lecture locale du démarrage)
+    $was = $Sync.WuOnline; $Sync.WuOnline = $true
     $prev = $Sync.WuPending
     if (Start-WuSearch) { $Sync.WuPrev = $prev; $Sync.WuPending = $null; $Sync.WuShown = $null; Show-WuPending; return $true }
+    $Sync.WuOnline = $was
     Write-UiLog 'Recherche Windows Update impossible pour l''instant : une recherche ou une tâche est déjà en cours.' 'WARN'
     $false
 }
@@ -650,6 +659,12 @@ function Get-WuPauseEnd {
     try { $t = [DateTime]::Parse($v, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal).ToLocalTime() } catch { return $null }
     $(if ($t -gt [DateTime]::Now) { $t } else { $null })
 }
+# suspension imposée par stratégie de groupe (HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate) : noms des valeurs
+# présentes, vide sinon
+function Get-WuPolicyPause {
+    $p = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+    (@('PauseQualityUpdates', 'PauseFeatureUpdates', 'PauseQualityUpdatesStartTime', 'PauseFeatureUpdatesStartTime') | Where-Object { $v = Get-RegValue $p $_; $null -ne $v -and "$v" -ne '' -and "$v" -ne '0' }) -join ', '
+}
 function Update-WuPauseButton {
     $b = $InfoUI.WuPauseBtn; if (-not $b) { return }
     $end = Get-WuPauseEnd
@@ -663,8 +678,11 @@ function Switch-WuPause {
         if (-not (Confirm-Action ("Reprendre les mises à jour Windows ?`n`nElles sont suspendues jusqu'au {0:dd/MM/yyyy à HH:mm}. Windows recommencera à les télécharger et les installer." -f $end))) { return }
         try {
             $k = Open-RegKey $WuPauseKey $true; if ($k) { try { foreach ($n in $WuPauseNames) { $k.DeleteValue($n, $false) } } finally { $k.Close() } }
-            if (Get-WuPauseEnd) { throw 'suspension toujours active après retrait des valeurs (stratégie de groupe ?)' }
-            Write-UiLog 'Mises à jour Windows reprises.' 'OK'; Add-SessionEvent 'Windows Update' 'Suspension des mises à jour' 'reprise' 'ok'
+            # contrôle réel : suspension imposée par stratégie (les valeurs retirées ici ne la lèvent pas). La relecture de
+            # PauseUpdatesExpiryTime, valeur qu'on vient de supprimer, réussissait toujours
+            $pol = Get-WuPolicyPause
+            if ($pol) { throw "suspension imposée par une stratégie de groupe ($pol) : elle ne se lève pas ici" }
+            Write-UiLog 'Mises à jour Windows : suspension retirée, Windows Update reprend à sa prochaine vérification.' 'OK'; Add-SessionEvent 'Windows Update' 'Suspension des mises à jour' 'reprise' 'ok'
         } catch { Write-UiLog "Reprise des mises à jour Windows impossible : $($_.Exception.Message)" 'ERROR'; Show-Info "Reprise impossible.`n`n$($_.Exception.Message)`n`nÀ faire dans Paramètres > Windows Update > Reprendre les mises à jour." 'Error' }
         Update-WuPauseButton; return
     }
@@ -683,7 +701,8 @@ function Switch-WuPause {
         $to = $d.Date.AddHours(23).AddMinutes(59).ToUniversalTime().ToString($fmt, [Globalization.CultureInfo]::InvariantCulture)
         foreach ($n in $WuPauseNames) { Set-RegValueDirect $WuPauseKey $n $(if ($n -match 'Start') { $now } else { $to }) 'String' }
         $e = Get-WuPauseEnd; if (-not $e) { throw 'valeurs écrites mais suspension non relue' }
-        Write-UiLog ('Mises à jour Windows suspendues jusqu''au {0:dd/MM/yyyy à HH:mm}.' -f $e) 'OK'; Add-SessionEvent 'Windows Update' 'Suspension des mises à jour' ('jusqu''au {0:dd/MM/yyyy}' -f $e) 'warn'
+        # valeurs de Paramètres > Windows Update relues ; prises en compte par le service à sa prochaine vérification
+        Write-UiLog ('Mises à jour Windows : suspension enregistrée jusqu''au {0:dd/MM/yyyy à HH:mm} (appliquée par Windows Update à sa prochaine vérification).' -f $e) 'OK'; Add-SessionEvent 'Windows Update' 'Suspension des mises à jour' ('jusqu''au {0:dd/MM/yyyy}' -f $e) 'warn'
     } catch { Write-UiLog "Suspension des mises à jour Windows impossible : $($_.Exception.Message)" 'ERROR'; Show-Info "Suspension impossible.`n`n$($_.Exception.Message)" 'Error' }
     Update-WuPauseButton
 }

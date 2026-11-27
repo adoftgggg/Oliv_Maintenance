@@ -136,6 +136,25 @@ $PortableRoot = Join-Path $UserProfilePath 'AppData\Local\Oliv_Maintenance\Porta
 $PortScript = @'
 $p = $Sync.PortParams; $st = $Sync.Port
 $wg = Find-Winget
+# chemin atteint par un lien (jonction, lien symbolique), lui-même ou un dossier parent
+function Test-PortLink([string]$Path) {
+    $q = $Path
+    while ($q) {
+        try { if (([IO.File]::GetAttributes($q) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true } }
+        catch [IO.FileNotFoundException] { $null = $_ } catch [IO.DirectoryNotFoundException] { $null = $_ }
+        $q = [IO.Path]::GetDirectoryName($q)
+    }
+    $false
+}
+# copie du dossier préparé vers le profil de l'utilisateur, dossier par dossier, refusée dès qu'un dossier de destination
+# est atteint par un lien : posé par l'utilisateur pendant le téléchargement, il faisait écrire l'administrateur ailleurs
+function Copy-PortTree([string]$Src, [string]$Dst) {
+    if (Test-PortLink $Dst) { throw "dossier $Dst atteint par une jonction ou un lien : copie refusée" }
+    [void][IO.Directory]::CreateDirectory($Dst)
+    if (Test-PortLink $Dst) { throw "dossier $Dst atteint par une jonction ou un lien : copie refusée" }
+    foreach ($f in [IO.Directory]::GetFiles($Src)) { [IO.File]::Copy($f, (Join-Path $Dst ([IO.Path]::GetFileName($f))), $true) }
+    foreach ($d in [IO.Directory]::GetDirectories($Src)) { Copy-PortTree $d (Join-Path $Dst ([IO.Path]::GetFileName($d))) }
+}
 $res = [Collections.Generic.List[string]]::new()
 foreach ($a in $p.Items) {
     $st.Name = $a.Name; $st.Phase = 'préparation'; $st.T0 = [DateTime]::Now
@@ -147,22 +166,28 @@ foreach ($a in $p.Items) {
         if ((Test-Path -LiteralPath $dir) -and (Get-Item -LiteralPath $dir).LastWriteTime -gt (Get-Date).AddDays(-30)) { $exe = & $find }
         if (-not $exe) {
             if (-not $wg) { throw 'winget introuvable' }
-            # dossier du profil de l'utilisateur (modifiable par lui) : suppression .NET, qui retire un lien ou une jonction sans le traverser
-            if (Test-Path -LiteralPath $dir) { [IO.Directory]::Delete($dir, $true) }
-            [void][IO.Directory]::CreateDirectory($dir)
+            # téléchargement et extraction dans le dossier protégé de l'application (écriture réservée aux administrateurs),
+            # puis copie dans le profil de l'utilisateur (il y garde les droits d'écriture : réglages à côté de l'exécutable)
+            $stg = Join-Path $p.Stage ($a.Id -replace '[^\w\.\-\+]', '_')
+            if (Test-Path -LiteralPath $stg) { [IO.Directory]::Delete($stg, $true) }
+            [void][IO.Directory]::CreateDirectory($stg)
             $st.Phase = 'téléchargement'
             # programme portable, sinon archive zip (exécutable portable à l'intérieur)
             $out = $null; $rc = 1
             foreach ($t in 'portable', 'zip') {
-                $out = & $wg download --id $a.Id -e --source winget --installer-type $t -d $dir --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1
+                $out = & $wg download --id $a.Id -e --source winget --installer-type $t -d $stg --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1
                 $rc = $LASTEXITCODE; if ($rc -eq 0) { break }
             }
             if ($rc -ne 0) { throw ('winget download, code 0x{0:X8} : {1}' -f $rc, ((@($out) | ForEach-Object { "$_".Trim() } | Where-Object { $_ -and $_ -notmatch '^[-\\|/ ]+$' } | Select-Object -Last 2) -join ' ')) }
-            foreach ($z in @(Get-ChildItem -LiteralPath $dir -Filter *.zip -File)) {
+            foreach ($z in @(Get-ChildItem -LiteralPath $stg -Filter *.zip -File)) {
                 $st.Phase = 'extraction'
-                Expand-Archive -LiteralPath $z.FullName -DestinationPath (Join-Path $dir 'app') -Force
+                Expand-Archive -LiteralPath $z.FullName -DestinationPath (Join-Path $stg 'app') -Force
                 Remove-Item -LiteralPath $z.FullName -Force
             }
+            $st.Phase = 'copie'
+            # ancienne copie du profil : suppression .NET, qui retire un lien ou une jonction sans le traverser
+            if (Test-Path -LiteralPath $dir) { [IO.Directory]::Delete($dir, $true) }
+            try { Copy-PortTree $stg $dir } finally { try { [IO.Directory]::Delete($stg, $true) } catch { $null = $_ } }
             (Get-Item -LiteralPath $dir).LastWriteTime = Get-Date
             $exe = & $find
             if (-not $exe) { throw "$($a.Exe) absent du téléchargement" }
@@ -179,7 +204,7 @@ function Invoke-AppsPortable {
     if ($Sync.PortRunning) { return }
     $items = @(foreach ($id in @($AppsUI.Sel)) { if ($AppPortable.Contains("$id")) { @{ Id = "$id"; Name = "$($AppsUI.Tiles["$id"].A[0])"; Exe = $AppPortable["$id"] } } })
     if (-not $items.Count) { return }
-    $Sync.PortParams = @{ Items = $items; Root = $PortableRoot }; $Sync.Port = [hashtable]::Synchronized(@{ Name = ''; Phase = ''; T0 = [DateTime]::Now; Res = $null })
+    $Sync.PortParams = @{ Items = $items; Root = $PortableRoot; Stage = (Join-Path $GameDir 'Portables') }; $Sync.Port = [hashtable]::Synchronized(@{ Name = ''; Phase = ''; T0 = [DateTime]::Now; Res = $null })
     $Sync.PortRunning = $true; Update-AppsSelection
     Write-UiLog ('Ouverture en version portable : {0}.' -f (($items | ForEach-Object { $_.Name }) -join ', ')) 'APP'
     Start-BgJob 'Port' $PortScript
@@ -321,7 +346,7 @@ function Update-AppsFilter {
         $n = 0
         foreach ($t in $sec.Children[1].Children) {
             $a = $t.Tag.A
-            $show = (-not $AppsUI.Cat -or $AppsUI.Cat -eq $sec.Tag) -and (-not $q -or "$($a[0])" -like "*$q*" -or "$($a[1])" -like "*$q*" -or "$($a[3])" -like "*$q*")
+            $show = (-not $AppsUI.Cat -or $AppsUI.Cat -eq $sec.Tag) -and (-not $q -or (Test-TextHas "$($a[0])" $q) -or (Test-TextHas "$($a[1])" $q) -or (Test-TextHas "$($a[3])" $q))
             $t.Visibility = $(if ($show) { 'Visible' } else { 'Collapsed' }); if ($show) { $n++ }
         }
         $sec.Visibility = $(if ($n) { 'Visible' } else { 'Collapsed' })

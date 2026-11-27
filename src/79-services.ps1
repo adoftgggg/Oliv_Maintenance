@@ -257,7 +257,7 @@ function Test-SvcVisible($S, [string]$Q) {
     if ($SvcUI.Scope -eq 'Other' -and $S.Ms) { return $false }
     if ($SvcUI.Scope -eq 'Ms' -and -not $S.Ms) { return $false }
     if ($SvcUI.RunOnly -and $S.State -ne 'Running') { return $false }
-    -not $Q -or $S.Disp -like "*$Q*" -or $S.Name -like "*$Q*" -or $S.Co -like "*$Q*"
+    -not $Q -or (Test-TextHas "$($S.Disp)" $Q) -or (Test-TextHas "$($S.Name)" $Q) -or (Test-TextHas "$($S.Co)" $Q)
 }
 function Update-SvcList {
     $d = $SvcUI.Data; if (-not $d) { return }
@@ -310,7 +310,9 @@ function Invoke-SvcAction([string]$Name, [string]$Op) {
             if (-not (Confirm-Action $m)) { return }
         }
         'disable' {
-            if (-not (Confirm-Action ("Désactiver le service $who ?`n`nIl est arrêté et ne démarre plus, même au démarrage de Windows. Réactivable ici (type de démarrage actuel mémorisé : {0})." -f $SvcStartText[$S.Start] + $warn))) { return }
+            # dépendants en cours : arrêtés aussi par Stop-Service -Force, nommés comme pour « Arrêter »
+            $dep = @(); try { $dep = @((Get-Service -Name $Name -ErrorAction Stop).DependentServices | Where-Object { $_.Status -eq 'Running' } | ForEach-Object { $_.DisplayName }) } catch { Write-Ignored 'Services dépendants' $_ }
+            if (-not (Confirm-Action (("Désactiver le service $who ?`n`nIl est arrêté et ne démarre plus, même au démarrage de Windows. Réactivable ici (type de démarrage actuel mémorisé : {0})." -f $SvcStartText[$S.Start]) + $(if ($dep.Count) { "`n`nServices dépendants arrêtés aussi : " + ($dep -join ', ') + '.' } else { '' }) + $warn))) { return }
             Save-SvcSavedStart $Name $(switch ($S.Start) { 'Auto' { 'auto' } 'Delayed' { 'delayed-auto' } default { 'demand' } })
         }
         'enable' { $start = Get-SvcSavedStart $Name }
@@ -334,6 +336,8 @@ $BgJobDone['SvcAct'] = {
     $b = $SvcUI.Busy; $SvcUI.Busy = $null; if ($SvcUI.Timer) { $SvcUI.Timer.Stop() }
     $Ui.SvcProg.Visibility = 'Collapsed'; $Ui.SvcRefresh.IsEnabled = $true
     $r = $Sync.SvcActRes
+    # tâche de fond terminée sans résultat (runspace en erreur) : échec affiché (avant : état « en cours » effacé sans message)
+    if ($b -and -not $r) { $r = @{ Ok = $false; Msg = 'action interrompue sans résultat (tâche de fond en erreur)' } }
     if ($b -and $r) {
         $row = $SvcUI.Rows[$b.Name]
         if ($row -and $r.State) { $row.Row.DataContext.State = $r.State; $row.Row.DataContext.Start = $r.Start; $row.Row.DataContext.Stop = $r.Stop }

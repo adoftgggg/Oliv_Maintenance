@@ -22,9 +22,15 @@ function Get-InstalledKey([string]$Partial) {
     } catch { $null = $_ }
     $null
 }
+# licence de Windows retenue : compléments écartés (clé ESU... : même application, clé partielle présente), puis produit
+# activé (LicenseStatus 1) en premier. Avant, le tri croissant plaçait un complément « non activé » (0) avant Windows activé
+function Select-WinLicense($Products) {
+    $base = @($Products | Where-Object { $_ -and -not $_.LicenseIsAddon }); if (-not $base.Count) { $base = @($Products | Where-Object { $_ }) }
+    @($base | Sort-Object @{ Expression = { [int]([int]$_.LicenseStatus -ne 1) } }, @{ Expression = { [int]$_.LicenseStatus } })[0]
+}
 $r = @{}
 try {
-    $p = @(Get-CimInstance SoftwareLicensingProduct -Filter "ApplicationID='55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL" -ErrorAction Stop | Sort-Object LicenseStatus)[0]
+    $p = Select-WinLicense @(Get-CimInstance SoftwareLicensingProduct -Filter "ApplicationID='55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL" -ErrorAction Stop)
     if ($p) { $r.Name = "$($p.Name)"; $r.Desc = "$($p.Description)"; $r.Status = [int]$p.LicenseStatus; $r.Partial = "$($p.PartialProductKey)"; $r.Grace = [int]$p.GracePeriodRemaining; $r.Family = "$($p.LicenseFamily)" }
     $s = Get-CimInstance SoftwareLicensingService -ErrorAction Stop
     $r.Oa3 = "$($s.OA3xOriginalProductKey)".Trim(); $r.Oa3Desc = "$($s.OA3xOriginalProductKeyDescription)"

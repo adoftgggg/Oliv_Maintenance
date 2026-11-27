@@ -11,7 +11,10 @@ try {
         foreach ($m in @($grp.psbase.Invoke('Members'))) {
             try { $sid = [Security.Principal.SecurityIdentifier]::new([byte[]]$m.GetType().InvokeMember('objectSid', 'GetProperty', $null, $m, $null), 0); $adm[$sid.Value] = 1 } catch { $null = $_ }
         }
-    } catch { $null = $_ }
+    } catch { $r.AdmError = $_.Exception.Message }
+    # groupe illisible ou vide (un poste a toujours au moins un membre) : type des comptes inconnu, actions qui retirent des
+    # droits ou un compte bloquées par l'interface (sinon le dernier administrateur pouvait être désactivé ou supprimé)
+    if (-not $adm.Count -and -not $r.AdmError) { $r.AdmError = 'aucun membre lu' }
     foreach ($u in @(Get-LocalUser -ErrorAction Stop)) {
         $sid = "$($u.SID.Value)"; if ($sid -match '-(503|504)$') { continue }
         $r.Items += [pscustomobject]@{ Name = "$($u.Name)"; Full = "$($u.FullName)"; Desc = "$($u.Description)"; Enabled = [bool]$u.Enabled; Sid = $sid; Admin = $adm.ContainsKey($sid)
@@ -32,6 +35,11 @@ function Update-AccCard($R) {
     $items = @($(if ($R) { $R.Items }) | Sort-Object @{ E = { -not $_.Enabled } }, @{ E = { $_.Builtin } }, Name)
     if (-not $items.Count) { $t = New-Text $(if ($R -and $R.Error) { "Comptes illisibles : $($R.Error)" } else { 'Aucun compte local.' }) 'Muted'; $t.Margin = New-Thickness 38 0 10 12; [void]$b.Children.Add($t) }
     $ToolsUI.AccAdmins = @($items | Where-Object { $_.Admin -and $_.Enabled }).Count
+    $ToolsUI.AccAdmUnknown = [bool]($R -and $R.AdmError)
+    if ($ToolsUI.AccAdmUnknown) {
+        $w = New-Text "Membres du groupe Administrateurs illisibles ($($R.AdmError)) : type des comptes inconnu, conversion en compte standard, désactivation et suppression bloquées. Actualiser pour relire."
+        $w.TextWrapping = 'Wrap'; $w.Margin = New-Thickness 46 0 18 8; $w.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'WarnFgBrush'); [void]$b.Children.Add($w)
+    }
     foreach ($a in $items) {
         $me = $a.Sid -in $UserSid, $AccSelf
         $sub = @($(if ($a.Admin) { 'Compte administrateur' } else { 'Compte utilisateur standard' }), $(if ($a.Ms) { 'compte Microsoft' } elseif ($a.Builtin) { 'compte intégré' } else { 'compte local' }),
@@ -47,13 +55,13 @@ function Update-AccCard($R) {
     [void]$b.Children.Add((New-ToolBar $btns))
 }
 function Show-AccMenu($Btn) {
-    $a = $Btn.Tag; $me = $a.Sid -in $UserSid, $AccSelf; $lastAdm = $a.Admin -and $a.Enabled -and $ToolsUI.AccAdmins -le 1
+    $a = $Btn.Tag; $me = $a.Sid -in $UserSid, $AccSelf; $lastAdm = ($a.Admin -and $a.Enabled -and $ToolsUI.AccAdmins -le 1) -or $ToolsUI.AccAdmUnknown
     $cm = [Windows.Controls.ContextMenu]::new()
     $add = { param([string]$T, [string]$Op, [bool]$On, [string]$Why)
         $mi = [Windows.Controls.MenuItem]::new(); $mi.Header = $T; $mi.Tag = @{ A = $a; Op = $Op }; $mi.IsEnabled = $On
         if (-not $On -and $Why) { $mi.ToolTip = $Why; [Windows.Controls.ToolTipService]::SetShowOnDisabled($mi, $true) }
         $mi.Add_Click({ param($s, $e) Invoke-AccAction $s.Tag.A $s.Tag.Op }); [void]$cm.Items.Add($mi) }
-    $why = $(if ($me) { 'Compte en cours d''utilisation' } elseif ($lastAdm) { 'Dernier administrateur actif du PC' } else { '' })
+    $why = $(if ($me) { 'Compte en cours d''utilisation' } elseif ($ToolsUI.AccAdmUnknown) { 'Membres du groupe Administrateurs illisibles : action bloquée' } elseif ($lastAdm) { 'Dernier administrateur actif du PC' } else { '' })
     if ($a.Admin) { & $add 'Convertir en compte utilisateur standard' 'std' (-not $me -and -not $lastAdm -and -not ($a.Sid -match '-500$')) $why } else { & $add 'Convertir en compte administrateur' 'adm' $true '' }
     if ($a.Enabled) { & $add 'Désactiver le compte' 'off' (-not $me -and -not $lastAdm) $why } else { & $add 'Activer le compte' 'on' $true '' }
     & $add 'Changer le mot de passe...' 'pwd' (-not $a.Ms) 'Compte Microsoft : mot de passe à changer sur account.microsoft.com'

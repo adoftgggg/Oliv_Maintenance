@@ -18,6 +18,12 @@ function Test-SoftDirSpecific([string]$Dir) {
     foreach ($r in $roots) { if ($d -ieq $r -or $r.StartsWith($d + '\', [StringComparison]::OrdinalIgnoreCase)) { return $false } }
     $true
 }
+# dossier situé dans le profil de l'utilisateur ciblé
+function Test-SoftDirInProfile([string]$Dir) {
+    $prof = "$UserProfilePath".TrimEnd('\'); if (-not $prof -or -not $Dir) { return $false }
+    try { $d = [IO.Path]::GetFullPath($Dir).TrimEnd('\') } catch { return $false }
+    $d.StartsWith($prof + '\', [StringComparison]::OrdinalIgnoreCase)
+}
 function Get-SoftInstallDir($App) {
     $dirs = [Collections.Generic.List[string]]::new()
     foreach ($root in 'HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall') {
@@ -32,6 +38,9 @@ function Get-SoftInstallDir($App) {
                     $d = [Environment]::ExpandEnvironmentVariables($d).TrimEnd('\')
                     # dossiers trop généraux écartés : sinon tout programme lancé depuis ce dossier est fermé de force avant
                     # l'installeur (entrée de désinstallation mal renseignée pointant sur System32 ou AppData\Local...)
+                    # entrée du profil (HKCU, modifiable sans élévation) : dossier retenu seulement dans le profil, sinon une
+                    # entrée de même nom désignait un dossier tiers (antivirus...) dont les programmes étaient fermés de force
+                    if ($root.StartsWith('HKCU') -and -not (Test-SoftDirInProfile $d)) { continue }
                     if ((Test-SoftDirSpecific $d) -and (Test-Path -LiteralPath $d)) { $dirs.Add($d + '\') }
                 } finally { $sk.Close() }
             }
@@ -98,13 +107,14 @@ function Remove-SoftOrphan($Items) {
     foreach ($a in $sel) {
         $file = Join-Path $dir ('{0:yyyyMMdd-HHmmss}_{1}.reg' -f (Get-Date), (("$($a.Name)" -replace '[^\w\-]+', '_').Trim('_')))
         try {
-            # HKCU = ruche de l'utilisateur ciblé (HKU\<SID>) et non celle du compte administrateur qui a élevé l'application :
-            # avant, export et suppression visaient le mauvais compte (rien supprimé, mais « retirée » affiché)
-            $rk = $(if ($a.RegKey -like 'HKCU\*' -and $HkuSidOk) { "HKU\$UserSid\" + $a.RegKey.Substring(5) } else { $a.RegKey })
+            # HKCU = ruche du compte qui exécute l'application : c'est celle que winget (Get-WinGetPackage, processus élevé) a
+            # inventoriée et où l'entrée a été jugée orpheline (87a). Avant, la suppression visait la ruche de l'utilisateur
+            # ciblé : avec un administrateur différent, une clé de même nom, non orpheline, pouvait y être supprimée
+            $rk = $(if ($a.RegKey -like 'HKCU\*') { 'HKU\{0}\{1}' -f $AccSelf, $a.RegKey.Substring(5) } else { $a.RegKey })
             $out = & "$env:windir\System32\reg.exe" export $rk $file /y 2>&1
             if ($LASTEXITCODE -ne 0) { throw "sauvegarde impossible : $((@($out) -join ' ').Trim())" }
-            Remove-RegKey $(if ($rk -like 'HKU\*') { $rk } else { $a.RegKey })
-            if (Test-RegKey $(if ($rk -like 'HKU\*') { $rk } else { $a.RegKey })) { throw 'clé toujours présente après suppression (droits ?)' }
+            Remove-RegKey $rk
+            if (Test-RegKey $rk) { throw 'clé toujours présente après suppression (droits ?)' }
             $done.Add("$($a.Id)")
             Write-UiLog ('Entrée orpheline retirée : {0} ({1}), sauvegarde {2}' -f $a.Name, $a.RegKey, $file) 'OK'
             Add-SessionEvent 'Logiciels' $a.Name 'entrée orpheline retirée' 'ok'

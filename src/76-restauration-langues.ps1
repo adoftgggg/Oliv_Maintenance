@@ -10,7 +10,8 @@ function Show-RestorePointMenu($Btn) {
     $cm = [Windows.Controls.ContextMenu]::new()
     foreach ($p in $pts) {
         $d = [Management.ManagementDateTimeConverter]::ToDateTime($p.CreationTime)
-        $mi = [Windows.Controls.MenuItem]::new(); $mi.Header = '{0:dd/MM/yyyy HH:mm}  ·  {1}' -f $d, $p.Description
+        # libellé dans un TextBlock : en texte brut, WPF prenait le 1er « _ » de la description pour une touche d'accès et le masquait
+        $mi = [Windows.Controls.MenuItem]::new(); $ht = [Windows.Controls.TextBlock]::new(); $ht.Text = '{0:dd/MM/yyyy HH:mm}  ·  {1}' -f $d, $p.Description; $mi.Header = $ht
         $mi.Tag = @{ Seq = [uint32]$p.SequenceNumber; Date = $d; Desc = "$($p.Description)" }
         $mi.Add_Click({ param($s, $e) Restore-ToPoint $s.Tag }); [void]$cm.Items.Add($mi)
     }
@@ -24,7 +25,15 @@ function Restore-ToPoint($P) {
         $r = Invoke-CimMethod -Namespace 'root/default' -ClassName SystemRestore -MethodName Restore -Arguments @{ SequenceNumber = $P.Seq } -ErrorAction Stop
         if ([int]$r.ReturnValue -ne 0) { throw ('SystemRestore.Restore a renvoyé {0}' -f $r.ReturnValue) }
         Write-UiLog ('Restauration système vers le point du {0:dd/MM/yyyy HH:mm} ({1}) : redémarrage dans 10 s.' -f $P.Date, $P.Desc) 'WARN'
-        & "$env:windir\System32\shutdown.exe" /r /t 10 /c 'Oliv_Maintenance : restauration du système au redémarrage' | Out-Null
+        # redémarrage déjà programmé (1190, Request-Reboot...) : annulé puis reprogrammé à 10 s ; échec : l'utilisateur est
+        # prévenu (la restauration, déjà armée, partirait sinon à un redémarrage ultérieur sans qu'il le sache)
+        $sd = "$env:windir\System32\shutdown.exe"; $rsn = 'Oliv_Maintenance : restauration du système au redémarrage'
+        & $sd /r /t 10 /c $rsn | Out-Null; $rc = $LASTEXITCODE
+        if ($rc -eq 1190) { & $sd /a | Out-Null; Start-Sleep -Milliseconds 300; & $sd /r /t 10 /c $rsn | Out-Null; $rc = $LASTEXITCODE }
+        if ($rc -ne 0) {
+            Write-UiLog ('Restauration système armée, mais redémarrage refusé par Windows (code {0}) : redémarrer le poste pour la lancer.' -f $rc) 'ERROR'
+            Show-Info ("La restauration est prête, mais Windows a refusé de redémarrer le poste (code $rc).`n`nEnregistrer le travail en cours puis redémarrer le poste : la restauration se lance au redémarrage.") 'Warn'
+        }
     } catch { Write-UiLog "Restauration système impossible : $($_.Exception.Message)" 'ERROR'; Show-Info "Restauration impossible : $($_.Exception.Message)" 'Error' }
 }
 
@@ -52,6 +61,8 @@ function Get-KlidName([string]$Klid) {
     if (-not $n) { $n = "$(Get-RegValue $k 'Layout Text')" }
     $(if ($n) { $n } else { "clavier $Klid" })
 }
+# clavier proposé au retrait : plus d'un clavier sur le poste, et jamais le dernier de la langue principale (indice 0)
+function Test-KeyboardRemovable([int]$LangIndex, [int]$LangKb, [int]$TotalKb) { $TotalKb -gt 1 -and -not ($LangIndex -eq 0 -and $LangKb -le 1) }
 function New-LangCard {
     $c = New-Card 'Langues et claviers' '' ([string][char]0xE775)
     $LangUI.Body = [Windows.Controls.StackPanel]::new(); $LangUI.Body.Margin = New-Thickness 38 0 10 8
@@ -88,7 +99,9 @@ function Update-LangCard {
             foreach ($w in '*', 'Auto') { $cd = [Windows.Controls.ColumnDefinition]::new(); $cd.Width = $(if ($w -eq '*') { [Windows.GridLength]::new(1, 'Star') } else { [Windows.GridLength]::Auto }); [void]$kg.ColumnDefinitions.Add($cd) }
             $kt = New-Text ('Clavier  ' + (Get-KeyboardName $tip)) 'Muted'; $kt.VerticalAlignment = 'Center'; $kt.ToolTip = $tip
             [void]$kg.Children.Add($kt)
-            if ($nKb -gt 1) {
+            # langue principale : son dernier clavier n'est pas proposé au retrait (il emportait la langue, la langue
+            # d'affichage préférée passait à la suivante)
+            if (Test-KeyboardRemovable $i @($l.InputMethodTips).Count $nKb) {
                 $kb = [Windows.Controls.Button]::new(); $kb.Style = $Window.FindResource('IconBtn'); $kb.Content = [string][char]0xE711; $kb.Width = 28; $kb.Height = 24
                 $kb.ToolTip = 'Retirer ce clavier'; $kb.Tag = @{ L = "$($l.LanguageTag)"; T = "$tip" }
                 $kb.Add_Click({ param($s, $e) Remove-UserLanguage $s.Tag.L $s.Tag.T })
@@ -245,6 +258,9 @@ function Remove-UserLanguage([string]$Tag, $Tip) {
     try {
         $list = Get-WinUserLanguageList -ErrorAction Stop
         $l = @($list | Where-Object { $_.LanguageTag -eq $Tag })[0]; if (-not $l) { return }
+        if ($l.LanguageTag -eq $list[0].LanguageTag -and (-not $Tip -or @($l.InputMethodTips).Count -le 1)) {
+            Show-Info 'La langue principale et son dernier clavier ne peuvent pas être retirés : changer d''abord de langue principale dans Paramètres > Heure et langue.' 'Warn'; return
+        }
         $what = $(if ($Tip) { 'le clavier « {0} »' -f (Get-KeyboardName $Tip) } else { 'la langue « {0} » et ses claviers' -f $l.Autonym })
         if (-not (Confirm-Action "Retirer $what ?`n`nSe rajoute à tout moment dans Paramètres > Heure et langue.")) { return }
         if ($Tip) { [void]$l.InputMethodTips.Remove($Tip); if (-not $l.InputMethodTips.Count) { [void]$list.Remove($l) } }

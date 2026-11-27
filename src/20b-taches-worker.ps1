@@ -2,8 +2,10 @@
 $WorkerScript += "`n" + @'
 function Invoke-Task_SfcVerify   { Invoke-SfcRun '/verifyonly' }
 function Invoke-Task_Sfc         { Invoke-SfcRun '/scannow' }
+# code de retour de « fsutil dirty set » lu (avant : succès annoncé même en cas d'échec)
 function Invoke-Task_ChkBoot {
-    [void](Invoke-Native "$env:windir\System32\fsutil.exe" @('dirty', 'set', $SysDrive))
+    $rc = Invoke-Native "$env:windir\System32\fsutil.exe" @('dirty', 'set', $SysDrive)
+    if ($rc -ne 0) { if (-not $Sync.Aborted) { Write-TaskLog ('CHKDSK non programmé : fsutil dirty set a échoué (code {0}).' -f $rc) 'ERROR' }; return }
     [void](Invoke-Native "$env:windir\System32\fsutil.exe" @('dirty', 'query', $SysDrive))
     Write-TaskLog 'CHKDSK /F (autochk) s''exécutera au prochain redémarrage.' 'OK'
 }
@@ -196,6 +198,8 @@ function Invoke-Task_TimeSync {
         Start-Sleep -Seconds 3
         $rc = Invoke-Native $w32 @('/resync')
     }
+    # interruption par l'utilisateur : sortie sans message (« Interrompu » est déjà au journal), pas de faux diagnostic réseau
+    if ($Sync.Aborted) { return }
     if ($rc -ne 0) { Write-TaskLog 'Heure non synchronisée : source de temps injoignable (réseau, pare-feu UDP 123 ou serveur de temps).' 'ERROR'; return }
     # écart restant avec la source (1 mesure) ; source locale ou illisible : pas de mesure
     $peer = ($src -replace ',0x[0-9a-f]+$', '').Trim()
@@ -316,7 +320,10 @@ function Invoke-Task_Optimize {
         $pd = Get-PhysicalDisk | Where-Object { $_.DeviceId -eq "$n" }
         Write-TaskLog "Disque $n - type de support : $(V $pd.MediaType)"
     } catch {}
-    Optimize-Volume -DriveLetter $SysLetter -Verbose 4>&1 | ForEach-Object { Write-TaskLog "$_" 'OUT' }
-    Write-TaskLog 'Optimisation terminée.' 'OK'
+    # erreurs d'Optimize-Volume (non bloquantes par défaut) lues : avant, « Optimisation terminée » en OK dans tous les cas
+    try {
+        Optimize-Volume -DriveLetter $SysLetter -Verbose -ErrorAction Stop 4>&1 | ForEach-Object { Write-TaskLog "$_" 'OUT' }
+        Write-TaskLog 'Optimisation terminée.' 'OK'
+    } catch { Write-TaskLog "Optimisation impossible : $($_.Exception.Message)" 'ERROR' }
 }
 '@

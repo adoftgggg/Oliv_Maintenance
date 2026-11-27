@@ -48,7 +48,9 @@ if ($Mode -eq 'on') {
                      GpuPriority = (Get-V $mg 'GPU Priority'); Priority = (Get-V $mg 'Priority'); SchedCat = (Get-V $mg 'Scheduling Category'); SfioPriority = (Get-V $mg 'SFIO Priority')
                      Stopped = @($svcs | Where-Object { "$((Get-Service -Name $_ -ErrorAction SilentlyContinue).Status)" -eq 'Running' }) }
     [void][IO.Directory]::CreateDirectory($dir)
-    ConvertTo-Json -InputObject $b | Set-Content -LiteralPath $sf -Encoding UTF8
+    # valeurs d'avant écrites d'un coup (fichier temporaire puis renommage) : jamais un fichier tronqué
+    ConvertTo-Json -InputObject $b | Set-Content -LiteralPath "$sf.tmp" -Encoding UTF8
+    Move-Item -LiteralPath "$sf.tmp" -Destination $sf -Force
     $done = @()
     try {
     if (-not $NoPower) {
@@ -76,7 +78,10 @@ if ($Mode -eq 'on') {
 }
 # off : valeurs d'avant remises à l'identique
 if (-not $on) { return 'déjà désactivé' }
-$b = Get-Content -LiteralPath $sf -Raw | ConvertFrom-Json
+# valeurs d'avant illisibles (fichier vide ou corrompu) : rien n'est restauré. Avant, un fichier vide donnait des valeurs
+# nulles et la restauration supprimait les réglages de la souris, du mode jeu de Windows et de la planification GPU
+$b = $null; try { $b = Get-Content -LiteralPath $sf -Raw | ConvertFrom-Json } catch { $b = $null }
+if (-not $b -or -not $b.Since) { throw "valeurs d'avant illisibles ($sf) : rien n'a été restauré. Réglages à remettre à la main, puis supprimer ce fichier pour désactiver le mode jeu." }
 if (-not $b.NoPower -and $b.Plan) { [void](Invoke-Pc @('/setactive', $b.Plan)) }
 if (-not $b.NoHags) { Set-V $gd 'HwSchMode' $b.HwSchMode 'DWord' }
 Set-V $ms 'MouseSpeed' $b.MouseSpeed 'String'; Set-V $ms 'MouseThreshold1' $b.MouseThreshold1 'String'; Set-V $ms 'MouseThreshold2' $b.MouseThreshold2 'String'
@@ -167,11 +172,14 @@ function New-GameShortcut {
         $desk = $(if ($dk) { $dk -replace '(?i)%USERPROFILE%', $UserProfilePath } else { Join-Path $UserProfilePath 'Desktop' })
         $desk = [Environment]::ExpandEnvironmentVariables($desk)
         $sh = New-Object -ComObject WScript.Shell
+        # ruche de l'utilisateur ciblé passée au script : élevé avec les identifiants d'un administrateur (compte standard),
+        # HKCU était celle de l'administrateur (souris et GameBar réglées et restaurées sur le mauvais compte)
+        $ur = $(if ($HkuSidOk) { ' -UserRoot "Registry::HKEY_USERS\{0}"' -f $UserSid } else { '' })
         foreach ($m in 'on', 'off') {
             $f = Join-Path $desk ('Mode jeu {0}.lnk' -f $m.ToUpper())
             $l = $sh.CreateShortcut($f)
             $l.TargetPath = "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe"
-            $l.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Mode {1}' -f $GameScriptFile, $m
+            $l.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Mode {1}{2}' -f $GameScriptFile, $m, $ur
             $l.IconLocation = "$ico,0"; $l.Description = $(if ($m -eq 'on') { 'Oliv_Maintenance : activer le mode jeu' } else { 'Oliv_Maintenance : désactiver le mode jeu' })
             $l.WindowStyle = 7; $l.Save()
             $by = [IO.File]::ReadAllBytes($f); $by[0x15] = $by[0x15] -bor 0x20; [IO.File]::WriteAllBytes($f, $by)

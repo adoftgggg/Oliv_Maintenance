@@ -15,12 +15,29 @@ function Read-HostsPart {
     }
 }
 # contenu hors bloc de blocage, et bloc (lignes) séparés
+# Repère de fin absent (retiré à la main) : avant, tout ce qui suivait le repère de début était classé dans le bloc, et les
+# entrées personnelles placées après étaient effacées par « Retirer l'ancien blocage ». Bloc limité alors au repère et aux
+# lignes qui suivent jusqu'à la dernière ligne « 0.0.0.0 ... » (commentaires et lignes vides du milieu de la liste compris),
+# avant la première entrée qui n'est pas un blocage ; le reste est gardé.
 function Split-HostsContent([string]$Text) {
-    $own = [Collections.Generic.List[string]]::new(); $blk = [Collections.Generic.List[string]]::new(); $in = $false
-    foreach ($l in ($Text -split "`r?`n")) {
-        if ($l.StartsWith($HostsMarkA)) { $in = $true; [void]$blk.Add($l); continue }
-        if ($in) { [void]$blk.Add($l); if ($l.StartsWith($HostsMarkB)) { $in = $false }; continue }
-        [void]$own.Add($l)
+    $own = [Collections.Generic.List[string]]::new(); $blk = [Collections.Generic.List[string]]::new()
+    $ls = @($Text -split "`r?`n"); $i = 0
+    while ($i -lt $ls.Count) {
+        $l = $ls[$i]
+        if (-not $l.StartsWith($HostsMarkA)) { [void]$own.Add($l); $i++; continue }
+        $end = -1; for ($j = $i + 1; $j -lt $ls.Count; $j++) { if ($ls[$j].StartsWith($HostsMarkB)) { $end = $j; break } }
+        if ($end -lt 0) {
+            $last = $i
+            for ($j = $i + 1; $j -lt $ls.Count; $j++) {
+                $t = $ls[$j].Trim()
+                # en-tête de la liste (localhost, broadcasthost, ip6-...) : traversé sans fin du bloc
+                if ($t -match '^0\.0\.0\.0\s') { $last = $j }
+                elseif ($t -and -not $t.StartsWith('#') -and $t -notmatch '^\S+\s+(localhost(\.localdomain)?|local|broadcasthost|ip6-\S+)\s*$') { break }
+            }
+            $end = $last
+        }
+        for ($j = $i; $j -le $end; $j++) { [void]$blk.Add($ls[$j]) }
+        $i = $end + 1
     }
     @{ Own = (($own -join "`r`n").TrimEnd()); Block = @($blk) }
 }

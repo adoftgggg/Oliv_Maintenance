@@ -72,7 +72,9 @@ namespace _OlivM
                     catch (UnauthorizedAccessException) { if (k >= 40) throw; System.Threading.Thread.Sleep(100); }
                 }
                 // restes (anciens fichiers, sous-dossiers) : supprimés s'ils ne sont pas en cours d'utilisation
-                foreach (string f in Directory.GetFiles(app)) { if (!string.Equals(f, ps1, StringComparison.OrdinalIgnoreCase)) { try { File.Delete(f); } catch { } } }
+                // fichier temporaire d'un autre lancement encore en cours (Oliv_Maintenance.<PID>.tmp, processus vivant) gardé :
+                // supprimé avant son File.Replace, il faisait échouer cet autre lancement (« Lancement impossible »)
+                foreach (string f in Directory.GetFiles(app)) { if (!string.Equals(f, ps1, StringComparison.OrdinalIgnoreCase) && !IsLiveTmp(f)) { try { File.Delete(f); } catch { } } }
                 foreach (string d in Directory.GetDirectories(app)) { try { Directory.Delete(d, true); } catch { } }
 
                 string sys32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
@@ -121,19 +123,28 @@ namespace _OlivM
             catch { return false; }
         }
 
+        // fichier temporaire « Oliv_Maintenance.<PID>.tmp » d'un processus encore en cours
+        static bool IsLiveTmp(string file)
+        {
+            string n = Path.GetFileName(file);
+            if (!n.StartsWith("Oliv_Maintenance.", StringComparison.OrdinalIgnoreCase) || !n.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) return false;
+            int pid;
+            if (!int.TryParse(n.Substring(17, n.Length - 21), out pid) || pid == Process.GetCurrentProcess().Id) return false;
+            try { using (Process p = Process.GetProcessById(pid)) { return !p.HasExited; } } catch { return false; }
+        }
+
+        // sorties non redirigées (console masquée du programme) : avant, stdout lu jusqu'au bout avant stderr ; plus de 4 Ko
+        // d'erreurs (takeown /R, icacls /T sur beaucoup de fichiers) bloquaient le programme et le lanceur indéfiniment.
+        // Entrée fermée : aucune question (takeown) ne peut attendre une réponse.
         static void Run(string exe, string args)
         {
             ProcessStartInfo psi = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), exe), args);
             psi.UseShellExecute = false;
             psi.CreateNoWindow = true;
             psi.RedirectStandardInput = true;
-            psi.RedirectStandardOutput = true;
-            psi.RedirectStandardError = true;
             using (Process p = Process.Start(psi))
             {
                 p.StandardInput.Close();
-                p.StandardOutput.ReadToEnd();
-                p.StandardError.ReadToEnd();
                 p.WaitForExit();
             }
         }

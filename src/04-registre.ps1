@@ -104,28 +104,33 @@ function Write-PolFile([string]$File, $List) {
                 throw "vérification : entrée $($x + 1) différente après écriture"
             }
         }
-        [IO.File]::Copy($tmp, $File, $true)
+        # substitution d'un coup (File.Replace, droits du fichier conservés) : une coupure ne laisse jamais un Registry.pol tronqué
+        if ([IO.File]::Exists($File)) { [IO.File]::Replace($tmp, $File, [NullString]::Value) } else { [IO.File]::Move($tmp, $File) }
     } finally { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }
 }
-# Sauvegarde datée de Registry.pol et gpt.ini avant toute modification (20 dernières conservées)
+# Sauvegarde de Registry.pol et gpt.ini avant toute modification :
+# - 1re sauvegarde gardée une fois pour toutes (Registry_origine.pol, gpt_origine.ini : état avant la 1re modification
+#   depuis la version 1.19.5, avant toute modification sur un poste neuf), jamais purgée ni écrasée ;
+# - copies datées à la milliseconde, jamais écrasées (deux écritures dans la même seconde écrasaient l'original par le
+#   fichier déjà modifié), 20 dernières conservées.
 function Backup-LocalPolicy([string]$Pol, [string]$Ini) {
     $ErrorActionPreference = 'Stop'
     $bk = Join-Path (Get-LogPath 'Etat') 'gpo-sauvegarde'
     [void][IO.Directory]::CreateDirectory($bk)
-    $stamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+    $stamp = '{0:yyyyMMdd-HHmmss-fff}' -f (Get-Date)
     $saved = @()
-    if (Test-Path -LiteralPath $Pol) {
-        $d = Join-Path $bk "Registry_$stamp.pol"
-        Copy-Item -LiteralPath $Pol -Destination $d -Force -ErrorAction Stop
+    foreach ($s in @(@($Pol, 'Registry', '.pol'), @($Ini, 'gpt', '.ini'))) {
+        if (-not (Test-Path -LiteralPath $s[0])) { continue }
+        $o = Join-Path $bk ($s[1] + '_origine' + $s[2])
+        if (-not (Test-Path -LiteralPath $o)) { [IO.File]::Copy($s[0], $o, $false); $saved += $o }
+        $d = Join-Path $bk ($s[1] + '_' + $stamp + $s[2]); $n = 1
+        while (Test-Path -LiteralPath $d) { $d = Join-Path $bk ('{0}_{1}-{2}{3}' -f $s[1], $stamp, $n, $s[2]); $n++ }
+        [IO.File]::Copy($s[0], $d, $false)
         $saved += $d
     }
-    if (Test-Path -LiteralPath $Ini) {
-        $d = Join-Path $bk "gpt_$stamp.ini"
-        Copy-Item -LiteralPath $Ini -Destination $d -Force -ErrorAction Stop
-        $saved += $d
-    }
-    foreach ($f in 'Registry_*.pol', 'gpt_*.ini') {
-        Get-ChildItem -LiteralPath $bk -Filter $f -File -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -Skip 20 | Remove-Item -Force -ErrorAction SilentlyContinue
+    # purge des seules copies datées (nom commençant par un chiffre après le préfixe), l'origine n'est jamais retirée
+    foreach ($f in 'Registry', 'gpt') {
+        Get-ChildItem -LiteralPath $bk -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match ('^' + $f + '_\d') } | Sort-Object Name -Descending | Select-Object -Skip 20 | Remove-Item -Force -ErrorAction SilentlyContinue
     }
     $saved
 }
@@ -165,7 +170,7 @@ function Set-LocalPolicyValue([string]$Key, [string]$Name, $Value) {
     }
     else { $lines.Insert($end, "gPCMachineExtensionNames=$cse"); $end++ }
     if ($vi -ge 0) { $lines[$vi] = "Version=$ver" } else { $lines.Insert($end, "Version=$ver") }
-    Set-Content -LiteralPath $ini -Value $lines -Encoding Default
+    Write-FileAtomic $ini (($lines -join "`r`n") + "`r`n") ([Text.Encoding]::Default) -NoBackup
     Write-UiLog ("Stratégie locale écrite : HKLM\$Key\$Name = " + $(if ($null -eq $Value) { '(supprimée)' } else { $Value }) + ' (visible dans gpedit.msc), application par gpupdate en cours.') 'OK'
     Start-Process -FilePath "$env:windir\System32\gpupdate.exe" -ArgumentList '/target:computer', '/wait:0' -WindowStyle Hidden
     $GpState.Started = $true

@@ -315,7 +315,7 @@ function Update-MonList {
     $liveG = @{}; $liveK = @{}
     foreach ($sec in $MonSections) {
         $gs = @($MonUI.Data.Groups.Values | Where-Object { $_.Kind -eq $sec.K })
-        if ($q) { $gs = @($gs | Where-Object { "$($_.Desc)" -like "*$q*" -or "$($_.Name)" -like "*$q*" -or @($_.Procs | Where-Object { "$($_.Pid)" -eq $q -or "$($_.Path)" -like "*$q*" }).Count }) }
+        if ($q) { $gs = @($gs | Where-Object { (Test-TextHas "$($_.Desc)" $q) -or (Test-TextHas "$($_.Name)" $q) -or @($_.Procs | Where-Object { "$($_.Pid)" -eq $q -or (Test-TextHas "$($_.Path)" $q) }).Count }) }
         if (-not $gs.Count) { continue }
         $hk = "sec|$($sec.K)"
         $h = $MonUI.Groups[$hk]
@@ -398,14 +398,35 @@ function Show-MonMenu($R) {
     [void]$m.Items.Add($mi)
     $m.IsOpen = $true
 }
+# PID descendants (à toute profondeur) d'un processus, d'après la liste { Pid ; Parent } de tous les processus
+function Get-MonDescendant([int]$Root, $All) {
+    $seen = [Collections.Generic.HashSet[int]]::new(); $todo = [Collections.Generic.Queue[int]]::new(); $todo.Enqueue($Root)
+    while ($todo.Count) { $x = $todo.Dequeue(); foreach ($c in @($All | Where-Object { [int]$_.Parent -eq $x -and [int]$_.Pid -ne $x })) { if ($seen.Add([int]$c.Pid)) { $todo.Enqueue([int]$c.Pid) } } }
+    @($seen)
+}
+# processus encore celui du relevé : même PID et même heure de création (FILETIME du moniteur, 1 s de tolérance) ; heure
+# inconnue (processus non ouvrable) : non vérifiable, accepté
+function Test-MonSameProc([int]$ProcId, [long]$Created) {
+    if (-not $Created) { return $true }
+    $sp = Get-Process -Id $ProcId -ErrorAction SilentlyContinue; if (-not $sp) { return $false }
+    try { [math]::Abs($sp.StartTime.ToFileTime() - $Created) -lt 10000000 } catch { $true }
+}
 function Stop-MonTarget($R, [bool]$Tree) {
     if (Test-MonProtected $R) { return }
     $ps = @(Get-MonTargetProc $R)
     $name = $(if ($R.Child) { "$($R.P.Name) (PID $($R.P.Pid))" } else { "$($R.G.Desc)" })
     $what = $(if ($Tree) { "le processus $name et tous les processus qu'il a lancés" } elseif ($ps.Count -gt 1) { "la tâche $name ($($ps.Count) processus)" } else { "la tâche $name" })
+    # arborescence qui contient l'application elle-même (explorer.exe, console qui l'a lancée) : refusée, taskkill /T
+    # l'aurait arrêtée aussi
+    if ($Tree) {
+        $all = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId -ErrorAction SilentlyContinue | ForEach-Object { @{ Pid = [int]$_.ProcessId; Parent = [int]$_.ParentProcessId } })
+        foreach ($p in $ps) { if ($PID -in @(Get-MonDescendant $p.Pid $all)) { Show-Info "Terminer l'arborescence de $name arrêterait aussi Oliv_Maintenance, lancée depuis ce processus : terminer seulement le processus, ou fermer l'application d'abord." 'Warn'; return } }
+    }
     if (-not (Confirm-Action ("Terminer $what ?`n`nLes données non enregistrées dans ce programme seront perdues."))) { return }
     $ko = [Collections.Generic.List[string]]::new()
     foreach ($p in $ps) {
+        # PID réutilisé par un autre processus pendant la confirmation : ignoré (sinon un autre programme était terminé)
+        if (-not (Test-MonSameProc $p.Pid $p.Created)) { continue }
         try {
             if ($Tree) {
                 $out = & "$env:windir\System32\taskkill.exe" /PID $p.Pid /T /F 2>&1

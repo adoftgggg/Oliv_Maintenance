@@ -30,7 +30,10 @@ $Ui.PendingExplorer.Add_Click({
     $Ui.PendingExplorer.IsEnabled = $false
     # nouvel Explorateur = PID différent de ceux arrêtés (un processus en cours d'arrêt reste visible quelques instants)
     $old = @(Get-Process -Name explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $UserSession })
-    $ExplorerWait.Old = @($old | ForEach-Object { $_.Id }); $old | Stop-Process -Force
+    $ExplorerWait.Old = @($old | ForEach-Object { $_.Id })
+    # arrêt refusé : bouton réactivé et erreur affichée (avant : exception non gérée, bouton grisé jusqu'à la relance)
+    try { $old | Stop-Process -Force -ErrorAction Stop }
+    catch { $Ui.PendingExplorer.IsEnabled = $true; Write-UiLog "Redémarrage de l'Explorateur impossible : $($_.Exception.Message)" 'ERROR'; Show-Info "Redémarrage de l'Explorateur impossible.`n`n$($_.Exception.Message)" 'Error'; return }
     if (-not $ExplorerWait.Timer) {
         $ExplorerWait.Timer = [Windows.Threading.DispatcherTimer]::new(); $ExplorerWait.Timer.Interval = [TimeSpan]::FromMilliseconds(250)
         $ExplorerWait.Timer.Add_Tick({

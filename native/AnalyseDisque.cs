@@ -44,11 +44,20 @@ public static class DirScan {
     const int KeepFiles = 200;
     static int Degree = 1;
     // degree : nombre de dossiers parcourus en parallèle sur les 2 premiers niveaux (1 = séquentiel, conseillé sur disque dur)
+    // Cancel remis à zéro par l'appelant avant le lancement (Start-TreeScan) et non plus ici : une annulation demandée pendant
+    // la préparation (lecture du type de disque, 1 à 3 s) était effacée et l'analyse complète tournait quand même
     public static DirNode Scan(string root, int degree) {
-        Scanned = 0; Bytes = 0; Denied = 0; Cloud = 0; Cancel = false; Degree = Math.Max(1, degree); TopTotal = 0; TopDone = 0;
+        Scanned = 0; Bytes = 0; Denied = 0; Cloud = 0; Degree = Math.Max(1, degree); TopTotal = 0; TopDone = 0;
         DirNode n = new DirNode(); n.Root = root; n.Name = root; n.IsDir = true;
         Walk(n, 0);
         return n;
+    }
+    // chemin long (préfixe \\?\) : partage réseau \\serveur\partage -> \\?\UNC\serveur\partage (avant : \\?\\\serveur...,
+    // chemin invalide, racine marquée « accès refusé » et résultat vide) ; chemin déjà préfixé laissé tel quel
+    public static string LongPath(string path) {
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path;
+        if (path.StartsWith(@"\\", StringComparison.Ordinal)) return @"\\?\UNC\" + path.Substring(2);
+        return @"\\?\" + path;
     }
     static void Walk(DirNode node, int depth) {
         try { WalkCore(node, depth); } finally { if (depth == 1) Interlocked.Increment(ref TopDone); }
@@ -59,7 +68,7 @@ public static class DirScan {
         string basePath = node.Path; if (!basePath.EndsWith("\\")) basePath += "\\";
         Current = basePath;
         FindData d;
-        IntPtr h = FindFirstFileExW("\\\\?\\" + basePath + "*", 1, out d, 0, IntPtr.Zero, 2);
+        IntPtr h = FindFirstFileExW(LongPath(basePath) + "*", 1, out d, 0, IntPtr.Zero, 2);
         if (h == new IntPtr(-1)) { node.Denied = true; Interlocked.Increment(ref Denied); return; }
         List<DirNode> files = new List<DirNode>();
         long fb = 0, fc = 0, cl = 0;

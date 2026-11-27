@@ -215,12 +215,21 @@ function Start-CleanMgr {
     while (-not $Sync.Aborted -and [DateTime]::Now -lt $lim -and @(Get-Process -Name cleanmgr -ErrorAction SilentlyContinue | Where-Object { try { $_.StartTime -ge $t0 } catch { $false } }).Count) { Start-Sleep -Seconds 2 }
     Write-TaskLog "cleanmgr terminé (code $($p.ExitCode))."
 }
+# lignes [SR] de CBS.log datées du lancement de SFC ou après (format « yyyy-MM-dd HH:mm:ss, ... » ; 5 s de marge) : avant,
+# le détail mêlait les lignes de toutes les exécutions précédentes
+function Select-SfcLine($Lines, [DateTime]$Since) {
+    foreach ($l in @($Lines)) {
+        $t = [DateTime]::MinValue
+        if ("$l".Length -ge 19 -and [DateTime]::TryParseExact("$l".Substring(0, 19), 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$t) -and $t -ge $Since.AddSeconds(-5)) { $l }
+    }
+}
 function Invoke-SfcRun {
     param([string]$Switch)
+    $t0 = [DateTime]::Now
     [void](Invoke-Native "$env:windir\System32\sfc.exe" @($Switch) -Utf16 -Console)
     try {
         $out = Join-Path (Split-Path $Sync.LogFile) ('{0}_{1:yyyyMMdd-HHmmss}_sfc-detail.txt' -f $env:COMPUTERNAME, (Get-Date))
-        Select-String -Path "$env:windir\Logs\CBS\CBS.log" -Pattern '\[SR\]' -ErrorAction Stop | ForEach-Object { $_.Line } | Set-Content -Path $out -Encoding UTF8
+        Select-SfcLine @(Select-String -LiteralPath "$env:windir\Logs\CBS\CBS.log" -Pattern '\[SR\]' -ErrorAction Stop | ForEach-Object { $_.Line }) $t0 | Set-Content -LiteralPath $out -Encoding UTF8
         Write-TaskLog "Détail SFC ([SR] de CBS.log) : $out"
     } catch { Write-TaskLog "Extraction CBS.log impossible : $($_.Exception.Message)" 'WARN' }
 }

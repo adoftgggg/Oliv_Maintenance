@@ -10,7 +10,17 @@ function Get-EnvVar([string]$Path) {
     $k = Open-RegKey $Path; if (-not $k) { return @() }
     try { @($k.GetValueNames() | Where-Object { $_ } | Sort-Object | ForEach-Object { [pscustomobject]@{ Name = $_; Value = "$($k.GetValue($_, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))"; Kind = "$($k.GetValueKind($_))" } }) } finally { $k.Close() }
 }
-function Test-EnvList($V) { $V.Value -like '*;*' -or $V.Name -in 'Path', 'PSModulePath', 'PATHEXT' }
+# liste (un élément par ligne à l'affichage et à l'édition) : Path, PSModulePath, PATHEXT, ou valeur dont chaque élément
+# est un chemin. Avant, toute valeur contenant « ; » était traitée en liste : une chaîne de connexion ou une valeur finissant
+# par « ; » perdait ses éléments vides et son « ; » final, et une édition sans changement passait pour une modification
+function Test-EnvList($V) {
+    if ($V.Name -in 'Path', 'PSModulePath', 'PATHEXT') { return $true }
+    if ("$($V.Value)" -notlike '*;*') { return $false }
+    $seg = @("$($V.Value)" -split ';')
+    # éléments vides (« ;; », « ; » final) : valeur gardée telle quelle
+    if (@($seg | Where-Object { -not $_ }).Count) { return $false }
+    -not @($seg | Where-Object { $_ -notmatch '^(%[^%]+%|[A-Za-z]:\\|\\\\)' }).Count
+}
 # dossier introuvable = seulement si on peut l'affirmer : variables du profil remplacées par celles du compte ciblé (et non du
 # compte administrateur qui a élevé l'application), lecteur absent pour ce processus (lecteur réseau de l'utilisateur, clé
 # débranchée) ou chemin réseau (\\serveur, lent ou injoignable en administrateur) = considéré présent, jamais proposé au retrait
@@ -172,8 +182,10 @@ function Edit-EnvVar([string]$Path, $Var) {
     $name = "$($r[0])".Trim(); if (-not $name -or $name -match '[=\s]') { Show-Info 'Nom invalide : ni espace ni signe =.' 'Warn'; return }
     $value = $(if ($multi) { (@("$($r[1])" -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join ';') } else { "$($r[1])" })
     if (-not $isNew -and $value -ceq $Var.Value) { return }
-    if ($isNew -and @(Get-EnvVar $Path | Where-Object { $_.Name -eq $name }).Count -and -not (Confirm-Action "La variable $name existe déjà ($where) : la remplacer ?")) { return }
-    if ($Var -and $Var.Name -eq 'Path' -and $Path -eq $EnvSys -and $value.Length -lt 20) { Show-Info 'PATH système presque vide : enregistrement refusé (Windows ne trouverait plus ses propres programmes).' 'Warn'; return }
+    # nom existant saisi comme nouvelle variable : refusé (le remplacement contournait la présentation en liste, le
+    # récapitulatif avant / après et le contrôle du PATH système presque vide)
+    if ($isNew -and @(Get-EnvVar $Path | Where-Object { $_.Name -eq $name }).Count) { Show-Info "La variable $name existe déjà ($where) : la modifier depuis sa ligne de la liste." 'Warn'; return }
+    if ($name -eq 'Path' -and $Path -eq $EnvSys -and $value.Length -lt 20) { Show-Info 'PATH système presque vide : enregistrement refusé (Windows ne trouverait plus ses propres programmes).' 'Warn'; return }
     # récapitulatif : éléments ajoutés / retirés (listes) ou ancienne / nouvelle valeur
     $lines = @()
     if ($multi) {

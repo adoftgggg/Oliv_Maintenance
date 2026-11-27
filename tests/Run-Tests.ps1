@@ -461,6 +461,214 @@ Test-Eq 'Copie : la version'                   (Get-CopyDone 'Copier la version'
 Test-Eq 'Copie : l''adresse'                   (Get-CopyDone 'Copier l''adresse') 'Adresse copiée'
 Test-Eq 'Copie : les identifiants'             (Get-CopyDone 'Copier les identifiants') 'Identifiants copiés'
 
+# ---------- modules chargés seulement depuis Windows et Program Files, Windows en premier (S15)
+Import-SrcFunction 'Get-SafeModulePath'
+$mpIn = "C:\Users\bob\Documents\WindowsPowerShell\Modules;%ProgramFiles%\WindowsPowerShell\Modules;$env:windir\system32\WindowsPowerShell\v1.0\Modules;D:\Outils\Modules;"
+Test-Eq 'Modules : dossiers réservés, ordre'    (Get-SafeModulePath $mpIn) "$env:windir\system32\WindowsPowerShell\v1.0\Modules;$env:ProgramFiles\WindowsPowerShell\Modules"
+Test-Eq 'Modules : profil seul -> vide'         (Get-SafeModulePath 'C:\Users\bob\Documents\WindowsPowerShell\Modules') ''
+
+# ---------- dossier d'installation lu dans HKCU : retenu seulement dans le profil (S17)
+Import-SrcFunction 'Test-SoftDirInProfile'
+$UserProfilePath = 'C:\Users\bob'
+Test-Eq 'Profil : dossier du profil'           (Test-SoftDirInProfile 'C:\Users\bob\AppData\Local\Discord') $true
+Test-Eq 'Profil : Program Files refusé'        (Test-SoftDirInProfile 'C:\Program Files\Antivirus') $false
+Test-Eq 'Profil : autre profil au nom proche'  (Test-SoftDirInProfile 'C:\Users\bobby\Outil') $false
+$UserProfilePath = $null
+
+# ---------- pages web : adresses https seulement (S18)
+Import-SrcFunction 'Open-WebPage'
+foreach ($bad in 'file:///C:/Windows/System32/calc.exe', 'http://exemple.com', 'https://a b') {
+    $wr = 'ouverte'; try { Open-WebPage $bad } catch { $wr = 'refusée' }; Test-Eq "Page web : $bad refusée" $wr 'refusée'
+}
+
+# ---------- objets nommés de l'instance : droits réservés aux Administrateurs et à SYSTEM (S12)
+Import-SrcFunction 'New-AppSyncObject'
+$snm = 'Local\olivm-test-' + [guid]::NewGuid().ToString('N')
+$smx = New-AppSyncObject $snm; $sev = New-AppSyncObject ($snm + '-ev') -Signal
+try {
+    $sids = { param($o) (@($o.GetAccessControl().GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value } | Sort-Object) -join ',') }
+    Test-Eq 'Verrou d''instance : droits'          (& $sids $smx) 'S-1-5-18,S-1-5-32-544'
+    Test-Eq 'Événement : droits'                  (& $sids $sev) 'S-1-5-18,S-1-5-32-544'
+    Test-Eq 'Événement : type'                    ($sev -is [Threading.EventWaitHandle]) $true
+} finally { $smx.Dispose(); $sev.Dispose() }
+
+# ---------- relance administrateur du .cmd : script exécuté seulement s'il n'a pas changé ; chemin avec apostrophe
+# typographique, espace et $ (S13, B38)
+Import-SrcFunction 'Get-RelaunchCommand'
+$rl = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-' + [guid]::NewGuid().ToString('N') + '\l' + [char]0x2019 + 'outil $x')
+[void][IO.Directory]::CreateDirectory($rl)
+try {
+    $rlOut = Join-Path $rl 'sortie.txt'; $rlScript = Join-Path $rl 'Oliv_Maintenance.cmd'
+    [IO.File]::WriteAllText($rlScript, ("[IO.File]::WriteAllText('{0}', 'exécuté ' + `$global:_OlivMScriptPath.Length)" -f ($rlOut -replace ("['" + [char]0x2019 + ']'), '$0$0')), [Text.UTF8Encoding]::new($false))
+    $rlp = Start-Process -FilePath "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList (Get-RelaunchCommand $rlScript) -WindowStyle Hidden -PassThru -Wait
+    Test-Eq 'Relance : script inchangé exécuté'    $(if ([IO.File]::Exists($rlOut)) { [IO.File]::ReadAllText($rlOut) } else { "absent (code $($rlp.ExitCode))" }) ('exécuté ' + $rlScript.Length)
+} finally { try { [IO.Directory]::Delete((Split-Path $rl), $true) } catch { $null = $_ } }
+
+# ---------- versions portables : copie vers le profil refusée à travers une jonction (S10)
+Import-SrcFunction 'Test-PortLink', 'Copy-PortTree'
+$pt = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory((Join-Path $pt 'prepare\app')); [void][IO.Directory]::CreateDirectory((Join-Path $pt 'ailleurs')); [void][IO.Directory]::CreateDirectory((Join-Path $pt 'profil'))
+[IO.File]::WriteAllText((Join-Path $pt 'prepare\app\outil.exe'), 'x')
+& cmd.exe /d /c mklink /J (Join-Path $pt 'profil\piege') (Join-Path $pt 'ailleurs') | Out-Null
+try {
+    Copy-PortTree (Join-Path $pt 'prepare') (Join-Path $pt 'profil\Outil')
+    Test-Eq 'Portable : copie dans le profil'      ([IO.File]::Exists((Join-Path $pt 'profil\Outil\app\outil.exe'))) $true
+    $pr = 'copiée'; try { Copy-PortTree (Join-Path $pt 'prepare') (Join-Path $pt 'profil\piege\Outil') } catch { $pr = 'refusée' }
+    Test-Eq 'Portable : jonction refusée'          $pr 'refusée'
+    Test-Eq 'Portable : rien écrit à travers'      @(Get-ChildItem -LiteralPath (Join-Path $pt 'ailleurs')).Count 0
+} finally { try { [IO.Directory]::Delete((Join-Path $pt 'profil\piege'), $false); [IO.Directory]::Delete($pt, $true) } catch { $null = $_ } }
+
+# ---------- stratégie locale : Registry.pol relu à l'identique ; sauvegardes jamais écrasées, origine jamais purgée (D8)
+Import-SrcFunction 'Read-PolFile', 'ConvertTo-PolData', 'Write-PolFile', 'Backup-LocalPolicy'
+$gp = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-' + [guid]::NewGuid().ToString('N')); [void][IO.Directory]::CreateDirectory($gp)
+function global:Get-LogPath([string]$Cat) { $null = $Cat; $gpLog }
+$gpLog = $gp
+try {
+    $pol = Join-Path $gp 'Registry.pol'; $ini = Join-Path $gp 'gpt.ini'
+    $l1 = [Collections.Generic.List[object]]::new(); $l1.Add([pscustomobject]@{ Key = 'Software\Policies\Test'; Name = 'Valeur'; Type = 4; Data = [BitConverter]::GetBytes([int]1) })
+    Write-PolFile $pol $l1
+    $l2 = [Collections.Generic.List[object]]::new(@($l1)); $l2.Add([pscustomobject]@{ Key = 'Software\Policies\Test'; Name = 'Texte'; Type = 1; Data = [Text.Encoding]::Unicode.GetBytes('abc' + [char]0) })
+    Write-PolFile $pol $l2
+    $rb = Read-PolFile $pol
+    Test-Eq 'Registry.pol : relu après remplacement' $rb.Count 2
+    Test-Eq 'Registry.pol : 2e valeur'             ([Text.Encoding]::Unicode.GetString($rb[1].Data).TrimEnd([char]0)) 'abc'
+    Test-Eq 'Registry.pol : pas de fichier temporaire' @(Get-ChildItem -LiteralPath $gp -Filter '*.tmp').Count 0
+    [IO.File]::WriteAllText($ini, "[General]`r`nVersion=1`r`n")
+    $orig = [Convert]::ToBase64String([IO.File]::ReadAllBytes($pol))
+    [void](Backup-LocalPolicy $pol $ini)
+    Write-PolFile $pol $l1
+    [void](Backup-LocalPolicy $pol $ini)
+    $bk = Join-Path $gp 'gpo-sauvegarde'
+    Test-Eq 'Sauvegarde GPO : 2 copies datées'      @(Get-ChildItem -LiteralPath $bk -Filter 'Registry_2*.pol').Count 2
+    Test-Eq 'Sauvegarde GPO : origine conservée'    ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $bk 'Registry_origine.pol')))) $orig
+    for ($n = 0; $n -lt 23; $n++) { [void](Backup-LocalPolicy $pol $ini) }
+    Test-Eq 'Sauvegarde GPO : 20 copies datées'     @(Get-ChildItem -LiteralPath $bk -Filter 'Registry_2*.pol').Count 20
+    Test-Eq 'Sauvegarde GPO : origine jamais purgée' ([IO.File]::Exists((Join-Path $bk 'Registry_origine.pol')) -and [IO.File]::Exists((Join-Path $bk 'gpt_origine.ini'))) $true
+} finally { Remove-Item function:global:Get-LogPath; try { [IO.Directory]::Delete($gp, $true) } catch { $null = $_ } }
+
+# ---------- instantanés de réglages : 30 gardés par compte (D9)
+Import-SrcFunction 'Get-SnapshotPurge'
+$snaps = @(1..35 | ForEach-Object { [pscustomobject]@{ Name = ('2026{0:D4}.json' -f $_); Path = "a$_"; Sid = 'S-A' } }) + @(1..5 | ForEach-Object { [pscustomobject]@{ Name = ('2025{0:D4}.json' -f $_); Path = "b$_"; Sid = 'S-B' } }) + @([pscustomobject]@{ Name = '2020.json'; Path = 'x'; Sid = $null })
+$purge = @(Get-SnapshotPurge $snaps 30)
+Test-Eq 'Instantanés : 5 plus anciens de A'      $purge.Count 5
+Test-Eq 'Instantanés : B et illisible gardés'    @($purge | Where-Object { $_.Sid -ne 'S-A' }).Count 0
+Test-Eq 'Instantanés : plus ancien de A purgé'   (@($purge | Sort-Object Name)[0].Path) 'a1'
+
+# ---------- fichier hosts : repère de fin absent, entrées personnelles qui suivent gardées (D10)
+Import-SrcFunction 'Split-HostsContent'
+$HostsMarkA = Get-SrcValue 'HostsMarkA'; $HostsMarkB = Get-SrcValue 'HostsMarkB'
+$hx = @('# mon fichier', '192.168.1.5 imprimante', $HostsMarkA, '127.0.0.1 localhost', '0.0.0.0 pub1.exemple', '# section', '0.0.0.0 pub2.exemple', '', '# mon NAS', '192.168.1.20 nas.maison', '0.0.0.0 bloque-moi.fr') -join "`r`n"
+$hs = Split-HostsContent $hx
+Test-Eq 'Hosts sans repère de fin : bloc'        $hs.Block.Count 5
+Test-Eq 'Hosts sans repère de fin : NAS gardé'   ($hs.Own -match 'nas\.maison' -and $hs.Own -match '# mon NAS' -and $hs.Own -match 'bloque-moi' -and $hs.Own -match 'imprimante') $true
+$hs2 = Split-HostsContent (@('192.168.1.5 imprimante', $HostsMarkA, '0.0.0.0 a', $HostsMarkB, '10.0.0.1 nas') -join "`r`n")
+Test-Eq 'Hosts avec repère de fin : bloc'        $hs2.Block.Count 3
+Test-Eq 'Hosts avec repère de fin : entrées'     $hs2.Own "192.168.1.5 imprimante`r`n10.0.0.1 nas"
+
+# ---------- variables d'environnement : liste seulement si chaque élément est un chemin (D12)
+Import-SrcFunction 'Test-EnvList'
+Test-Eq 'Variable : Path'                        (Test-EnvList @{ Name = 'Path'; Value = 'C:\Windows' }) $true
+Test-Eq 'Variable : liste de dossiers'           (Test-EnvList @{ Name = 'LIB'; Value = 'C:\a;%ProgramFiles%\b;\\srv\c' }) $true
+Test-Eq 'Variable : chaîne de connexion'         (Test-EnvList @{ Name = 'CNX'; Value = 'Server=x;Database=y' }) $false
+Test-Eq 'Variable : « ; » final gardé'           (Test-EnvList @{ Name = 'LIB'; Value = 'C:\a;C:\b;' }) $false
+
+# ---------- sauvegarde .reg d'une entrée de démarrage : tout type de valeur (D17)
+Import-SrcFunction 'ConvertTo-RegExportLine'
+Test-Eq '.reg : texte échappé'                   (ConvertTo-RegExportLine 'App' 'String' 'C:\x\"a"') '"App"="C:\\x\\\"a\""'
+Test-Eq '.reg : DWORD'                           (ConvertTo-RegExportLine 'N' 'DWord' 255) '"N"=dword:000000ff'
+Test-Eq '.reg : binaire (StartupApproved)'       (ConvertTo-RegExportLine 'App' 'Binary' ([byte[]](3, 0, 0x1f))) '"App"=hex:03,00,1f'
+Test-Eq '.reg : texte extensible'                (ConvertTo-RegExportLine 'E' 'ExpandString' '%a%') '"E"=hex(2):25,00,61,00,25,00,00,00'
+Test-Eq '.reg : multi-chaîne'                    (ConvertTo-RegExportLine 'M' 'MultiString' @('a', 'b')) '"M"=hex(7):61,00,00,00,62,00,00,00,00,00'
+
+# ---------- anciens points de restauration : seuls les clichés des points de restauration (D19)
+Import-SrcFunction 'Select-RestoreShadow'
+$t0 = [DateTime]'2026-11-20 10:00'
+$shd = @([pscustomobject]@{ ID = 'pr1'; InstallDate = $t0.AddSeconds(20) }, [pscustomobject]@{ ID = 'sauvegarde'; InstallDate = $t0.AddHours(3) }, [pscustomobject]@{ ID = 'pr2'; InstallDate = $t0.AddDays(1) })
+Test-Eq 'Points : clichés des points seulement'  ((@(Select-RestoreShadow $shd @($t0, $t0.AddDays(1).AddMinutes(2))) | ForEach-Object { $_.ID }) -join ',') 'pr1,pr2'
+Test-Eq 'Points : aucun point = rien'            @(Select-RestoreShadow $shd @()).Count 0
+
+# ---------- filtres de recherche : texte tapé pris tel quel, sans motif (B8)
+Import-SrcFunction 'Test-TextHas'
+Test-Eq 'Filtre : crochet ouvrant'               (Test-TextHas 'Outil [x64]' '[x6') $true
+Test-Eq 'Filtre : casse ignorée'                 (Test-TextHas 'Mozilla Firefox' 'FIRE') $true
+Test-Eq 'Filtre : * non joker'                   (Test-TextHas 'Firefox' 'F*x') $false
+
+# ---------- ligne de commande winget : arguments avec espace entre guillemets (B9)
+Import-SrcFunction 'Join-ProcessArg'
+Test-Eq 'Arguments : override entre guillemets'  (Join-ProcessArg @('install', '--override', '--quiet --force', '')) 'install --override "--quiet --force" ""'
+
+# ---------- analyse de disque : chemin long d'un partage réseau (B12)
+if ('_OlivM.DirScan' -as [type]) {
+    Test-Eq 'Chemin long : lecteur'              ([_OlivM.DirScan]::LongPath('C:\Dossier\')) '\\?\C:\Dossier\'
+    Test-Eq 'Chemin long : partage réseau'       ([_OlivM.DirScan]::LongPath('\\serveur\partage\')) '\\?\UNC\serveur\partage\'
+    Test-Eq 'Chemin long : déjà préfixé'         ([_OlivM.DirScan]::LongPath('\\?\D:\x\')) '\\?\D:\x\'
+}
+
+# ---------- réglages : valeur lue à l'avance utilisée seulement pendant la construction des lignes (B13) ; DNS inconnu (B15)
+Import-SrcFunction 'Get-TweakState', 'Set-DnsProvider'
+$Sync = @{ TwCache = [hashtable]::Synchronized(@{ X = $true }) }
+$twx = [pscustomobject]@{ Id = 'X'; Get = { $false } }
+$TwUseCache = $false
+Test-Eq 'Réglage : relecture hors construction'  (Get-TweakState $twx) $false
+$TwUseCache = $true
+Test-Eq 'Réglage : valeur lue à l''avance'       (Get-TweakState $twx) $true
+$TwUseCache = $false; $Sync = $null
+$DnsProviders = [ordered]@{ AdGuard = @{ V4 = @('94.140.14.14') } }
+$dr = 'accepté'; try { Set-DnsProvider 'Ancien' } catch { $dr = 'refusé' }
+Test-Eq 'DNS : fournisseur inconnu refusé'       $dr 'refusé'
+
+# ---------- antivirus : couleur sur les seuls antivirus actifs de date connue (B21, B22)
+Import-SrcFunction 'Get-AvWorstAge'
+$now = [DateTime]::Now
+Test-Eq 'Antivirus : tiers sans date ignoré'     ([int](Get-AvWorstAge @(@{ Date = $null; Passive = $false }, @{ Date = $now.AddDays(-1); Passive = $false }))) 1
+Test-Eq 'Antivirus : Defender passif ignoré'     ([int](Get-AvWorstAge @(@{ Date = $now.AddDays(-30); Passive = $true }, @{ Date = $now.AddHours(-2); Passive = $false }))) 0
+Test-Eq 'Antivirus : aucune date connue'         ($null -eq (Get-AvWorstAge @(@{ Date = $null; Passive = $false }))) $true
+
+# ---------- claviers : dernier clavier de la langue principale jamais proposé au retrait (B24)
+Import-SrcFunction 'Test-KeyboardRemovable'
+Test-Eq 'Clavier : dernier de la langue principale' (Test-KeyboardRemovable 0 1 2) $false
+Test-Eq 'Clavier : 2e clavier de la principale'  (Test-KeyboardRemovable 0 2 2) $true
+Test-Eq 'Clavier : clavier d''une autre langue'   (Test-KeyboardRemovable 1 1 2) $true
+Test-Eq 'Clavier : seul clavier du poste'        (Test-KeyboardRemovable 1 1 1) $false
+
+# ---------- licence : Windows activé retenu avant un complément non activé (B27)
+Import-SrcFunction 'Select-WinLicense'
+$lic = Select-WinLicense @([pscustomobject]@{ Name = 'ESU'; LicenseStatus = 0; LicenseIsAddon = $true }, [pscustomobject]@{ Name = 'Windows'; LicenseStatus = 1; LicenseIsAddon = $false })
+Test-Eq 'Licence : Windows activé retenu'        $lic.Name 'Windows'
+$lic2 = Select-WinLicense @([pscustomobject]@{ Name = 'Notif'; LicenseStatus = 5; LicenseIsAddon = $false }, [pscustomobject]@{ Name = 'Activé'; LicenseStatus = 1; LicenseIsAddon = $false })
+Test-Eq 'Licence : activé avant notification'    $lic2.Name 'Activé'
+
+# ---------- moniteur : arborescence et PID réutilisé (B28)
+Import-SrcFunction 'Get-MonDescendant', 'Test-MonSameProc'
+$tree = @(@{ Pid = 10; Parent = 1 }, @{ Pid = 20; Parent = 10 }, @{ Pid = 30; Parent = 20 }, @{ Pid = 40; Parent = 1 })
+Test-Eq 'Arborescence : descendants'             ((@(Get-MonDescendant 10 $tree) | Sort-Object) -join ',') '20,30'
+$me = Get-Process -Id $PID
+Test-Eq 'PID : même processus'                   (Test-MonSameProc $PID $me.StartTime.ToFileTime()) $true
+Test-Eq 'PID : réutilisé (autre heure)'          (Test-MonSameProc $PID ($me.StartTime.AddMinutes(-5).ToFileTime())) $false
+Test-Eq 'PID : heure inconnue'                   (Test-MonSameProc $PID 0) $true
+
+# ---------- recherche globale : caractères hors du plan de base (emoji) sans erreur, positions conservées (B32)
+Import-SrcFunction 'Get-FlatText'
+$emo = 'Été ' + [char]::ConvertFromUtf32(0x1F600) + ' Démo'
+$fl = 'erreur'; try { $fl = Get-FlatText $emo } catch { $fl = 'erreur' }
+Test-Eq 'Recherche : emoji sans erreur'          ($fl.Length -eq $emo.Length -and $fl.StartsWith('ete ') -and $fl.EndsWith(' demo')) $true
+
+# ---------- détail SFC : lignes de l'exécution en cours seulement (B42)
+Import-SrcFunction 'Select-SfcLine'
+$cbs = @('2026-11-20 09:00:00, Info CSI 00000001 [SR] ancienne exécution', '2026-11-26 14:00:03, Info CSI 00000002 [SR] Verifying', 'ligne sans date [SR]', '2026-11-26 14:05:00, Info CSI 00000003 [SR] Repaired')
+Test-Eq 'SFC : lignes depuis le lancement'       (@(Select-SfcLine $cbs ([DateTime]'2026-11-26 14:00:05')).Count) 2
+
+# ---------- nettoyage : crochets d'un nom de profil pris tels quels (B43)
+Import-SrcFunction 'ConvertTo-CleanPattern', 'Resolve-CleanTarget'
+Test-Eq 'Motif : chemin sans joker'              ($null -eq (ConvertTo-CleanPattern 'C:\Users\Jean[1]\AppData\Local\Temp')) $true
+Test-Eq 'Motif : partie fixe échappée'           (ConvertTo-CleanPattern 'C:\Users\Jean[1]\User Data\*\Cache') 'C:\Users\Jean`[1`]\User Data\*\Cache'
+$cp = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-' + [guid]::NewGuid().ToString('N') + '\Jean[1]')
+[void][IO.Directory]::CreateDirectory((Join-Path $cp 'Temp')); [void][IO.Directory]::CreateDirectory((Join-Path $cp 'Data\Profil 1\Cache'))
+try {
+    Test-Eq 'Nettoyage : profil à crochets'      @(Resolve-CleanTarget @{ Paths = @("D:$cp\Temp") }).Count 1
+    Test-Eq 'Nettoyage : crochets et joker'      @(Resolve-CleanTarget @{ Paths = @("D:$cp\Data\*\Cache") }).Count 1
+} finally { try { [IO.Directory]::Delete((Split-Path $cp), $true) } catch { $null = $_ } }
+
 # ---------- nom court du fabricant (ligne Constructeur des mises à jour constructeur)
 $OemBrands = Get-SrcValue 'OemBrands'
 

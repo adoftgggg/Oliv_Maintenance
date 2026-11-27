@@ -92,11 +92,14 @@ function Switch-CtxEntry($It) {
 }
 function Restart-Explorer {
     if (-not (Confirm-Action "Redémarrer l'Explorateur Windows ?`n`nLa barre des tâches et les fenêtres de l'Explorateur se ferment quelques secondes ; les autres programmes restent ouverts.")) { return }
-    try { Get-Process -Name explorer -ErrorAction Stop | Where-Object { $_.SessionId -eq $UserSession } | Stop-Process -Force -ErrorAction Stop } catch { Write-Ignored 'Arrêt de l''Explorateur' $_ }
+    # arrêt refusé : erreur affichée, rien d'annoncé (avant : « Explorateur Windows redémarré » journalisé même en échec)
+    try { Get-Process -Name explorer -ErrorAction Stop | Where-Object { $_.SessionId -eq $UserSession } | Stop-Process -Force -ErrorAction Stop }
+    catch { Write-UiLog "Redémarrage de l'Explorateur impossible : $($_.Exception.Message)" 'ERROR'; Show-Info "Redémarrage de l'Explorateur impossible.`n`n$($_.Exception.Message)" 'Error'; return }
     # relancé automatiquement par Windows (AutoRestartShell). Jamais lancé d'ici : un Explorateur démarré par l'application
     # (administrateur) tournerait élevé, et tout programme ouvert depuis le Bureau aussi
     $t = [Windows.Threading.DispatcherTimer]::new(); $t.Interval = [TimeSpan]::FromSeconds(6)
-    $t.Add_Tick({ param($s, $e) $s.Stop(); if (-not @(Get-Process -Name explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $UserSession }).Count) { Write-UiLog 'Explorateur non relancé automatiquement : Gestionnaire des tâches > Exécuter une nouvelle tâche > explorer.exe (sans cocher « droits administrateur »).' 'WARN' } })
-    $t.Start(); Write-UiLog 'Explorateur Windows redémarré.' 'APP'
+    # résultat annoncé une fois la relance constatée par Windows (6 s), plus au moment de l'arrêt
+    $t.Add_Tick({ param($s, $e) $s.Stop(); if (-not @(Get-Process -Name explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $UserSession }).Count) { Write-UiLog 'Explorateur non relancé automatiquement : Gestionnaire des tâches > Exécuter une nouvelle tâche > explorer.exe (sans cocher « droits administrateur »).' 'WARN' } else { Write-UiLog 'Explorateur Windows redémarré.' 'APP' } })
+    $t.Start()
 }
 

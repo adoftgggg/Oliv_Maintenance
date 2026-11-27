@@ -774,7 +774,7 @@ function Update-SoftView {
     $avail = $SoftUI.Filter -eq 'Upd'
     $SoftUI.H2.Parent.ColumnDefinitions[2].Width = [Windows.GridLength]::new($(if ($avail) { 150 } else { 0 }))
     $q = "$($SoftUI.Find.Text)".Trim()
-    if ($q) { $show = @($show | Where-Object { "$($_.Name)" -like "*$q*" -or "$($_.Id)" -like "*$q*" }) }
+    if ($q) { $show = @($show | Where-Object { (Test-TextHas "$($_.Name)" $q) -or (Test-TextHas "$($_.Id)" $q) }) }
     $sf = $(if ($SoftUI.Filter -eq 'All') { $SoftUI.SrcFilter } else { $null })
     if ($sf) { $show = @($show | Where-Object { $kind[(Get-SoftKey $_)] -eq $sf }) }
     $SoftUI.List.Children.Clear(); $SoftUI.Rows = @{}; $SoftUI.Order = [Collections.ArrayList]::new(); $SoftUI.SrcCells = @{}
@@ -813,7 +813,7 @@ function Update-SoftView {
 # historique : date et utilisateur sous le nom, versions avant / après, résultat (mis à jour / échec avec code winget)
 function Show-SoftHistory($Hist) {
     $q = "$($SoftUI.Find.Text)".Trim()
-    $show = @($Hist | Where-Object { -not $q -or "$($_.Name)" -like "*$q*" -or "$($_.Id)" -like "*$q*" })
+    $show = @($Hist | Where-Object { -not $q -or (Test-TextHas "$($_.Name)" $q) -or (Test-TextHas "$($_.Id)" $q) })
     $SoftUI.List.Children.Clear(); $SoftUI.Rows = @{}; $SoftUI.Order = [Collections.ArrayList]::new(); if ($SoftUI.SelSet) { $SoftUI.SelSet.Clear() }
     foreach ($h in $show) {
         $row = [Windows.Controls.Border]::new()

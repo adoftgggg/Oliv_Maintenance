@@ -184,6 +184,8 @@ try {
         $req = [Net.HttpWebRequest]::Create($url); $req.Timeout = 30000; $req.ReadWriteTimeout = 60000
         $resp = $req.GetResponse(); $tot = [double]$resp.ContentLength
         $in = $resp.GetResponseStream(); $fs = [IO.File]::Create($iso + '.part'); $buf = [byte[]]::new(1MB); $done = [double]0; $t0 = [DateTime]::Now; $tl = $t0
+        # téléchargement interrompu, en erreur ou incomplet : fichier .part (jusqu'à 6 Go) supprimé de Téléchargements
+        $dlOk = $false
         try {
             while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) {
                 $fs.Write($buf, 0, $n); $done += $n
@@ -193,8 +195,12 @@ try {
                     Set-UsbState "Téléchargement de Windows $($p.Win)" $(if ($tot -gt 0) { 100 * $done / $tot } else { -1 }) ('{0:N2} Go sur {1:N2} Go  ·  {2:N1} Mo/s' -f ($done / 1GB), ($tot / 1GB), ($sp / 1MB))
                 }
             }
-        } finally { $fs.Dispose(); $in.Dispose(); $resp.Dispose() }
-        if ($tot -gt 0 -and $done -lt $tot) { throw 'téléchargement incomplet.' }
+            $dlOk = -not ($tot -gt 0 -and $done -lt $tot)
+        } finally {
+            $fs.Dispose(); $in.Dispose(); $resp.Dispose()
+            if (-not $dlOk) { Remove-Item -LiteralPath ($iso + '.part') -Force -ErrorAction SilentlyContinue }
+        }
+        if (-not $dlOk) { throw 'téléchargement incomplet.' }
         if (Test-Path -LiteralPath $iso) { Remove-Item -LiteralPath $iso -Force }
         Rename-Item -LiteralPath ($iso + '.part') -NewName $name
     }
@@ -210,7 +216,10 @@ try {
     # effacement, conversion MBR, partition principale active (32 Go au plus : limite FAT32 de Windows), formatage FAT32 rapide,
     # lettre ; style de partition et lettre contrôlés ensuite (variable $pst : $st est l'état partagé avec l'interface)
     $mb = [math]::Floor(([math]::Min([double]$d.Size, [double]32GB) - 8MB) / 1MB)
-    $dp = Join-Path $env:TEMP ('olivm-usb-{0}.txt' -f [guid]::NewGuid().ToString('N'))
+    # script diskpart dans le dossier protégé de l'application ($GameDir, écriture réservée aux administrateurs) : dans %TEMP%,
+    # un programme sans élévation pouvait le réécrire avant son exécution (select disk 0 + clean)
+    [void][IO.Directory]::CreateDirectory($p.Tools)
+    $dp = Join-Path $p.Tools ('olivm-usb-{0}.txt' -f [guid]::NewGuid().ToString('N'))
     [IO.File]::WriteAllText($dp, ("select disk {0}`r`nattributes disk clear readonly noerr`r`nclean`r`nconvert mbr`r`ncreate partition primary size={1}`r`nactive`r`nformat fs=fat32 quick label=WIN{2}`r`nassign`r`nrescan`r`n" -f $p.Disk, $mb, $p.Win), [Text.Encoding]::ASCII)
     Set-UsbState 'Préparation de la clé USB' -1 'diskpart : effacement, MBR, partition FAT32 active'
     try { $dpo = & "$env:windir\System32\diskpart.exe" /s $dp 2>&1; $dpc = $LASTEXITCODE } finally { Remove-Item -LiteralPath $dp -Force -ErrorAction SilentlyContinue }
@@ -228,7 +237,12 @@ try {
     # 4. copie des fichiers de l'ISO (install.wim > 4 Go découpé par DISM)
     Set-UsbState 'Copie des fichiers de Windows' 0 'Montage de l''image ISO'
     $img = Mount-DiskImage -ImagePath $iso -PassThru -ErrorAction Stop
-    $src = "$(($img | Get-Volume).DriveLetter):\"
+    # lettre attribuée parfois avec un léger retard après le montage : relue 10 s au plus (avant : « :\ », copie en échec
+    # après l'effacement de la clé)
+    $letter = ''
+    for ($k = 0; $k -lt 20 -and -not $letter; $k++) { $letter = "$((Get-DiskImage -ImagePath $iso | Get-Volume -ErrorAction SilentlyContinue).DriveLetter)".Trim(); if (-not $letter) { Start-Sleep -Milliseconds 500 } }
+    if (-not $letter) { throw 'image ISO montée sans lettre de lecteur : copie impossible.' }
+    $src = "${letter}:\"
     $files = @(Get-ChildItem -LiteralPath $src -Recurse -File -Force)
     $wim = @($files | Where-Object { $_.FullName -ieq (Join-Path $src 'sources\install.wim') })[0]
     $split = $wim -and $wim.Length -ge 4GB - 1MB

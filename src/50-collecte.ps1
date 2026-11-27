@@ -307,6 +307,11 @@ $DiagScript = @'
 $ProgressPreference = 'SilentlyContinue'
 $items = [Collections.ArrayList]::new()
 function Add-D([string]$K, [string]$V, [string]$B, [string]$T) { [void]$items.Add(@{ K = $K; V = $V; B = $B; T = $T }) }
+# âge en jours des signatures les plus anciennes parmi les antivirus actifs (non passifs) de date connue ; $null si aucune
+function Get-AvWorstAge($Avs) {
+    $ages = @($Avs | Where-Object { $_.Date -and -not $_.Passive } | ForEach-Object { ([DateTime]::Now - [DateTime]$_.Date).TotalDays })
+    if ($ages.Count) { ($ages | Measure-Object -Maximum).Maximum } else { $null }
+}
 $since = (Get-Date).AddDays(-30)
 # ---------- Historique des installations Windows Update : 2 sources réelles fusionnées, rapprochées par numéro KB
 #  - historique de l'agent Windows Update (IUpdateSearcher.QueryHistory, 1 000 entrées au plus) ;
@@ -422,6 +427,8 @@ try {
     $bk = "BitLocker ($env:SystemDrive)"; $vs = "$($bv.VolumeStatus)"; $pc = [int]$bv.EncryptionPercentage
     if ($vs -eq 'EncryptionInProgress') { [void]$items.Add(@{ K = $bk; V = "chiffrement en cours ($pc %)"; B = 'WarnFgBrush'; X = 'encrypting' }) }
     elseif ($vs -eq 'DecryptionInProgress') { [void]$items.Add(@{ K = $bk; V = "déchiffrement en cours ($pc %)"; B = 'WarnFgBrush'; X = 'decrypting' }) }
+    # chiffrement ou déchiffrement en pause : distinct de la protection suspendue (reprise de la conversion, pas de la protection)
+    elseif ($vs -in 'EncryptionPaused', 'DecryptionPaused') { [void]$items.Add(@{ K = $bk; V = $(if ($vs -eq 'EncryptionPaused') { "chiffrement en pause ($pc %)" } else { "déchiffrement en pause ($pc %)" }); B = 'WarnFgBrush'; X = 'paused' }) }
     elseif ("$($bv.ProtectionStatus)" -eq 'On') { [void]$items.Add(@{ K = $bk; V = 'activé'; B = 'OkFgBrush'; X = 'on' }) }
     elseif ($pc -gt 0) { [void]$items.Add(@{ K = $bk; V = 'activé, protection suspendue'; B = 'WarnFgBrush'; X = 'suspended' }) }
     else { [void]$items.Add(@{ K = $bk; V = 'désactivé'; B = 'WarnFgBrush'; X = 'off' }) }
@@ -448,14 +455,16 @@ foreach ($n in @($av | ForEach-Object { "$($_.displayName)" } | Where-Object { $
             if (Test-Path -LiteralPath $f) { $d = (Get-Item -LiteralPath $f).LastWriteTime }
         }
     }
-    $avs.Add(@{ Name = $n; Date = $d })
+    $avs.Add(@{ Name = $n; Date = $d; Passive = $false })
 }
 $mpMode = ''
-try { $mp = Get-MpComputerStatus -ErrorAction Stop; $mpMode = "$($mp.AMRunningMode)"; $avs.Add(@{ Name = 'Windows Defender'; Date = $mp.AntivirusSignatureLastUpdated }) } catch {}
+# Defender passif ou arrêté (autre antivirus actif) : affiché comme tel, ses signatures ne comptent pas dans la couleur
+try { $mp = Get-MpComputerStatus -ErrorAction Stop; $mpMode = "$($mp.AMRunningMode)"; $avs.Add(@{ Name = 'Windows Defender'; Date = $mp.AntivirusSignatureLastUpdated; Passive = $mpMode -ne 'Normal' }) } catch {}
 if ($avs.Count) {
-    $txt = ($avs | ForEach-Object { '{0} (maj le : {1})' -f $_.Name, $(if ($_.Date) { '{0:dd/MM/yyyy HH:mm}' -f $_.Date } else { 'inconnue' }) }) -join "`n"
-    $ages = @($avs | ForEach-Object { if ($_.Date) { ([DateTime]::Now - $_.Date).TotalDays } else { 99 } })
-    $worst = ($ages | Measure-Object -Maximum).Maximum
+    $txt = ($avs | ForEach-Object { '{0} ({1}maj le : {2})' -f $_.Name, $(if ($_.Passive) { 'passif, ' } else { '' }), $(if ($_.Date) { '{0:dd/MM/yyyy HH:mm}' -f $_.Date } else { 'inconnue' }) }) -join "`n"
+    # couleur : âge des signatures des antivirus actifs dont la date est connue (date illisible pour la plupart des produits
+    # tiers : avant, comptée 99 jours, ligne toujours rouge) ; aucune date connue = orange
+    $worst = Get-AvWorstAge @($avs)
     # antivirus principal (menu d'analyse de la ligne) : Defender actif (mode Normal, ni passif ni désactivé au profit d'un
     # autre produit), sinon 1er antivirus tiers activé d'après le Centre de sécurité (productState, bits 12-15 = 1)
     # Sophos installé = antivirus principal (Defender alors passif ou désactivé), quel que soit son productState
@@ -463,7 +472,7 @@ if ($avs.Count) {
     $third = @($av | Where-Object { "$($_.displayName)" -notmatch 'Defender' -and ((([int]$_.productState) -shr 12) -band 0xF) -eq 1 } | ForEach-Object { "$($_.displayName)" })
     $soph = @($names | Where-Object { $_ -match '(?i)sophos' })
     $main = $(if ($soph.Count) { 'other:' + $soph[0] } elseif ($mpMode -eq 'Normal') { 'defender' } elseif ($third.Count) { 'other:' + $third[0] } elseif ($names.Count) { 'other:' + $names[0] } elseif ($mpMode) { 'defender' } else { '' })
-    [void]$items.Add(@{ K = 'Antivirus'; V = $txt; B = $(if ($worst -le 2) { 'OkFgBrush' } elseif ($worst -le 7) { 'WarnFgBrush' } else { 'ErrFgBrush' }); X = $(if ($main) { 'av:' + $main } else { '' }) })
+    [void]$items.Add(@{ K = 'Antivirus'; V = $txt; B = $(if ($null -eq $worst) { 'WarnFgBrush' } elseif ($worst -le 2) { 'OkFgBrush' } elseif ($worst -le 7) { 'WarnFgBrush' } else { 'ErrFgBrush' }); X = $(if ($main) { 'av:' + $main } else { '' }) })
 } else { Add-D 'Antivirus' 'aucun antivirus détecté' 'ErrFgBrush' }
 
 try {

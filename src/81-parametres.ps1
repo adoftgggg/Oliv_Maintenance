@@ -334,8 +334,9 @@ function Set-SettingsLayout($P, $Cols) {
             foreach ($c in $list[1..($list.Count - 1)]) {
                 $sep = [Windows.Controls.Border]::new(); $sep.Height = 1; $sep.Margin = New-Thickness 16 6 16 0; $sep.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'LineBrush')
                 [void]$host0.Children.Add($sep)
-                # carte à pied de boutons (grille : contenu ligne 0, boutons ligne 1) : ordre des lignes conservé
-                $kids = @($c.Child.Children | Sort-Object { [Windows.Controls.Grid]::GetRow($_) }); $c.Child.Children.Clear()
+                # carte à pied de boutons ($setFoot : DockPanel [barre, contenu], barre ancrée en bas) : contenu d'abord, barre
+                # ensuite (avant : tri par ligne de grille, 0 pour les deux, boutons affichés au-dessus du texte qu'ils commandent)
+                $kids = @($c.Child.Children | Sort-Object { "$([Windows.Controls.DockPanel]::GetDock($_))" -eq 'Bottom' }, { [Windows.Controls.Grid]::GetRow($_) }); $c.Child.Children.Clear()
                 foreach ($x in $kids) { [Windows.Controls.Grid]::SetRow($x, 0); [void]$host0.Children.Add($x) }
             }
             $list = @($list[0])
@@ -423,6 +424,11 @@ function Get-TweakSnapshot {
         }
     })
 }
+# instantanés à supprimer : au-delà des $Keep plus récents de chaque compte (nom = date) ; compte inconnu (fichier
+# illisible) : jamais supprimé
+function Get-SnapshotPurge($Files, [int]$Keep) {
+    foreach ($g in @($Files | Where-Object { $_.Sid } | Group-Object Sid)) { @($g.Group | Sort-Object Name -Descending | Select-Object -Skip $Keep) }
+}
 function Save-TweakSnapshot([string]$Reason, [string[]]$Changes) {
     $vals = [ordered]@{}
     foreach ($r in $TweakRows) { if ($r.Enabled -and $null -ne $r.Current) { $vals[$r.Tweak.Id] = $r.Current } }
@@ -431,8 +437,14 @@ function Save-TweakSnapshot([string]$Reason, [string[]]$Changes) {
         if (-not (Test-Path -LiteralPath $SnapDir)) { [void](New-Item -ItemType Directory -Path $SnapDir -Force) }
         $now = [DateTime]::Now
         $o = [pscustomobject]@{ Time = $now.ToString('o'); Sid = $UserSid; User = $UserName; Reason = $Reason; Changes = @($Changes); Values = [pscustomobject]$vals }
-        ConvertTo-Json -InputObject $o -Depth 3 | Set-Content -LiteralPath (Join-Path $SnapDir ('{0:yyyyMMdd-HHmmss-fff}.json' -f $now)) -Encoding UTF8
-        @(Get-ChildItem -LiteralPath $SnapDir -Filter '*.json' -File | Sort-Object Name -Descending | Select-Object -Skip 30) | Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-FileAtomic (Join-Path $SnapDir ('{0:yyyyMMdd-HHmmss-fff}.json' -f $now)) (ConvertTo-Json -InputObject $o -Depth 3) -NoBackup
+        # 30 derniers instantanés gardés par compte (avant : tous comptes confondus, ceux d'un utilisateur disparaissaient
+        # après 30 modifications faites pour un autre) ; fichier illisible jamais supprimé
+        $all = @(Get-ChildItem -LiteralPath $SnapDir -Filter '*.json' -File | ForEach-Object {
+            $sid = try { "$((Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json).Sid)" } catch { $null }
+            [pscustomobject]@{ Name = $_.Name; Path = $_.FullName; Sid = $sid }
+        })
+        foreach ($x in @(Get-SnapshotPurge $all 30)) { Remove-Item -LiteralPath $x.Path -Force -ErrorAction SilentlyContinue }
         Write-UiLog "Instantané des réglages enregistré : $Reason." 'APP'
     } catch { Write-UiLog "Instantané des réglages : $($_.Exception.Message)" 'WARN' }
     if ($SetUI.Built) { Update-SnapshotList }
@@ -550,6 +562,8 @@ function Get-TweakDefault($Tw) {
 }
 # Restauration d'usine : tous les réglages de l'outil remis à la valeur par défaut de Windows (instantané pris avant)
 function Restore-TweakDefault {
+    # pendant une tâche : refusé (gpupdate, DNS... en parallèle du worker), comme l'import d'une configuration
+    if ($Sync.Running) { Show-Info 'Une tâche est en cours. Restaurer les réglages une fois terminée.'; return }
     $vals = [ordered]@{}
     foreach ($tw in $Tweaks) { $vals[$tw.Id] = Get-TweakDefault $tw }
     $diff = Get-SnapshotDiff ([pscustomobject]@{ Values = [pscustomobject]$vals })
@@ -564,6 +578,7 @@ function Restore-TweakDefault {
     Update-ApplyButton
 }
 function Restore-TweakSnapshot($Snap) {
+    if ($Sync.Running) { Show-Info 'Une tâche est en cours. Restaurer les réglages une fois terminée.'; return }
     $diff = Get-SnapshotDiff $Snap
     $when = '{0:dd/MM/yyyy HH:mm}' -f (Get-SnapshotTime $Snap)
     if (-not $diff.Count) { Show-SnapshotDetail $Snap; return }
@@ -709,7 +724,7 @@ function New-SettingsHero {
     # page des versions publiées (GitHub), lien cliquable
     $gl = New-Text ("github.com/$UpdRepo"); $gl.Cursor = [Windows.Input.Cursors]::Hand; $gl.TextDecorations = [Windows.TextDecorations]::Underline; $gl.Margin = New-Thickness 0 0 0 6; $gl.HorizontalAlignment = 'Left'
     $gl.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'AccentBrush'); $gl.ToolTip = 'Ouvrir la page des versions publiées dans le navigateur'
-    $gl.Add_MouseLeftButtonUp({ try { Start-Process "https://github.com/$UpdRepo/releases" } catch { Write-UiLog "Ouverture de la page GitHub : $($_.Exception.Message)" 'ERROR' } })
+    $gl.Add_MouseLeftButtonUp({ try { Open-WebPage "https://github.com/$UpdRepo/releases" } catch { Write-UiLog "Ouverture de la page GitHub : $($_.Exception.Message)" 'ERROR' } })
     [void]$sp.Children.Add($gl)
     $SetUI.HeroStatus = New-Text '' 'Muted'; $SetUI.HeroStatus.TextWrapping = 'Wrap'; [void]$sp.Children.Add($SetUI.HeroStatus)
     [void]$g.Children.Add($sp)

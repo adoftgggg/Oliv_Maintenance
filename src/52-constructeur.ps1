@@ -42,9 +42,12 @@ function Invoke-Native([string]$FilePath, [string[]]$ArgumentList) {
             Set-JobStep 'Oem' 1 4 "installation de $Name (winget)"
             $wg = Find-Winget; if (-not $wg) { throw 'winget introuvable.' }
             Write-TaskLog "$Name absent : installation automatique par winget ($Id)."
-            $p = Start-Process -FilePath $wg -ArgumentList @('install', '-e', '--id', $Id, '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') -WindowStyle Hidden -Wait -PassThru
-            Write-TaskLog ('{0} : code retour winget {1}' -f $Name, $p.ExitCode) $(if ($p.ExitCode -eq 0) { 'OK' } else { 'ERROR' })
-            $p.ExitCode -eq 0
+            # par Invoke-Native : PID publié ($Sync.OemChildPid), Annuler arrête winget (avant : Start-Process -Wait, annulation
+            # sans effet jusqu'à la fin de l'installation, plusieurs minutes)
+            $rc = Invoke-Native $wg @('install', '-e', '--id', $Id, '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
+            if ($Sync.OemCancelled) { throw 'installation interrompue (recherche annulée).' }
+            Write-TaskLog ('{0} : code retour winget {1}' -f $Name, $rc) $(if ($rc -eq 0) { 'OK' } else { 'ERROR' })
+            $rc -eq 0
         } catch { Write-TaskLog "Installation de $Name : $($_.Exception.Message)" 'ERROR'; $false }
     }
     # HP Image Assistant hors de Program Files (C:\HPIA, C:\SWSetup : modifiables par tout utilisateur avec les droits par
@@ -96,7 +99,13 @@ function Invoke-Native([string]$FilePath, [string[]]$ArgumentList) {
                     if (-not (Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' })) {
                         [void](Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers -ErrorAction Stop)
                     }
-                    Install-Module -Name Lenovo.Client.Update -Repository PSGallery -Scope AllUsers -Force -ErrorAction Stop
+                    # module sans signature Authenticode vérifiable : version de la galerie contrôlée avant l'installation
+                    # (propriétaire du paquet sur PowerShell Gallery : compte lenovocdrt de Lenovo ; à défaut de cette
+                    # information, auteur Lenovo), puis installée exactement (chargée ensuite depuis Program Files seulement)
+                    $fm = Find-Module -Name Lenovo.Client.Update -Repository PSGallery -ErrorAction Stop
+                    $own = "$($fm.AdditionalMetadata.owners)"
+                    if (($own -and $own -notmatch '(?i)\blenovocdrt\b') -or (-not $own -and "$($fm.Author)" -notmatch '(?i)\bLenovo\b')) { throw "module Lenovo.Client.Update de la galerie publié par un autre compte ($own $($fm.Author)) : installation refusée." }
+                    Install-Module -Name Lenovo.Client.Update -RequiredVersion $fm.Version -Repository PSGallery -Scope AllUsers -Force -ErrorAction Stop
                 }
                 Import-Module Lenovo.Client.Update -ErrorAction Stop
                 Write-TaskLog ('Lenovo.Client.Update {0} : recherche des pilotes, BIOS et firmware applicables (plusieurs minutes possibles)...' -f (Get-Module Lenovo.Client.Update).Version)
@@ -224,6 +233,9 @@ if ($wuIds.Count) {
         if ($coll.Count -eq 0) { Write-TaskLog 'Aucun des pilotes sélectionnés n''est encore proposé par Windows Update.' 'WARN' }
         else {
             $n = $coll.Count; $base = [int]$Sync.OemRun.Done
+            # pilotes en échec au téléchargement : comptés terminés une seule fois, à ce moment-là, puis ignorés par la phase
+            # d'installation (avant : jamais comptés si l'installation levait ensuite une exception)
+            $dlFail = [Collections.Generic.HashSet[string]]::new()
             # téléchargement puis installation en tâche asynchrone : GetProgress() donne la mise à jour en cours et son pourcentage
             foreach ($phase in 'téléchargement', 'installation') {
                 $Sync.OemRun.Step = "$phase de $n $(Get-Plural $n 'pilote' 'pilotes') Windows Update"; $Sync.OemInstStatus = $Sync.OemRun.Step; Write-TaskLog $Sync.OemInstStatus
@@ -252,6 +264,7 @@ if ($wuIds.Count) {
                 if ($phase -eq 'installation') {
                     $rc = @{ 2 = 'installé'; 3 = 'installé avec erreurs'; 4 = 'échec'; 5 = 'annulé' }
                     for ($i = 0; $i -lt $n; $i++) {
+                        if ($dlFail.Contains($collIds[$i])) { continue }
                         $ur = $res.GetUpdateResult($i); $k = $collIds[$i]; $hr = [int64]$ur.HResult; if ($hr -lt 0) { $hr += 4294967296 }
                         if ([int]$ur.ResultCode -in 2, 3) {
                             $Sync.OemOkCount = 1 + [int]$Sync.OemOkCount
@@ -271,6 +284,7 @@ if ($wuIds.Count) {
                                 $hr = [int64]$ur.HResult
                                 if ($hr -lt 0) { $hr += 4294967296 }
                                 Set-OemItem $collIds[$i] @{ State = 'fail'; Code = $hr; Phase = 'téléchargement' }
+                                if ($dlFail.Add($collIds[$i])) { $Sync.OemRun.Done++ }
                             }
                         } catch { Write-Ignored 'Résultat d''installation constructeur' $_ }
                     }

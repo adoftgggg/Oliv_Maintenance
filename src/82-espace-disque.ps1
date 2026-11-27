@@ -146,12 +146,14 @@ function Show-SpaceAnalyzer {
     $TreeUI.Timer = [Windows.Threading.DispatcherTimer]::new(); $TreeUI.Timer.Interval = [TimeSpan]::FromMilliseconds(300)
     $TreeUI.Timer.Add_Tick({ Update-TreeScan })
     $w.Add_Closed({
-        if ($TreeUI.Job) { [_OlivM.DirScan]::Cancel = $true }
         $TreeUI.Timer.Stop(); $TreeUI.DriveTimer.Stop(); $TreeUI.Root = $null; $TreeUI.Node = $null; $TreeUI.Stack = $null
-        if ($TreeUI.Job) {
-            try { $TreeUI.Job.PS.EndInvoke($TreeUI.Job.Handle) } catch {}
-            try { $TreeUI.Job.PS.Runspace.Dispose(); $TreeUI.Job.PS.Dispose() } catch {}
-            $TreeUI.Job = $null
+        # analyse en cours : annulée sans attendre sa fin (EndInvoke figeait l'interface toute la durée de l'analyse),
+        # runspace libéré par le minuteur dès qu'elle s'arrête
+        if ($TreeUI.Job) { [_OlivM.DirScan]::Cancel = $true; $BgOrphans.Add($TreeUI.Job); $TreeUI.Job = $null }
+        # suppression en cours : suivie par le minuteur, résultat au Journal et dans le rapport de session à sa fin
+        if ($TreeUI.DelJob) {
+            $Sync.TreeDelBg = @{ Path = $TreeUI.DelItem.Path; Size = $TreeUI.DelItem.Size; Recycle = [bool]$Sync.TreeDel.Recycle }
+            $BgJobs['TreeDel'] = $TreeUI.DelJob; $TreeUI.DelJob = $null; $TreeUI.DelItem = $null
         }
         $TreeUI.Win = $null; [GC]::Collect()
     })
@@ -219,6 +221,8 @@ function Start-TreeScan {
         try { $di = [IO.DriveInfo]::new($TreeUI.Target); $TreeUI.Used = [double]($di.TotalSize - $di.TotalFreeSpace) } catch {}
     }
     $Sync.TreePath = $TreeUI.Target; $Sync.TreeResult = $null
+    # annulation remise à zéro ici, avant le lancement (plus dans DirScan.Scan) : un clic sur Annuler pendant la préparation compte
+    [_OlivM.DirScan]::Cancel = $false
     $TreeUI.Job = New-PsJob @'
 $deg = [math]::Min(8, [Environment]::ProcessorCount)
 try {
@@ -353,6 +357,7 @@ function Show-TreeMenu($Src) {
 }
 function Start-TreeDelete($Item, [bool]$Recycle) {
     if ($TreeUI.Job -or $TreeUI.DelJob -or (Test-TreeProtected $Item.Path)) { return }
+    if ($BgJobs.ContainsKey('TreeDel')) { Show-Info 'Une suppression lancée avant la fermeture de l''analyseur est encore en cours : attendre sa fin (Journal).'; return }
     $what = $(if ($Item.IsDir) { 'le dossier' } else { 'le fichier' })
     $how = $(if ($Recycle) { "Mettre $what à la corbeille ?" } else { "Supprimer définitivement $what ?" })
     $det = "{0}`n{1}{2}" -f $Item.Path, (Format-SizeUi $Item.Size), $(if ($Item.IsDir) { '  ·  {0:N0} {1}' -f $Item.Files, (Get-Plural $Item.Files 'fichier' 'fichiers') } else { '' })
@@ -364,6 +369,19 @@ function Start-TreeDelete($Item, [bool]$Recycle) {
     $TreeUI.Status.Text = "Suppression en cours : $($Item.Path)"; $TreeUI.Prog.Visibility = 'Visible'
     Write-UiLog ('{0} : {1} ({2})' -f $(if ($Recycle) { 'Mise à la corbeille' } else { 'Suppression définitive' }), $Item.Path, (Format-SizeUi $Item.Size))
     $TreeUI.Timer.Start()
+}
+# suppression terminée après la fermeture de l'analyseur : Journal, notification et rapport de session (plus d'arbre à mettre à jour)
+$BgJobDone['TreeDel'] = {
+    $d = $Sync.TreeDelBg; $r = $Sync.TreeDelResult; $Sync.TreeDelBg = $null
+    if (-not $d) { return }
+    if ($r -and -not $r.Exists) {
+        Write-UiLog ('Supprimé : {0} ({1}).' -f $d.Path, (Format-SizeUi $d.Size)) 'OK'
+        Show-Toast ('{0} : {1} libérés' -f $(if ($d.Recycle) { 'Mis à la corbeille' } else { 'Supprimé' }), (Format-SizeUi $d.Size))
+        Add-SessionEvent 'Espace disque' $d.Path ('{0} {1}' -f $(if ($d.Recycle) { 'mis à la corbeille' } else { 'supprimé définitivement' }), (Format-SizeUi $d.Size)) 'ok'
+    } else {
+        Write-UiLog ('Suppression incomplète : {0} (code {1}).' -f $d.Path, $(if ($r) { $r.Code } else { '?' })) 'WARN'
+        Add-SessionEvent 'Espace disque' $d.Path ('suppression incomplète (code {0})' -f $(if ($r) { $r.Code } else { '?' })) 'warn'
+    }
 }
 function Complete-TreeDelete {
     $j = $TreeUI.DelJob; $it = $TreeUI.DelItem; $TreeUI.DelJob = $null; $TreeUI.DelItem = $null

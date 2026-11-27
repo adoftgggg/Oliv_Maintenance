@@ -102,6 +102,8 @@ function Add-BitLockerMenu($V, [string]$State) {
     if ($busy) { $mi = [Windows.Controls.MenuItem]::new(); $mi.Header = $(if ($State -eq 'encrypting') { 'Chiffrement en cours' } elseif ($State -eq 'decrypting') { 'Déchiffrement en cours' } else { 'Opération BitLocker en cours' }); $mi.IsEnabled = $false; [void]$cm.Items.Add($mi) }
     & $add 'Activer BitLocker...' 'enable' ($State -eq 'off')
     if ($State -eq 'suspended') { & $add 'Reprendre la protection' 'resume' $true }
+    # chiffrement / déchiffrement en pause : reprise de la conversion (Resume-BitLocker ne reprend que la protection)
+    if ($State -eq 'paused') { & $add 'Reprendre le chiffrement (ou déchiffrement)' 'resumeconv' $true }
     & $add 'Désactiver BitLocker...' 'disable' ($State -in 'on', 'suspended')
     $b.ContextMenu = $cm
     $b.Add_Click({ param($s, $e) $s.ContextMenu.PlacementTarget = $s; $s.ContextMenu.Placement = 'Bottom'; $s.ContextMenu.IsOpen = $true })
@@ -122,10 +124,11 @@ function Invoke-BitLockerAction([string]$Action) {
             Write-UiLog 'BitLocker : désactivation demandée.' 'WARN'
         }
         'resume' { }
+        'resumeconv' { }
         default { return }
     }
     $Sync.BlAction = $Action; $Sync.BlVolume = $vol; $Sync.BlResult = $null
-    Write-UiLog ('BitLocker ({0}) : {1}...' -f $vol, @{ enable = 'activation'; disable = 'désactivation'; resume = 'reprise de la protection' }[$Action]) 'APP'
+    Write-UiLog ('BitLocker ({0}) : {1}...' -f $vol, @{ enable = 'activation'; disable = 'désactivation'; resume = 'reprise de la protection'; resumeconv = 'reprise du chiffrement' }[$Action]) 'APP'
     Start-BgJob 'BitLocker' $BitLockerScript
 }
 $BitLockerScript = @'
@@ -154,6 +157,13 @@ try {
         }
         'disable' { [void](Disable-BitLocker -MountPoint $vol -ErrorAction Stop); $r.Ok = $true; $r.Msg = 'désactivé, déchiffrement en cours en arrière-plan' }
         'resume'  { [void](Resume-BitLocker -MountPoint $vol -ErrorAction Stop); $r.Ok = $true; $r.Msg = 'protection reprise' }
+        # conversion en pause : ResumeConversion de Win32_EncryptableVolume (équivalent de manage-bde -resume)
+        'resumeconv' {
+            $ev = Get-CimInstance -Namespace 'root\cimv2\Security\MicrosoftVolumeEncryption' -ClassName Win32_EncryptableVolume -Filter ("DriveLetter='{0}'" -f $vol) -ErrorAction Stop
+            $rc = (Invoke-CimMethod -InputObject $ev -MethodName ResumeConversion -ErrorAction Stop).ReturnValue
+            if ($rc -ne 0) { throw ('reprise refusée par Windows (code 0x{0:X8})' -f [int64]$rc) }
+            $r.Ok = $true; $r.Msg = 'chiffrement (ou déchiffrement) repris en arrière-plan'
+        }
     }
 } catch { $r.Msg = $_.Exception.Message }
 $Sync.BlResult = $r
@@ -166,7 +176,7 @@ $BgJobDone['BitLocker'] = {
             Write-UiLog $(if ($r.Backup) { "Clé de récupération sauvegardée dans : $($r.Backup)." } else { 'Clé de récupération non sauvegardée hors du poste (ni Entra ID ni Active Directory) : la noter depuis le diagnostic rapide (Afficher).' }) $(if ($r.Backup) { 'OK' } else { 'WARN' })
         }
         Add-SessionEvent 'Sécurité' "BitLocker ($vol)" $r.Msg 'ok'
-        if ($Sync.BlAction -in 'enable', 'disable') { Start-BlWatch }
+        if ($Sync.BlAction -in 'enable', 'disable', 'resumeconv') { Start-BlWatch }
     } else {
         $m = $(if ($r) { $r.Msg } else { 'tâche interrompue' })
         Write-UiLog ('BitLocker ({0}) : échec - {1}' -f $vol, $m) 'ERROR'

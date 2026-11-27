@@ -50,6 +50,9 @@ try {
         $j = Invoke-RestMethod -Uri ('https://api.github.com/repos/{0}/releases/latest' -f $p.Repo) -Headers $h -TimeoutSec 12 -UseBasicParsing -ErrorAction Stop
         $v = "$($j.tag_name)" -replace '^[vV]', ''; $name = "Oliv_Maintenance_$v.exe"
         if ($p.Url -like "*/$name") { throw }
+        # version relue pas plus récente que celle installée (publication retirée, retour en arrière) : rien n'est installé
+        $nv = $null; $cv = $null; [void][version]::TryParse($v, [ref]$nv); [void][version]::TryParse("$($p.Cur)", [ref]$cv)
+        if (-not $nv -or ($cv -and $nv -le $cv)) { throw "la dernière version publiée ($v) n'est pas plus récente que celle installée ($($p.Cur)) : rien à installer" }
         $p.Url = 'https://raw.githubusercontent.com/{0}/binaires/{1}' -f $p.Repo, $name; $p.Tag = "$($j.tag_name)"
         $p.Size = $null; $p.Digest = $null
         if ("$($j.body)" -match '(?i)SHA-?256\W+([0-9a-f]{64})') { $p.Digest = 'sha256:' + $Matches[1].ToLower() }
@@ -70,6 +73,8 @@ try {
         if ($got -ne $want) { throw 'empreinte SHA-256 différente de celle publiée : fichier rejeté' }
         $st.Hash = $true
     }
+    # empreinte publiée obligatoire (comme lancer.ps1) : sans elle, rien ne garantit que le fichier reçu est celui publié
+    if (-not $st.Hash) { throw 'empreinte SHA-256 non publiée avec cette version : fichier rejeté' }
     # empreinte du fichier reçu : recontrôlée par le script de remplacement juste avant la copie et le lancement
     $st.Sha = (Get-FileHash -LiteralPath $part -Algorithm SHA256).Hash
     if (Test-Path -LiteralPath $p.Dest) { Remove-Item -LiteralPath $p.Dest -Force }
@@ -122,6 +127,10 @@ $UpdDlDir = Join-Path $env:ProgramData 'Oliv_Maintenance\MiseAJour'
 function Start-UpdInstall {
     $r = $UpdUI.Info; if (-not $r -or $BgJobs.ContainsKey('UpdDl')) { return }
     if ($Sync.Running) { Show-Info 'Une tâche est en cours. Mettre à jour une fois terminée.'; return }
+    if ("$($r.Digest)" -notmatch '^sha256:[0-9a-fA-F]{64}$') {
+        Write-UiLog ('Mise à jour {0} refusée : empreinte SHA-256 non publiée avec la version.' -f (Get-UpdVersion $r.Tag)) 'WARN'
+        Show-Info "Mise à jour refusée : l'empreinte SHA-256 du fichier n'est pas publiée avec cette version, son intégrité ne peut pas être vérifiée.`n`nTélécharger la version depuis sa page GitHub (bouton Voir sur GitHub)." 'Warn'; return
+    }
     if (-not $AppDirSafe) {
         Write-UiLog 'Mise à jour impossible : dossier de l''application non sécurisé (C:\ProgramData\Oliv_Maintenance).' 'ERROR'
         Show-Info "Mise à jour impossible : les droits du dossier C:\ProgramData\Oliv_Maintenance n'ont pas pu être sécurisés.`n`nFermer puis relancer l'application pour les remettre en conformité." 'Error'; return
@@ -130,7 +139,7 @@ function Start-UpdInstall {
     $dir = $(if ($exe -and (Test-Path -LiteralPath $exe)) { Split-Path -Parent $exe } else { Join-Path $UserProfilePath 'Downloads' })
     # nom fixe sur le poste (Oliv_Maintenance.exe), sans numéro de version : version et logo portés par le fichier lui-même.
     # Téléchargé dans le dossier protégé (.new), substitué après la fermeture
-    $Sync.UpdDl = [hashtable]::Synchronized(@{ Url = $r.Url; Size = $r.Size; Digest = $r.Digest; Dest = (Join-Path $UpdDlDir 'Oliv_Maintenance.exe.new'); Target = (Join-Path $dir 'Oliv_Maintenance.exe'); Old = $exe; Repo = $UpdRepo })
+    $Sync.UpdDl = [hashtable]::Synchronized(@{ Url = $r.Url; Size = $r.Size; Digest = $r.Digest; Dest = (Join-Path $UpdDlDir 'Oliv_Maintenance.exe.new'); Target = (Join-Path $dir 'Oliv_Maintenance.exe'); Old = $exe; Repo = $UpdRepo; Cur = $AppVersion })
     $Sync.UpdDlState = [hashtable]::Synchronized(@{ Pct = 0; Ok = $false; Msg = ''; Hash = $false; Sha = '' })
     $Ui.UpdGo.IsEnabled = $false; $Ui.UpdProg.Value = 0; $Ui.UpdProg.Visibility = 'Visible'; $Ui.UpdText.Text = 'Téléchargement de la version {0}...' -f (Get-UpdVersion $r.Tag)
     Write-UiLog ('Mise à jour : téléchargement de {0}.' -f $r.Url) 'APP'
@@ -147,7 +156,7 @@ $BgJobDone['UpdDl'] = {
         Show-UpdBar; return
     }
     if ($st.Retarget) { Write-UiLog ('Mise à jour : la version annoncée a été remplacée sur le dépôt, version {0} téléchargée à la place.' -f $st.Retarget) 'APP' }
-    Write-UiLog ('Mise à jour téléchargée : {0}{1}.' -f $p.Target, $(if ($st.Hash) { ' (empreinte SHA-256 vérifiée)' } else { ' (empreinte non publiée : taille vérifiée)' })) 'OK'
+    Write-UiLog ('Mise à jour téléchargée et vérifiée (empreinte SHA-256 publiée) : version {0}.' -f $(if ($st.Retarget) { $st.Retarget } else { Get-UpdVersion $UpdUI.Info.Tag })) 'OK'
     # lancé par le fichier .cmd : nouvel exe copié pour l'utilisateur (Téléchargements) et dossier ouvert, lancement par
     # l'utilisateur (invite UAC)
     if (-not $p.Old) {
@@ -205,7 +214,7 @@ function Show-UpdNote {
     $t = ("$($r.Notes)" -replace '(?m)^\s*(Exe|T.l.chargement)\s*:.*$', '').Trim()
     $n = $(if ($t) { $t -replace '(?m)^#+\s*', '' -replace '\*\*', '' } else { 'Pas de notes pour cette version.' })
     $v = Show-Dialog ("Nouveautés de la version {0}`n`n{1}" -f (Get-UpdVersion $r.Tag), $n) 'Info' @(@{ T = 'Voir sur GitHub'; V = 'web' }, @{ T = 'Mettre à jour'; V = 'go'; S = 'PrimaryBtn' }, @{ T = 'Fermer'; V = 'no'; C = $true }) $null $null 640
-    if ($v -eq 'web') { Start-Process $r.Page } elseif ($v -eq 'go') { Start-UpdInstall }
+    if ($v -eq 'web') { try { Open-WebPage $r.Page } catch { Write-UiLog "Ouverture de la page GitHub : $($_.Exception.Message)" 'ERROR'; Show-Info "Ouverture de la page GitHub impossible.`n`n$($_.Exception.Message)" 'Error' } } elseif ($v -eq 'go') { Start-UpdInstall }
 }
 $Ui.UpdGo.Add_Click({ Start-UpdInstall })
 $Ui.UpdNotes.Add_Click({ Show-UpdNote })
