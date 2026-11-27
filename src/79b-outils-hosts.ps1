@@ -47,11 +47,20 @@ function Write-HostsFile([string]$Own, [string[]]$Block) {
     $txt = $Own.TrimEnd() + "`r`n" + $(if ($Block -and $Block.Count) { "`r`n" + ($Block -join "`r`n").TrimEnd() + "`r`n" } else { '' })
     # fichier momentanément ouvert par le service Client DNS (relecture après modification) ou l'antivirus : nouvel essai
     # toutes les 250 ms, 15 s au plus, avant de signaler l'échec
-    # écriture atomique (fichier temporaire substitué, droits du fichier conservés) : une coupure ne laisse jamais un hosts tronqué
-    for ($k = 0; ; $k++) {
-        try { Write-FileAtomic $HostsFile $txt ([Text.Encoding]::Default) -NoBackup; break }
-        catch [IO.IOException] { if ($k -ge 60) { throw 'fichier hosts occupé par un autre programme depuis 15 s (service Client DNS ou antivirus) : réessayer dans un instant.' }; Start-Sleep -Milliseconds 250 }
-    }
+    # écriture atomique (fichier temporaire substitué, droits du fichier conservés) : une coupure ne laisse jamais un hosts tronqué.
+    # Fichier occupé : nouvel essai toutes les 250 ms sans figer la fenêtre (avant : Start-Sleep sur le fil d'interface,
+    # jusqu'à 15 s figée), carte du fichier hosts désactivée pendant l'attente
+    $body = $ToolsUI.HostsBody
+    try {
+        for ($k = 0; ; $k++) {
+            try { Write-FileAtomic $HostsFile $txt ([Text.Encoding]::Default) -NoBackup; break }
+            catch [IO.IOException] {
+                if ($k -ge 60) { throw 'fichier hosts occupé par un autre programme depuis 15 s (service Client DNS ou antivirus) : réessayer dans un instant.' }
+                if ($k -eq 0) { if ($body) { $body.IsEnabled = $false }; Show-Toast 'Fichier hosts occupé par un autre programme : nouvel essai...' $false }
+                Wait-UiDelay 250
+            }
+        }
+    } finally { if ($body) { $body.IsEnabled = $true } }
     # vidage du cache DNS sans attendre (Clear-DnsClientCache bloquait l'interface pendant la relecture du fichier par le service)
     try { Start-Process -FilePath (Join-Path $env:windir 'System32\ipconfig.exe') -ArgumentList '/flushdns' -WindowStyle Hidden } catch { Write-Ignored 'Vidage du cache DNS' $_ }
 }
@@ -77,7 +86,7 @@ function Confirm-HostsChange([string]$Before, [string]$After, [string]$Head) {
     }
     foreach ($n in ($a.Keys | Sort-Object)) { if (-not $b.ContainsKey($n)) { $lines += '- retiré : {0}  (était {1})' -f $n, (Get-HostsMeaning $a[$n]) } }
     if (-not $lines.Count) {
-        if ($Before.Trim() -ceq $After.Trim()) { return $false }
+        if ($Before.Trim() -ceq $After.Trim()) { Show-Toast 'Aucun changement : fichier hosts inchangé'; return $false }
         $lines = @('Aucune entrée modifiée : seuls les commentaires ou la mise en forme changent.')
     }
     $ToolsUI.HostsLast = $lines
@@ -87,7 +96,12 @@ function Save-HostsOwn([string]$Own, $Block, [string]$What) {
     try {
         Write-HostsFile $Own $Block
         Write-UiLog ("Fichier hosts modifié ($What) : " + (@($ToolsUI.HostsLast) -join ' ; ')) 'OK'; Add-SessionEvent 'Réglages' 'Fichier hosts' $What 'ok'
-    } catch { Show-Info "Écriture du fichier hosts impossible (antivirus ?).`n`n$($_.Exception.Message)" 'Error' }
+        Show-Toast 'Fichier hosts enregistré'
+    } catch {
+        # échec tracé au Journal comme les autres écritures du fichier hosts (avant : message seulement)
+        Write-UiLog "Fichier hosts : $($_.Exception.Message)" 'ERROR'
+        Show-Info "Écriture du fichier hosts impossible (antivirus ?).`n`n$($_.Exception.Message)" 'Error'
+    }
     Update-HostsCard
 }
 # DNS AdGuard (94.140.14.14 : blocage des pubs et traqueurs côté serveur) réglé sur toutes les cartes réseau actives ; ancien

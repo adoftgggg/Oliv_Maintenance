@@ -46,7 +46,6 @@ function Set-RegValue([string]$Path, [string]$Name, $Value, [string]$Type = 'DWo
         } else { throw }
     }
 }
-# Registry.pol : en-tête « PReg » + version 1, puis entrées [clé;valeur;type;taille;données] en UTF-16LE
 # Registry.pol (format PReg) : en-tête « PReg » + version 1, puis entrées [clé;valeur;type;taille;données] en UTF-16LE.
 # Lecture stricte : tout écart de format arrête la lecture avec une erreur (jamais de réécriture d'un fichier lu partiellement).
 function Read-PolFile([string]$File) {

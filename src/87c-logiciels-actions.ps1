@@ -154,7 +154,7 @@ $Ui.FooterStatus.Add_MouseLeftButtonUp({
 })
 # dernier inventaire enregistré (logiciels.json) chargé dès le démarrage : Mes applications, Mettre à jour et le catalogue
 # Installer l'affichent tout de suite, la relecture se fait ensuite en arrière-plan. Le chargement était fait par la carte
-# Logiciels de Maintenance (New-SoftCard), retirée : la liste était relue entièrement à chaque ouverture de l'application.
+# Logiciels de Maintenance, retirée : la liste était relue entièrement à chaque ouverture de l'application.
 try {
     if (-not $Sync.WgResult -and (Test-Path -LiteralPath $SoftFile)) {
         $Sync.WgResult = Get-Content -LiteralPath $SoftFile -Raw -Encoding UTF8 | ConvertFrom-Json

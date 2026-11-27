@@ -489,15 +489,6 @@ function Get-OemRunSig { $run = $Sync.OemRun; if (-not $run) { return '' }; (@($
     $i = $run.Items[$_]
     '{0}:{1}:{2}:{3}' -f $_, $i.State, $i.Phase, $i.Pct
 }) -join '|') + "|$([bool]$Sync.AutoReboot)" }
-# Nom court du fabricant : « ASUSTeK COMPUTER INC. » > ASUS, « Micro-Star International Co., Ltd. » > MSI, « LENOVO » > Lenovo...
-# Inconnu : formes juridiques et mots génériques retirés (Inc., Corporation, Co., Ltd., Computer, Technology...).
-$OemBrands = [ordered]@{
-    '(?i)^asus' = 'ASUS'; '(?i)micro-?star|^msi\b' = 'MSI'; '(?i)gigabyte' = 'Gigabyte'; '(?i)asrock' = 'ASRock'
-    '(?i)hewlett|^hp\b' = 'HP'; '(?i)^dell' = 'Dell'; '(?i)^lenovo' = 'Lenovo'; '(?i)^acer' = 'Acer'; '(?i)^microsoft' = 'Microsoft'
-    '(?i)fujitsu' = 'Fujitsu'; '(?i)dynabook' = 'Dynabook'; '(?i)toshiba' = 'Toshiba'; '(?i)samsung' = 'Samsung'
-    '(?i)supermicro|super micro' = 'Supermicro'; '(?i)biostar' = 'Biostar'; '(?i)^intel' = 'Intel'; '(?i)medion' = 'Medion'
-    '(?i)panasonic' = 'Panasonic'; '(?i)getac' = 'Getac'; '(?i)huawei' = 'Huawei'; '(?i)^apple' = 'Apple'; '(?i)^nzxt' = 'NZXT'
-}
 # Ligne « Constructeur » : marque  ·  modèle  ·  n° de série. Modèle : nom commercial (famille chez Lenovo, dont le
 # nom de produit est le type machine) ; PC assemblé (valeurs système par défaut) : marque et modèle de la carte mère.
 # N° de série lu par la collecte de l'accueil (première valeur réelle : BIOS, produit, châssis, carte mère).

@@ -381,7 +381,6 @@ function Set-AppsIcon {
             $bi = [Windows.Media.Imaging.BitmapImage]::new(); $bi.BeginInit(); $bi.CacheOption = 'OnLoad'; $bi.UriSource = [Uri]::new($f); $bi.DecodePixelWidth = 128; $bi.EndInit(); $bi.Freeze()
             if ($bi.PixelWidth -lt 32 -and -not $real) { continue }   # icône générique 16 px du service = site sans icône : initiales gardées
             $im = [Windows.Controls.Image]::new(); $im.Source = $bi; $im.Width = 34; $im.Height = 34; [Windows.Media.RenderOptions]::SetBitmapScalingMode($im, 'HighQuality')
-            [Windows.Media.RenderOptions]::SetBitmapScalingMode($im, 'HighQuality')
             $o.Icon.Background = [Windows.Media.Brushes]::White; $o.Icon.Child = $im; $o.IconSet = $true; $o.IconReal = $real
         } catch { Write-Ignored 'Icône d''application' $_ }
     }

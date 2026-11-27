@@ -198,7 +198,9 @@ function Set-TreeTarget([string]$Path) {
     foreach ($b in $TreeUI.DriveBtns) { $b.Tag = $(if ($b.DataContext -eq $Path) { 'on' } else { '' }) }
 }
 function Start-TreeScan {
-    if ($TreeUI.Job -or -not (Test-Path -LiteralPath $TreeUI.Target)) { return }
+    if ($TreeUI.Job) { return }
+    # emplacement disparu (clé USB retirée, dossier supprimé) : dit dans la ligne d'état (avant : clic sans aucune réponse)
+    if (-not (Test-Path -LiteralPath $TreeUI.Target)) { $TreeUI.Status.Text = "Emplacement introuvable : $($TreeUI.Target) (lecteur retiré ou dossier supprimé)."; return }
     $TreeUI.Root = $null
     $TreeUI.Node = $null
     $TreeUI.Map.Children.Clear()
@@ -684,5 +686,8 @@ function Show-TreeList {
         $row.Add_MouseRightButtonUp({ param($s, $e) Show-TreeMenu $s })
         [void]$l.Children.Add($row)
     }
+    # liste limitée aux 200 plus gros éléments : le reste annoncé (avant : coupée sans le dire)
+    $more = @($n.Children | Where-Object { Test-TreeShown $_ }).Count - 200
+    if ($more -gt 0) { $t = New-Text ('+ {0:N0} {1} plus {2}, non {3} : ouvrir un sous-dossier pour les voir' -f $more, (Get-Plural $more 'autre élément' 'autres éléments'), (Get-Plural $more 'petit' 'petits'), (Get-Plural $more 'affiché' 'affichés')) 'Muted'; $t.Margin = New-Thickness 26 6 16 6; [void]$l.Children.Add($t) }
 }
 

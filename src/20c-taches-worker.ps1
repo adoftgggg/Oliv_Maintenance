@@ -232,7 +232,7 @@ function Invoke-SoftRemoveItem($X, $Wg) {
 }
 # programmes qui bloquent le logiciel, juste avant son installeur : processus du même nom que le logiciel, puis tout
 # processus qui a un fichier du dossier d'installation ouvert ou chargé (exe, DLL) d'après le gestionnaire de redémarrage
-# de Windows (3 000 fichiers au plus)
+# de Windows (400 fichiers au plus)
 function Find-SoftLocker($Lock) {
     $it = $Sync.SoftRun.Items["$($Sync.SoftRun.Cur)"]; $it.Phase = 'recherche des programmes ouverts'
     $found = @{}; $base = "$($Lock.Base)"
@@ -488,6 +488,8 @@ function Invoke-Task_SoftUpgrade {
     if ($reboot) { Write-TaskLog 'Redémarrage du poste demandé par au moins un installeur.' 'WARN' }
 }
 function Invoke-Task_AppxRemove {
+    # paquets préinstallés lus une seule fois (requête lente, plusieurs secondes) au lieu d'une fois par application cochée
+    $prov = @(Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue)
     foreach ($n in $Sync.Params.Appx) {
         Write-TaskLog "AppX : $n" 'STEP'
         $found = $false
@@ -499,7 +501,7 @@ function Invoke-Task_AppxRemove {
             }
             catch { Write-TaskLog "  échec : $($p.PackageFullName) - $($_.Exception.Message)" 'WARN' }
         }
-        foreach ($p in @(Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq $n })) {
+        foreach ($p in @($prov | Where-Object { $_.DisplayName -eq $n })) {
             $found = $true
             try {
                 Remove-AppxProvisionedPackage -Online -PackageName $p.PackageName -ErrorAction Stop | Out-Null

@@ -103,8 +103,11 @@ function Show-SearchResult {
     $q = "$($Ui.GlobalSearch.Text)".Trim()
     $Ui.SearchHint.Visibility = $(if ($Ui.GlobalSearch.Text) { 'Collapsed' } else { 'Visible' })
     $Ui.SearchList.Children.Clear(); $SearchUI.Sel = -1; $SearchUI.Shown = @()
+    $newSearch = "$($SearchUI.LastQ)".Length -lt 2; $SearchUI.LastQ = $q
     if ($q.Length -lt 2) { $Ui.SearchPop.IsOpen = $false; return }
-    if ($SearchUI.Dirty -or -not $SearchUI.Stamp -or ([DateTime]::Now - $SearchUI.Stamp).TotalSeconds -gt 30) {
+    # index ancien de plus de 30 s : reconstruit au début d'une recherche seulement, jamais entre deux frappes (la
+    # reconstruction complète figeait la saisie) ; index marqué à refaire (pages construites) : reconstruit tout de suite
+    if ($SearchUI.Dirty -or -not $SearchUI.Stamp -or ($newSearch -and ([DateTime]::Now - $SearchUI.Stamp).TotalSeconds -gt 30)) {
         $Window.Cursor = [Windows.Input.Cursors]::Wait
         try { Update-SearchIndex } finally { $Window.Cursor = $null }
     }
@@ -132,7 +135,8 @@ function Show-SearchResult {
     }
     $sorted = @(); foreach ($pk in $order) { $sorted += @($SearchUI.Shown | Where-Object { $(if ($_.Kind -eq 'app') { 'Soft' } else { $_.Page }) -eq $pk }) }
     $SearchUI.Shown = $sorted
-    $glyph = @{ Info = 0xE80F; Maint = 0xE90F; Perf = 0xE770; Perso = 0xE771; Log = 0xE81C; Settings = 0xE713; Soft = 0xE7B8 }
+    # icônes des onglets (mêmes que la barre d'onglets) ; Sécurité, Applications, Services et Outils manquaient (résultats sans icône)
+    $glyph = @{ Info = 0xE80F; Maint = 0xE90F; Perf = 0xE770; Secu = 0xE72E; Perso = 0xE771; Apps = 0xE71D; Svc = 0xE912; Tools = 0xEC7A; Log = 0xE81C; Settings = 0xE713; Soft = 0xE7B8 }
     $i = 0; $last = $null
     foreach ($u in $SearchUI.Shown) {
         $pk = $(if ($u.Kind -eq 'app') { 'Soft' } else { $u.Page })

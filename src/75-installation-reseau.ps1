@@ -110,7 +110,8 @@ function Show-UsbDialog {
         if ($BgJobs.ContainsKey('Usb')) { $Sync.UsbCancel = $true; $UsbUI.Cancel.IsEnabled = $false; $UsbUI.Detail.Text = 'Arrêt demandé...'; return }
         $UsbUI.Win.Close()
     })
-    $dlg.Add_Closing({ param($s, $e) if ($BgJobs.ContainsKey('Usb')) { $e.Cancel = $true } })
+    # fermeture refusée pendant la création : la raison est donnée (avant : croix et Alt+F4 sans aucune réponse)
+    $dlg.Add_Closing({ param($s, $e) if ($BgJobs.ContainsKey('Usb')) { $e.Cancel = $true; Show-Toast 'Création de la clé en cours : bouton Interrompre pour l''arrêter' $false } })
     $dlg.Add_Closed({ $UsbUI.Win = $null; if ($UsbUI.Timer) { $UsbUI.Timer.Stop() } })
     $UsbUI.Ok.Add_Click({ Start-UsbCreation })
     [void]$dlg.ShowDialog()
@@ -386,9 +387,13 @@ function New-NetPortSection($Body) {
     $bt.Add_Click({ Show-NetConnection })
     [void]$hd.Children.Add($bt); [void]$Body.Children.Add($hd)
 }
+# noms des processus relus une fois par affichage (Update-ProcName) : avant, un Get-Process par port et par connexion,
+# fenêtre figée une à quelques secondes avec beaucoup de connexions
+$ProcNames = @{}
+function Update-ProcName { $ProcNames.Clear(); foreach ($p in [Diagnostics.Process]::GetProcesses()) { try { $ProcNames[$p.Id] = $p.ProcessName } finally { $p.Dispose() } } }
 function Get-ProcName([int]$ProcId) {
     if ($ProcId -eq 4) { return 'System' }
-    $p = Get-Process -Id $ProcId -ErrorAction SilentlyContinue; $(if ($p) { $p.ProcessName } else { "processus $ProcId" })
+    $(if ($ProcNames.ContainsKey($ProcId)) { $ProcNames[$ProcId] } else { "processus $ProcId" })
 }
 # ports en écoute (hors boucle locale) : lignes « Port 445 : System · partage de fichiers (SMB) », non standard signalés
 function Get-NetPortLine {
@@ -406,6 +411,7 @@ function Get-NetPortLine {
 }
 function Show-NetConnection {
     try {
+        Update-ProcName
         $ports = @(Get-NetPortLine)
         $cn = @(Get-NetTCPConnection -State Established -ErrorAction Stop | Where-Object { $_.RemoteAddress -notin '127.0.0.1', '::1' })
     } catch { Show-Info "Lecture impossible : $($_.Exception.Message)" 'Error'; return }

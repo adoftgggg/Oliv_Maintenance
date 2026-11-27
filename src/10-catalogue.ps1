@@ -523,18 +523,19 @@ $Tweaks = @(
                else { Set-RegValue $p 'ProductVersion' 'Windows 11' 'String'; Set-RegValue $p 'TargetReleaseVersionInfo' "$v" 'String'; Set-RegValue $p 'TargetReleaseVersion' 1 } } }
 )
 
+# icône de la carte de chaque groupe de réglages (nom du groupe = champ Group des réglages ; le test « Groupes de réglages :
+# icône » vérifie qu'aucun groupe n'en manque). Avant : « Explorateur, souris et presse-papiers » sans icône, trois clés
+# d'anciens groupes et un champ Desc lu nulle part
 $GroupInfo = @{
-    'Performances et alimentation' = @{ Glyph=[string][char]0xE7E8; Desc='Démarrage, veille prolongée, applications en arrière-plan, indexation, partage des mises à jour' }
-    'Menu démarrer'                = @{ Glyph=[string][char]0xE8A9; Desc='Résultats web, recommandations, suggestions et fichiers récents' }
-    'Barre des tâches'             = @{ Glyph=[string][char]0xE7C4; Desc='Alignement, recherche, boutons et widgets' }
-    'Souris et presse-papiers'     = @{ Glyph=[string][char]0xE962; Desc='Précision du pointeur, historique des éléments copiés (Windows + V)' }
-    'Réseau'                       = @{ Glyph=[string][char]0xE968; Desc='Serveurs DNS des cartes réseau' }
-    'Sécurité'                     = @{ Glyph=[string][char]0xE72E; Desc='Durcissement : protocoles anciens, UAC, pare-feu, Defender, LSA' }
-    'Windows Update'               = @{ Glyph=[string][char]0xE895; Desc='Report ou arrêt des mises à jour, version de Windows 11 maintenue sur le poste' }
-    'Explorateur de fichiers'      = @{ Glyph=[string][char]0xE8B7; Desc='Dossier d''ouverture, extensions, fichiers cachés, menu clic droit' }
-    'Confidentialité'              = @{ Glyph=[string][char]0xE72E; Desc='Données envoyées à Microsoft sur l''utilisation du poste' }
-    'Intelligence artificielle'    = @{ Glyph=[string][char]0xE945; Desc='Recherche agentique, Recall, Click to Do, Bloc-notes, Paint, Edge' }
-    'Publicités et suggestions'    = @{ Glyph=[string][char]0xE789; Desc='Contenus promotionnels et suggestions de nouvelles fonctions' }
+    'Performances et alimentation'          = @{ Glyph=[string][char]0xE7E8 }
+    'Menu démarrer'                         = @{ Glyph=[string][char]0xE8A9 }
+    'Barre des tâches'                      = @{ Glyph=[string][char]0xE7C4 }
+    'Explorateur, souris et presse-papiers' = @{ Glyph=[string][char]0xE8B7 }
+    'Sécurité'                              = @{ Glyph=[string][char]0xE72E }
+    'Windows Update'                        = @{ Glyph=[string][char]0xE895 }
+    'Confidentialité'                       = @{ Glyph=[string][char]0xE72E }
+    'Intelligence artificielle'             = @{ Glyph=[string][char]0xE945 }
+    'Publicités et suggestions'             = @{ Glyph=[string][char]0xE789 }
 }
 
 $EffectInfo = @{

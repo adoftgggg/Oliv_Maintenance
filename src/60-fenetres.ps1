@@ -134,7 +134,9 @@ function Initialize-ChildZoom($W) {
 function Set-UiZoom([double]$Z, [bool]$Show = $true) {
     $Z = Get-ZoomValue $Z
     $script:UiZoom = $Z
-    foreach ($w in @($Window, $TreeUI.Win, $SoftUI.Win)) { Set-WindowZoom $w }
+    # toutes les fenêtres ouvertes (variables d'environnement et moniteur compris : avant, la fenêtre Variables gardait
+    # le zoom de son ouverture)
+    foreach ($w in @($Window, $TreeUI.Win, $SoftUI.Win, $EnvUI.Win, $MonUI.Win)) { Set-WindowZoom $w }
     try { [IO.File]::WriteAllText($ZoomFile, $Z.ToString([Globalization.CultureInfo]::InvariantCulture)) } catch { Write-Ignored 'Enregistrement du zoom' $_ }
     if ($SetUI.Zoom) {
         foreach ($b in $SetUI.Zoom) {
@@ -218,7 +220,7 @@ function Show-ZoomToast([double]$Z = $UiZoom, $Target = $null) {
         $script:ZoomPop = $zp
     }
     $zp = $script:ZoomPop
-    $owner = $(if ($Target) { $Target } else { @($Window, $TreeUI.Win, $SoftUI.Win, $MonUI.Win) | Where-Object { $_ -and $_.IsActive } | Select-Object -First 1 })
+    $owner = $(if ($Target) { $Target } else { Get-ActiveAppWindow })
     if (-not $owner) { $owner = $Window }
     $zp.Text.Text = 'Zoom {0} %' -f [int][math]::Round($Z * 100)
     $zp.Timer.Stop()

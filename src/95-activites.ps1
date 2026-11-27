@@ -92,9 +92,10 @@ function Watch-UiFreeze {
     $now = [DateTime]::Now; $f = $Sync.UiFreeze
     if ($f) {
         $Sync.UiFreeze = $null; $d = ($now - $f.Start).TotalSeconds
-        # blocages de l'interface : plus signalés (ni journal ni bandeau), demande de l'utilisateur ; mesure conservée pour la
-        # surveillance (Sync.UiFreezeLast)
-        $Sync.UiFreezeLast = @{ S = $d; Step = "$($f.Step)"; At = $now }
+        # blocages de l'interface : plus signalés à l'écran (ni Journal ni bandeau), demande de l'utilisateur ; consignés dans
+        # le fichier journal seulement, avec l'étape en cours, pour repérer les traitements trop longs (avant : mesure gardée
+        # dans $Sync.UiFreezeLast, lue nulle part)
+        try { Write-FileLog ('Interface bloquée {0:N1} s{1}' -f $d, $(if ($f.Step) { " ($($f.Step))" } else { '' })) 'WARN' } catch { $null = $_ }
     }
     $Sync.UiPing = $now
 }
@@ -120,18 +121,27 @@ function Start-BlWatch {
 }
 $BgJobDone['BlPoll'] = {
     $p = $Sync.BlPoll; $vol = $env:SystemDrive
-    if (-not $p -or $p.Err) { return }
+    # lecture en échec 3 fois de suite : suivi arrêté (avant : une tâche relancée toutes les 4 s sans fin)
+    if (-not $p -or $p.Err) {
+        $BlWatch.Err = 1 + [int]$BlWatch.Err
+        if ($BlWatch.Err -ge 3) { $BlWatch.Timer.Stop(); $BlWatch.Err = 0; Remove-BgActivity 'BitLocker'; Write-Ignored 'Suivi du chiffrement BitLocker' $(if ($p) { $p.Err } else { 'tâche interrompue' }) }
+        return
+    }
+    $BlWatch.Err = 0
     $txt = $null; $pct = 0
-    switch ($p.St) {
-        'EncryptionInProgress' { $pct = $p.Pct; $txt = 'BitLocker ({0}) : chiffrement en cours  ·  {1:N1} %' -f $vol, $pct }
-        'DecryptionInProgress' { $pct = 100 - $p.Pct; $txt = 'BitLocker ({0}) : déchiffrement en cours  ·  {1:N1} % effectué' -f $vol, $pct }
-        'EncryptionSuspended' { $pct = $p.Pct; $txt = 'BitLocker ({0}) : chiffrement en pause à {1:N1} % (reprise automatique par Windows)' -f $vol, $pct }
-        'DecryptionSuspended' { $pct = 100 - $p.Pct; $txt = 'BitLocker ({0}) : déchiffrement en pause à {1:N1} % effectué' -f $vol, $pct }
+    # états « en pause » : EncryptionPaused / DecryptionPaused (noms de Get-BitLockerVolume ; « Suspended », seuls testés
+    # avant, n'existent pas : une pause arrêtait le suivi comme une fin)
+    switch -Regex ($p.St) {
+        '^EncryptionInProgress$' { $pct = $p.Pct; $txt = 'BitLocker ({0}) : chiffrement en cours  ·  {1:N1} %' -f $vol, $pct }
+        '^DecryptionInProgress$' { $pct = 100 - $p.Pct; $txt = 'BitLocker ({0}) : déchiffrement en cours  ·  {1:N1} % effectué' -f $vol, $pct }
+        '^Encryption(Paused|Suspended)$' { $pct = $p.Pct; $txt = 'BitLocker ({0}) : chiffrement en pause à {1:N1} % (reprise automatique par Windows)' -f $vol, $pct }
+        '^Decryption(Paused|Suspended)$' { $pct = 100 - $p.Pct; $txt = 'BitLocker ({0}) : déchiffrement en pause à {1:N1} % effectué' -f $vol, $pct }
     }
     if ($txt) {
         $BlWatch.Was = $p.St
         Set-BgActivity 'BitLocker' $txt $pct 'Avancement réel du volume système, relu toutes les 4 secondes. Le PC reste utilisable ; un redémarrage ne fait que mettre en pause.' $null
-        if ($InfoUI.BlValue) { $InfoUI.BlValue.Text = $(if ($p.St -like 'Encryption*') { 'chiffrement en cours ({0:N1} %)' -f $p.Pct } else { 'déchiffrement en cours ({0:N1} % restant chiffré)' -f $p.Pct }) }
+        $ps = $(if ($p.St -match 'Paused|Suspended') { 'en pause' } else { 'en cours' })
+        if ($InfoUI.BlValue) { $InfoUI.BlValue.Text = $(if ($p.St -like 'Encryption*') { 'chiffrement {0} ({1:N1} %)' -f $ps, $p.Pct } else { 'déchiffrement {0} ({1:N1} % restant chiffré)' -f $ps, $p.Pct }) }
         return
     }
     # terminé (FullyEncrypted / FullyDecrypted) : fin du suivi

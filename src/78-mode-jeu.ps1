@@ -106,15 +106,37 @@ function Write-GameScript {
     $cap
 }
 function Get-GameModeOn { Test-Path -LiteralPath (Join-Path $GameDir 'mode-jeu.json') }
+# bascule en tâche de fond : powercfg, arrêt et relance de SysMain et Windows Search (plusieurs secondes) figeaient la
+# fenêtre sur le fil d'interface ; bouton grisé et état « en cours » pendant la bascule
+$GameJobScript = @'
+$q = $Sync.GameReq
+try { $m = & ([scriptblock]::Create($q.Script)) -Mode $q.Want -UserRoot $q.Root; $Sync.GameRes = @{ Ok = $true; Msg = "$m" } }
+catch { $Sync.GameRes = @{ Ok = $false; Msg = $_.Exception.Message } }
+'@
 function Switch-GameMode {
+    if ($BgJobs.ContainsKey('Game')) { return }
     $want = $(if (Get-GameModeOn) { 'off' } else { 'on' })
-    try {
-        [void](Write-GameScript)
-        $root = $(if ($HkuSidOk) { "Registry::HKEY_USERS\$UserSid" } else { 'HKCU:' })
-        $res = & ([scriptblock]::Create($GameScript)) -Mode $want -UserRoot $root
-        Write-UiLog "Mode jeu $res." 'OK'
-        Add-SessionEvent 'Réglages' 'Mode jeu' "$res" 'ok'
-    } catch { Write-UiLog "Mode jeu : $($_.Exception.Message)" 'ERROR' }
+    try { [void](Write-GameScript) }
+    catch { Write-UiLog "Mode jeu : $($_.Exception.Message)" 'ERROR'; Show-Info "Mode jeu : bascule impossible.`n`n$($_.Exception.Message)" 'Error'; return }
+    $root = $(if ($HkuSidOk) { "Registry::HKEY_USERS\$UserSid" } else { 'HKCU:' })
+    $Sync.GameReq = @{ Script = $GameScript; Want = $want; Root = $root }; $Sync.GameRes = $null
+    if ($GameUI.Btn) { $GameUI.Btn.IsEnabled = $false; $GameUI.State.Text = $(if ($want -eq 'on') { 'Activation en cours...' } else { 'Désactivation en cours...' }) }
+    Start-BgJob 'Game' $GameJobScript
+}
+$BgJobDone['Game'] = {
+    if ($GameUI.Btn) { $GameUI.Btn.IsEnabled = $true }
+    $r = $Sync.GameRes
+    if ($r -and $r.Ok) {
+        Write-UiLog "Mode jeu $($r.Msg)." 'OK'
+        Add-SessionEvent 'Réglages' 'Mode jeu' "$($r.Msg)" 'ok'
+    } else {
+        $m = $(if ($r) { $r.Msg } else { 'tâche interrompue' })
+        Write-UiLog "Mode jeu : $m" 'ERROR'; Show-Info "Mode jeu : bascule impossible.`n`n$m" 'Error'
+    }
+    Complete-GameSwitch
+}
+# après la bascule : réglages concernés relus, référence mise à jour, carte et bandeau des réglages en attente
+function Complete-GameSwitch {
     # lignes des réglages concernés relues (plan, HAGS, souris, mode jeu de Windows), badges « redémarrage requis »
     foreach ($r in @($TweakRows | Where-Object { $_.Tweak -and $_.Tweak.Id -in 'PowerPlan', 'Hags', 'MousePrecision', 'GameModeWin' })) {
         try { $v = Get-TweakValue $r.Tweak; if ("$v" -ne "$($r.Current)") { Complete-TweakChange $r $v $v } } catch { Write-Ignored 'Mode jeu (lecture des réglages)' $_ }

@@ -237,8 +237,6 @@ function Reset-CardOrder([string]$Page, [switch]$Quiet) {
     $CardMove.Applied.Remove($Page)
     if (-not $Quiet) { Write-UiLog ('{0} : ordre des cartes par défaut rétabli.' -f $CardPages[$Page]) 'APP' }
 }
-# une place plus haut / plus bas dans l'onglet (ordre de lecture : colonne par colonne) ; en haut d'une colonne, la carte
-# passe en bas de la colonne précédente, en bas d'une colonne, en haut de la suivante
 function Hide-Card($C) {
     [void]$HiddenCards.Add($C.Key); Save-HiddenCard; Set-CardShown $C $false
     Write-UiLog ('Carte « {0} » masquée (réaffichage : Paramètres > Onglets et cartes affichés).' -f $C.Title) 'APP'

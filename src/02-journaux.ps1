@@ -69,6 +69,21 @@ function Read-JsonState([string]$Path, [string]$What) {
     }
     @{ Ok = -not $found; Data = $null; From = $null }
 }
+# Fichier JSON Lines (une entrée par ligne, historiques) lu par paquets de 500 lignes : un seul ConvertFrom-Json par paquet
+# (tableau JSON) au lieu d'un par ligne, plusieurs secondes de moins sur le fil d'interface pour un historique de
+# plusieurs milliers de lignes, et taille de chaque paquet sous la limite de ConvertFrom-Json de Windows PowerShell 5.1.
+# Paquet illisible (ligne corrompue) : relu ligne par ligne, lignes illisibles ignorées (fichier journal). Ordre conservé.
+function Read-JsonLine([string]$Path, [string]$What) {
+    if (-not [IO.File]::Exists($Path)) { return }
+    $ls = @([IO.File]::ReadAllLines($Path, [Text.Encoding]::UTF8) | Where-Object { $_.Trim() })
+    for ($i = 0; $i -lt $ls.Count; $i += 500) {
+        $part = @($ls[$i..([math]::Min($i + 499, $ls.Count - 1))])
+        $all = $null
+        try { $all = ConvertFrom-Json -InputObject ('[' + ($part -join ',') + ']') -ErrorAction Stop } catch { $all = $null }
+        if ($null -ne $all) { foreach ($o in $all) { $o }; continue }
+        foreach ($l in $part) { try { ConvertFrom-Json -InputObject $l -ErrorAction Stop } catch { Write-Ignored $What $_ } }
+    }
+}
 # copie en table de hachage d'un état en mémoire : table (résultat d'un runspace) ou objet relu d'un fichier JSON
 # (ConvertFrom-Json : PSCustomObject, « @{} + objet » lève une erreur). Premier niveau seulement.
 function ConvertTo-StateTable($Obj) {
@@ -124,11 +139,15 @@ function Move-OldLog {
         $dest = Join-Path (Get-LogPath $cat) ([IO.Path]::GetFileName($f))
         if (-not (Test-Path -LiteralPath $dest)) { try { [IO.File]::Move($f, $dest) } catch { Write-Ignored 'Rangement des journaux' $_ } }
     }
-    # anciens dossiers vides supprimés (un fichier non déplaçable les laisse en place)
+    # anciens dossiers vides supprimés (un fichier non déplaçable les laisse en place) ; dossiers de l'arborescence actuelle
+    # ($LogCats : Systeme\Point de restauration...) et leurs parents gardés (avant : supprimés vides puis recréés à chaque lancement)
+    $cur = @($LogCats.Values | ForEach-Object { (Join-Path $LogDir $_).TrimEnd('\') })
     foreach ($d in 'Nettoyage', 'Reparation', 'Disques', 'Batterie', 'Applications', 'Systeme', 'Reglages') {
         $p = Join-Path $LogDir $d
         if (Test-Path -LiteralPath $p) {
             foreach ($x in @(Get-ChildItem -LiteralPath $p -Directory -Recurse | Sort-Object { $_.FullName.Length } -Descending) + @(Get-Item -LiteralPath $p)) {
+                $fx = $x.FullName.TrimEnd('\')
+                if (@($cur | Where-Object { $_ -ieq $fx -or $_.StartsWith($fx + '\', [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
                 if (-not @(Get-ChildItem -LiteralPath $x.FullName -Force).Count) { try { $x.Delete() } catch {} }
             }
         }

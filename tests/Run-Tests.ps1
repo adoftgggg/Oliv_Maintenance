@@ -288,17 +288,16 @@ Test-Eq 'Espace : non analysé'                (Get-TreeCategory @('Non analysé
 Test-Eq 'Couleur éclaircie 0 %'               (Get-LightHex '#5B6B82' 0) '#5B6B82'
 Test-Eq 'Couleur éclaircie 100 %'             (Get-LightHex '#5B6B82' 1) '#FFFFFF'
 
-# ---------- rapport d'intervention : tâches terminées, en cours et en attente
-Import-SrcFunction 'Get-RunEvent'
+# ---------- journal de session : tâches terminées seules, avec leur résultat, et espace libéré
+Import-SrcFunction 'Get-RunEvent', 'Format-SizeUi'
 $global:Sync = @{ Selected = @('DismRestore', 'Sfc', 'ChkBoot'); TaskIdx = 2; TaskPct = 37.6; TaskStart = [DateTime]::Today.AddHours(10); ChildName = 'SFC'; Cancel = $false; RunStart = [DateTime]::Today.AddHours(9)
     Labels = @{ DismRestore = 'Réparation DISM'; Sfc = 'Réparation SFC'; ChkBoot = 'CHKDSK' }
-    TaskResults = @(@{ Id = 'DismRestore'; Label = 'Réparation DISM'; Start = [DateTime]::Today.AddHours(9); Err = 0; Warn = 0; Cancel = $false; Last = 'ok' }); WuInstalled = @(); SpaceGain = $null }
-$re = @(Get-RunEvent -Live)
-Test-Eq 'Rapport en direct : 3 lignes'           $re.Count 3
-Test-Eq 'Rapport en direct : tâche terminée'     $re[0].Result 'terminé'
-Test-Eq 'Rapport en direct : tâche en cours'     $re[1].Result 'en cours (37 %)'
-Test-Eq 'Rapport en direct : tâche en attente'   $re[2].Result 'en attente'
-Test-Eq 'Rapport final : tâches terminées seules' @(Get-RunEvent).Count 1
+    TaskResults = @(@{ Id = 'DismRestore'; Label = 'Réparation DISM'; Start = [DateTime]::Today.AddHours(9); Err = 0; Warn = 0; Cancel = $false; Last = 'ok' }, @{ Id = 'Sfc'; Label = 'Réparation SFC'; Start = [DateTime]::Today.AddHours(10); Err = 2; Warn = 0; Cancel = $false; Last = '' }); WuInstalled = @(); SpaceGain = $null }
+$re = @(Get-RunEvent)
+Test-Eq 'Journal de session : tâches terminées seules' $re.Count 2
+Test-Eq 'Journal de session : tâche réussie'     $re[0].Result 'terminé'
+Test-Eq 'Journal de session : tâche en erreur'   ('{0}|{1}' -f $re[1].Result, $re[1].Level) '2 erreurs|error'
+$global:Sync = $null
 
 # ---------- liens (jonctions) : détectés et supprimés sans suivre leur cible (dossier de l'application, nettoyage)
 Import-SrcFunction 'Test-PathLink', 'Remove-PathLink', 'Remove-DirLink', 'Test-CleanLinkPath'
@@ -669,8 +668,59 @@ try {
     Test-Eq 'Nettoyage : crochets et joker'      @(Resolve-CleanTarget @{ Paths = @("D:$cp\Data\*\Cache") }).Count 1
 } finally { try { [IO.Directory]::Delete((Split-Path $cp), $true) } catch { $null = $_ } }
 
-# ---------- nom court du fabricant (ligne Constructeur des mises à jour constructeur)
-$OemBrands = Get-SrcValue 'OemBrands'
+# ---------- historiques (JSON Lines) lus par paquets, ligne corrompue ignorée, ordre conservé ; cache des logiciels (P5, P6)
+Import-SrcFunction 'Read-JsonLine', 'Get-SoftHistory'
+$jl = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-' + [guid]::NewGuid().ToString('N') + '.jsonl')
+try {
+    $rows = @(1..1200 | ForEach-Object { '{"N":' + $_ + ',"Date":"2026-11-' + ('{0:D2}' -f (1 + $_ % 28)) + 'T10:00:00"}' })
+    [IO.File]::WriteAllLines($jl, [string[]]($rows[0..599] + @('{"N":') + $rows[600..1199]), [Text.UTF8Encoding]::new($false))
+    $rd = @(Read-JsonLine $jl 'test')
+    Test-Eq 'JSON Lines : 1200 entrées lues'       $rd.Count 1200
+    Test-Eq 'JSON Lines : ordre conservé'          ('{0},{1}' -f $rd[0].N, $rd[1199].N) '1,1200'
+    $SoftHistFile = $jl; $SoftHistCache = @{ Stamp = ''; Rows = @() }
+    Test-Eq 'Historique logiciels : lu'            @(Get-SoftHistory).Count 1200
+    $stamp1 = $SoftHistCache.Stamp
+    [void](Get-SoftHistory)
+    Test-Eq 'Historique logiciels : cache réutilisé' $SoftHistCache.Stamp $stamp1
+    [IO.File]::AppendAllText($jl, '{"N":1201,"Date":"2026-12-15T10:00:00"}' + "`r`n")
+    Test-Eq 'Historique logiciels : relu si modifié' @(Get-SoftHistory).Count 1201
+    Test-Eq 'Historique logiciels : plus récent en tête' @(Get-SoftHistory)[0].N 1201
+} finally { try { [IO.File]::Delete($jl) } catch { $null = $_ } }
+
+# ---------- imprimante par défaut : nom échappé dans la requête WQL (P10)
+Import-SrcFunction 'ConvertTo-WqlString'
+Test-Eq 'WQL : apostrophe et barre oblique'      (ConvertTo-WqlString "\\srv\HP d'accueil") "\\\\srv\\HP d\'accueil"
+
+# ---------- attente sans figer la fenêtre : délai respecté (P4)
+Add-Type -AssemblyName WindowsBase
+Import-SrcFunction 'Wait-UiDelay'
+$sw = [Diagnostics.Stopwatch]::StartNew(); Wait-UiDelay 200; $sw.Stop()
+Test-Eq 'Attente : 200 ms au moins'              ($sw.ElapsedMilliseconds -ge 190 -and $sw.ElapsedMilliseconds -lt 2000) $true
+
+# ---------- rangement des journaux : dossiers de l'arborescence actuelle jamais supprimés (P14)
+Import-SrcFunction 'Get-LogPath', 'Move-OldLog'
+$LogDir = Join-Path ([IO.Path]::GetTempPath()) ('olivm-test-' + [guid]::NewGuid().ToString('N'))
+$LogCats = [ordered]@{ Restauration = 'Systeme\Point de restauration'; Demarrage = 'Systeme\Applications au demarrage'; Etat = '_etat'; Depannage = 'Maintenance\Depannage' }
+foreach ($d in @($LogCats.Values) + @('Reglages\vide')) { [void][IO.Directory]::CreateDirectory((Join-Path $LogDir $d)) }
+try {
+    Move-OldLog
+    Test-Eq 'Journaux : dossier actuel gardé'      ([IO.Directory]::Exists((Join-Path $LogDir 'Systeme\Point de restauration'))) $true
+    Test-Eq 'Journaux : ancien dossier vide retiré' ([IO.Directory]::Exists((Join-Path $LogDir 'Reglages'))) $false
+} finally { try { [IO.Directory]::Delete($LogDir, $true) } catch { $null = $_ } }
+
+# ---------- groupes de réglages : chacun a son icône de carte (I5)
+$GroupInfo = Get-SrcValue 'GroupInfo'
+$grpSrc = [IO.File]::ReadAllText((Join-Path $root 'src\10-catalogue.ps1'), $utf8)
+$grpMiss = @([regex]::Matches($grpSrc, "Group='([^']+)'") | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique | Where-Object { -not $GroupInfo.ContainsKey($_) })
+Test-Eq 'Groupes de réglages : icône'            ($grpMiss -join ', ') ''
+
+# ---------- choix du réglage : écriture refusée = $false, rien d'affiché comme pris (I1)
+Import-SrcFunction 'Set-AffichageValue'
+function global:Open-RegKey { throw 'accès refusé' }
+function global:Show-Info { $null = $args }
+function global:Write-UiLog { $null = $args }
+Test-Eq 'Choix enregistré : échec signalé'       (Set-AffichageValue 'Test' 1) $false
+Remove-Item function:global:Open-RegKey, function:global:Show-Info, function:global:Write-UiLog
 
 # ---------- libellé court des mises à jour Windows
 Import-SrcFunction 'Get-WuShortTitle'

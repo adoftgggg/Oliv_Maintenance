@@ -23,9 +23,9 @@ function Get-HistoryRow {
         $f = Join-Path (Get-LogPath 'Etat') $n
         if (-not (Test-Path -LiteralPath $f)) { continue }
         try {
-            foreach ($l in [IO.File]::ReadAllLines($f, [Text.Encoding]::UTF8)) {
-                if (-not $l) { continue }
-                try { $r = $l | ConvertFrom-Json } catch { continue }
+            # lecture par paquets (Read-JsonLine) : un ConvertFrom-Json par ligne figeait la fenêtre sur un long historique
+            foreach ($r in @(Read-JsonLine $f 'Historique : ligne illisible ignorée')) {
+                if (-not $r) { continue }
                 try { $d = [DateTime]$r.Date } catch { continue }
                 if ($n -eq 'historique.jsonl') { $out.Add([pscustomobject]@{ D = $d; Cat = "$($r.Cat)"; Title = "$($r.Title)"; Result = "$($r.Result)" }) }
                 else {
@@ -101,6 +101,14 @@ function Set-ClipText([string]$Text, [string]$Done) {
     if ($Done -or -not $ok) { Show-Toast $(if ($ok) { "$Done dans le presse-papiers" } else { 'Copie impossible : presse-papiers occupé par un autre programme' }) $ok }
     $ok
 }
+# attente sans figer la fenêtre : la boucle de messages continue (affichage, minuteurs, clics) pendant $Ms millisecondes.
+# L'appelant désactive ce qui ne doit pas être relancé pendant l'attente
+function Wait-UiDelay([int]$Ms) {
+    $f = [Windows.Threading.DispatcherFrame]::new()
+    $t = [Windows.Threading.DispatcherTimer]::new(); $t.Interval = [TimeSpan]::FromMilliseconds($Ms); $t.Tag = $f
+    $t.Add_Tick({ param($s, $e) $s.Stop(); $s.Tag.Continue = $false })
+    $t.Start(); [Windows.Threading.Dispatcher]::PushFrame($f)
+}
 # texte saisi dans un champ de filtre contenu dans $Text, sans distinction de casse. « -like "*$q*" » levait une erreur de
 # motif dès qu'un [ était tapé (« Erreur interne » dans le Journal, bandeau rouge), et ? ou * y étaient des jokers
 function Test-TextHas([string]$Text, [string]$Q) { $Text.IndexOf($Q, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
@@ -121,6 +129,13 @@ function Get-CopyDone([string]$Head) {
 }
 # bandeau bref (2,5 s) en bas de la fenêtre : confirmation d'une action sans bouton dédié (copie depuis un menu...)
 $ToastUI = @{}
+# fenêtre de l'application au premier plan, fenêtres secondaires comprises (analyseur d'espace disque, Logiciels, variables
+# d'environnement, moniteur de ressources) ; sinon fenêtre principale si visible, $null sinon. Propriétaire des boîtes de
+# dialogue et des notifications (avant : moniteur et variables oubliés, boîte ouverte derrière eux ou sur un autre écran)
+function Get-ActiveAppWindow {
+    foreach ($w in @($TreeUI.Win, $SoftUI.Win, $EnvUI.Win, $MonUI.Win)) { if ($w -and $w.IsActive) { return $w } }
+    if ($Window.IsVisible) { $Window } else { $null }
+}
 function Show-Toast([string]$Text, [bool]$Ok = $true) {
     if (-not $ToastUI.Pop) {
         $pp = [Windows.Controls.Primitives.Popup]::new(); $pp.AllowsTransparency = $true; $pp.Placement = 'Center'; $pp.StaysOpen = $true; $pp.IsHitTestVisible = $false
@@ -139,7 +154,7 @@ function Show-Toast([string]$Text, [bool]$Ok = $true) {
     foreach ($x in $ToastUI.Glyph, $ToastUI.Text) { $x.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($Ok) { 'OkFgBrush' } else { 'ErrFgBrush' })) }
     $ToastUI.Text.Text = $Text
     # fenêtre active de l'application (Logiciels, Espace disque, Variables...) : bandeau affiché dans celle-ci, pas derrière
-    $w = $(if ($TreeUI.Win -and $TreeUI.Win.IsActive) { $TreeUI.Win } elseif ($SoftUI.Win -and $SoftUI.Win.IsActive) { $SoftUI.Win } elseif ($EnvUI.Win -and $EnvUI.Win.IsActive) { $EnvUI.Win } else { $Window })
+    $w = Get-ActiveAppWindow; if (-not $w) { $w = $Window }
     $ToastUI.Pop.PlacementTarget = $w.Content
     $ToastUI.Pop.VerticalOffset = [math]::Max([double]0, $w.ActualHeight / 2 - 60)
     $ToastUI.Pop.IsOpen = $false; $ToastUI.Pop.IsOpen = $true

@@ -238,13 +238,17 @@ try {
 function Save-SoftExcl { try { ConvertTo-Json -InputObject @($SoftExcl.Keys | Sort-Object) | Set-Content -LiteralPath $SoftExclFile -Encoding UTF8 } catch { Write-Ignored 'Enregistrement des logiciels exclus' $_ } }
 function Get-SoftKey($A) { '{0}|{1}' -f $A.Src, $A.Id }
 $SoftHistFile = Join-Path (Get-LogPath 'Etat') 'logiciels-historique.jsonl'
+# historique relu seulement s'il a changé (taille, date) : avant, tout le fichier était relu et analysé à chaque affichage
+# de la fenêtre Logiciels ; lecture par paquets (Read-JsonLine)
+$SoftHistCache = @{ Stamp = ''; Rows = @() }
 function Get-SoftHistory {
-    if (-not (Test-Path -LiteralPath $SoftHistFile)) { return @() }
-    $l = @()
-    foreach ($ln in [IO.File]::ReadAllLines($SoftHistFile, [Text.Encoding]::UTF8)) {
-        if ($ln.Trim()) { try { $l += ($ln | ConvertFrom-Json) } catch { Write-Ignored 'Historique des logiciels : ligne illisible ignorée' $_ } }
+    $fi = [IO.FileInfo]::new($SoftHistFile); if (-not $fi.Exists) { $SoftHistCache.Stamp = ''; return @() }
+    $st = '{0}|{1}' -f $fi.Length, $fi.LastWriteTimeUtc.Ticks
+    if ($SoftHistCache.Stamp -ne $st) {
+        $SoftHistCache.Rows = @(Read-JsonLine $SoftHistFile 'Historique des logiciels : ligne illisible ignorée' | Sort-Object { [DateTime]$_.Date } -Descending)
+        $SoftHistCache.Stamp = $st
     }
-    @($l | Sort-Object { [DateTime]$_.Date } -Descending)
+    $SoftHistCache.Rows
 }
 function Get-SoftUpdate {
     $r = $Sync.WgResult; if (-not $r -or $r.Error) { return @() }
@@ -319,45 +323,6 @@ function Update-SoftCard {
     $SoftUI.CardText.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, $(if ($Sync.WgRunning -or -not $r -or $r.Error) { 'MutedBrush' } elseif ($up.Count) { 'WarnFgBrush' } else { 'OkFgBrush' }))
     if (-not $Sync.WgRunning -and $up.Count -ne [int]$UpdBanner.N) { try { Update-SoftUpdBanner } catch { Write-Ignored 'Bandeau des mises à jour des logiciels' $_ } }
 }
-function New-SoftCard {
-    $b = [Windows.Controls.Border]::new(); $b.Style = $Window.FindResource('Panel'); $b.Padding = New-Thickness 16 14 16 14; $b.Margin = New-Thickness 0 12 0 0
-    [Windows.Controls.DockPanel]::SetDock($b, 'Bottom')
-    $g = [Windows.Controls.Grid]::new(); $b.Child = $g
-    $sp = [Windows.Controls.StackPanel]::new(); $sp.VerticalAlignment = 'Center'; $sp.Margin = New-Thickness 0 0 130 0
-    $dp = [Windows.Controls.DockPanel]::new()
-    $ic = New-Text ([string][char]0xE7B8); $ic.Style = $Window.FindResource('CardIcon'); [Windows.Controls.DockPanel]::SetDock($ic, 'Left')
-    $tt = New-Text 'Logiciels'; $tt.Style = $Window.FindResource('Section')
-    [void]$dp.Children.Add($ic); [void]$dp.Children.Add($tt); [void]$sp.Children.Add($dp)
-    $d = New-Text 'Inventaire des logiciels installés et mises à jour disponibles (winget)' 'Muted'
-    $d.Margin = New-Thickness 30 4 0 0
-    [void]$sp.Children.Add($d)
-    $SoftUI.CardText = New-Text '' 'Muted'; $SoftUI.CardText.Margin = New-Thickness 30 4 0 0; [void]$sp.Children.Add($SoftUI.CardText)
-    # bord droit des boutons des cartes de Maintenance : marge de carte 16 + retrait des lignes 8 + marge du bouton 6 = 30
-    $btn = New-Button 'Ouvrir'
-    $btn.MinWidth = 110
-    $btn.HorizontalAlignment = 'Right'
-    $btn.VerticalAlignment = 'Center'
-    $btn.Margin = New-Thickness 0 0 14 0
-    $btn.Add_Click({
-        try { Show-SoftWindow } catch {
-            Write-UiLog "Fenêtre Logiciels : $($_.Exception.Message)" 'ERROR'
-            Show-Info "Ouverture de la fenêtre Logiciels impossible.`n`n$($_.Exception.Message)" 'Error'
-        }
-    })
-    [void]$g.Children.Add($sp); [void]$g.Children.Add($btn)
-    # premier enfant ancré en bas = tout en bas : la carte passe sous Espace disque
-    $Ui.MaintLeft.Children.Insert(0, $b)
-    try {
-        if (Test-Path -LiteralPath $SoftFile) {
-            $Sync.WgResult = Get-Content -LiteralPath $SoftFile -Raw -Encoding UTF8 | ConvertFrom-Json
-            $SoftUI.Shown = $Sync.WgResult.Stamp
-        }
-    } catch {
-        Write-Ignored 'Lecture du dernier inventaire des logiciels' $_
-    }
-    $SoftUI.Fresh = $true
-    Update-SoftCard
-}
 $SoftXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Oliv_Maintenance - Logiciels" Width="1100" Height="760" MinWidth="760" MinHeight="480" WindowStartupLocation="Manual"
@@ -431,7 +396,6 @@ $SoftXaml = @'
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
         <Button x:Name="HistClear" Content="Vider l'historique" Style="{DynamicResource WarnBtn}" Height="30" Margin="6,0,0,0" Visibility="Collapsed"/>
         <Button x:Name="RunStop" Content="Interrompre" Style="{DynamicResource WarnBtn}" Height="30" Margin="6,0,0,0" Visibility="Collapsed"/>
-        <Button x:Name="Reinst" Style="{DynamicResource ActionBtn}" Height="30" Margin="6,0,0,0" Padding="12,0" IsEnabled="False" Visibility="Collapsed" MaxWidth="300"/>
         <Button x:Name="Run" Style="{DynamicResource PrimaryBtn}" Height="30" Margin="6,0,0,0" IsEnabled="False" MaxWidth="440"/>
       </StackPanel>
       <!-- zoom propre à la fenêtre (Ctrl + molette, Ctrl + / Ctrl -, Ctrl + 0, clic sur le pourcentage : 100 %) -->

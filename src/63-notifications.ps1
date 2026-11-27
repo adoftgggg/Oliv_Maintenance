@@ -70,6 +70,9 @@ function Watch-PcAlert {
             if ($v.Free / $v.Total -lt 0.1) { $al["disk|$($v.Name)"] = @('Disque presque plein', ('{0} : {1:N1} Go libres sur {2:N0} Go. Cliquer pour nettoyer.' -f $v.Name.TrimEnd('\'), ($v.Free / 1GB), ($v.Total / 1GB)), 'Warning', { Show-Page 'Maint' }) }
         }
     } catch { $null = $_ }
+    # alerte disparue (redémarrage fait, disque nettoyé) : oubliée, de nouveau notifiée si elle revient (avant : jamais
+    # répétée de toute la session)
+    foreach ($k in @($AlertSeen.Keys)) { if (-not $al.Contains($k)) { $AlertSeen.Remove($k) } }
     foreach ($k in $al.Keys) {
         if ($AlertSeen.ContainsKey($k)) { continue }
         # une bulle par contrôle (une bulle chasse la précédente) ; alerte marquée vue seulement une fois affichée

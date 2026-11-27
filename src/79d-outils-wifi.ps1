@@ -41,8 +41,8 @@ function Update-WifiCard($R) {
     foreach ($w in $items) {
         $hasKey = [bool]$w.Key
         $sec = @{ Shown = $false; Clear = $w.Key + '   ·   ' + (Get-WifiAuthText $w.Auth); Masked = (Get-MaskedText 'xxxxxxxxxx') + '   ·   ' + (Get-WifiAuthText $w.Auth) }
-        $eye = $(if ($hasKey) { New-ToolIconButton 0xE7B3 'Afficher / masquer le mot de passe' $sec { param($s, $e) Switch-ToolSecret $s.Tag 'Wifi' 'Afficher les mots de passe Wi-Fi enregistrés' $s } })
-        $cp = $(if ($hasKey) { New-ToolIconButton 0xE8C8 'Copier le mot de passe' $w { param($s, $e) if (Request-ToolAuth 'Wifi' 'Copier un mot de passe Wi-Fi') { [void](Invoke-CopyButton $s $s.Tag.Key 'Copié' ('Mot de passe du réseau Wi-Fi « {0} » copié.' -f $s.Tag.Name)) } } })
+        $eye = $(if ($hasKey) { New-ToolIconButton 0xE7B3 'Afficher / masquer le mot de passe' $sec { param($s, $e) Switch-ToolSecret $s.Tag $s } })
+        $cp = $(if ($hasKey) { New-ToolIconButton 0xE8C8 'Copier le mot de passe' $w { param($s, $e) [void](Invoke-CopyButton $s $s.Tag.Key 'Copié' ('Mot de passe du réseau Wi-Fi « {0} » copié.' -f $s.Tag.Name)) } })
         $del = New-ToolIconButton 0xE74D 'Oublier ce réseau' $w { param($s, $e) Remove-WifiProfile $s.Tag.Name }
         $sub = $(if ($hasKey) { (Get-MaskedText 'xxxxxxxxxx') + '   ·   ' + (Get-WifiAuthText $w.Auth) } else { Get-WifiAuthText $w.Auth })
         $row = New-ToolRow $w.Name $sub @($eye, $cp, $del) $(if ($w.Auto) { 'Connexion automatique' } else { 'Connexion manuelle' })

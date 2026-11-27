@@ -125,7 +125,8 @@ function Show-Dialog([string]$Message, [string]$Kind = 'Info', [object[]]$Button
     $dlg = [Windows.Markup.XamlReader]::Load([System.Xml.XmlNodeReader]::new($x))
     $dlg.Resources.MergedDictionaries.Add($Window.Resources)
     # propriétaire : fenêtre active de l'application (analyseur d'espace disque ou fenêtre principale)
-    $own = $(if ($TreeUI.Win -and $TreeUI.Win.IsActive) { $TreeUI.Win } elseif ($SoftUI.Win -and $SoftUI.Win.IsActive) { $SoftUI.Win } elseif ($EnvUI.Win -and $EnvUI.Win.IsActive) { $EnvUI.Win } elseif ($Window.IsVisible) { $Window } else { $null })
+    # (moniteur de ressources compris : avant, ses confirmations s'ouvraient sur la fenêtre principale, parfois derrière lui)
+    $own = Get-ActiveAppWindow
     if ($own) { $dlg.Owner = $own } else { $dlg.WindowStartupLocation = 'CenterScreen' }
     if ($AppIcon) { $dlg.Icon = $AppIcon }; Add-WindowAnim $dlg
     $k = @{ Info = @(0xE946, 'AccentBrush'); Question = @(0xE9CE, 'AccentBrush'); Warn = @(0xE7BA, 'WarnFgBrush'); Error = @(0xEA39, 'ErrFgBrush'); Ok = @(0xE930, 'OkFgBrush') }[$Kind]
@@ -165,7 +166,9 @@ function Show-Dialog([string]$Message, [string]$Kind = 'Info', [object[]]$Button
     if ($OnReady) { & $OnReady $dlg $bp }
     $dlg.Add_ContentRendered({
         param($s, $e)
-        if ($s.Tag -is [Windows.Controls.Control]) { [void]$s.Tag.Focus(); if ($s.Tag -is [Windows.Controls.TextBox]) { $s.Tag.SelectAll() }; return }
+        # champ d'une ligne : texte sélectionné (remplacé à la frappe) ; champ multiligne (hosts, PATH) : curseur à la fin, la
+        # 1re touche ne remplace plus tout le texte
+        if ($s.Tag -is [Windows.Controls.Control]) { [void]$s.Tag.Focus(); if ($s.Tag -is [Windows.Controls.TextBox]) { if ($s.Tag.AcceptsReturn) { $s.Tag.CaretIndex = $s.Tag.Text.Length } else { $s.Tag.SelectAll() } }; return }
         $bt = $s.FindName('Btns'); if ($bt) { foreach ($c in $bt.Children) { if ($c.IsDefault) { [void]$c.Focus() } } }
     })
     [void]$dlg.ShowDialog()

@@ -3,7 +3,7 @@
 # (Parameters\ServiceDll). Lecture et actions dans une tâche de fond (un arrêt peut attendre jusqu'à 30 s ou plus).
 # Actions à l'unité : Démarrer / Arrêter (Stop-Service -Force : services dépendants arrêtés aussi), Désactiver
 # (démarrage Désactivé + arrêt) / Réactiver (type de démarrage d'avant, mémorisé dans _etat\services-desactives.json).
-$SvcUI = @{ Data = $null; Reading = $false; Busy = $null; Scope = 'All'; RunOnly = $false; Rows = @{}; Built = $false }
+$SvcUI = @{ Data = $null; Reading = $false; Busy = $null; Scope = 'All'; RunOnly = $false; Rows = @{} }
 $SvcStateFile = Join-Path (Get-LogPath 'Etat') 'services-desactives.json'
 # services indispensables à Windows ou à l'application : ni arrêt ni désactivation proposés
 $SvcCritical = @('RpcSs', 'RpcEptMapper', 'DcomLaunch', 'LSM', 'SamSs', 'EventLog', 'EventSystem', 'PlugPlay', 'Power', 'BrokerInfrastructure',

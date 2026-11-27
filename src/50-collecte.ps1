@@ -20,9 +20,6 @@ function Publish-InfoSlow([hashtable]$Part) {
 '@
 $InfoScript = @'
 $ProgressPreference = 'SilentlyContinue'
-$MediaFr = @{ 0 = ''; 3 = 'HDD'; 4 = 'SSD'; 5 = 'SCM' }
-$BusFr   = @{ 1 = 'SCSI'; 3 = 'ATA'; 6 = 'Fibre'; 7 = 'USB'; 8 = 'RAID'; 9 = 'iSCSI'; 10 = 'SAS'; 11 = 'SATA'; 12 = 'SD'; 13 = 'MMC'; 15 = 'Fichier'; 16 = 'Espaces de stockage'; 17 = 'NVMe' }
-$HealthEn = @{ 0 = 'Healthy'; 1 = 'Warning'; 2 = 'Unhealthy' }
 $slow = @{}
 try {
     $bios = Get-CimInstance Win32_BIOS -Property SerialNumber
@@ -121,6 +118,9 @@ try {
     $need = @{ LaptopCim = [bool]$isLaptop }
     try { $need.Camera = @(Get-CimInstance Win32_PnPEntity -Filter "PNPClass='Camera' OR PNPClass='Image'" -ErrorAction Stop | Where-Object { "$($_.Status)" -eq 'OK' }).Count -gt 0 } catch { Write-Ignored 'Détection de la caméra' $_ }
     try { $need.CopilotPlus = @(Get-CimInstance Win32_PnPEntity -Filter "PNPClass='ComputeAccelerator'" -ErrorAction Stop).Count -gt 0 } catch { Write-Ignored 'Détection du processeur IA (NPU)' $_ }
+    # Defender actif (réglages Defender de Sécurité) : lu ici, en arrière-plan (chargement du module CIM, plusieurs secondes
+    # au 1er appel sur le fil d'interface) ; exception = antivirus tiers ou service arrêté
+    try { $need.Defender = "$((Get-MpComputerStatus -ErrorAction Stop).AMRunningMode)" -eq 'Normal' } catch { $need.Defender = $false }
     $Sync.NeedPre = $need
     Publish-InfoSlow $slow
 } catch { Write-Ignored 'Informations du poste' $_ }

@@ -519,7 +519,7 @@ function Start-WuOnlineSearch {
 function Start-AllUpdateSearch {
     if ($Sync.Running) { return }
     if (-not $Sync.WuSearching) { [void](Start-WuOnlineSearch) }
-    if (-not $Sync.OemRunning -and -not $Sync.OemInstalling) { Start-OemScan; Show-OemResult }
+    if (-not $Sync.OemRunning -and -not $Sync.OemInstalling) { Start-OemScan }
     Update-AllSearchButton
 }
 function Update-AllSearchButton {

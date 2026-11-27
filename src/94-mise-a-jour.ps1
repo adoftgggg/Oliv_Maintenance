@@ -11,8 +11,13 @@ function Get-UpdAuto { $v = Get-RegValue $CardRegKey 'MajAuLancement'; $null -eq
 # recherche des mises à jour des logiciels installés (winget, Microsoft Store) en arrière-plan 30 s après le lancement ;
 # choix dans HKCU\Software\Oliv_Maintenance\Affichage\MajLogicielsAuLancement (activé par défaut)
 function Get-SoftAuto { $v = Get-RegValue $CardRegKey 'MajLogicielsAuLancement'; $null -eq $v -or [int]$v -eq 1 }
-function Set-SoftAuto([bool]$On) { try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue('MajLogicielsAuLancement', [int]$On, [Microsoft.Win32.RegistryValueKind]::DWord) } finally { $k.Close() } } catch { Write-Ignored 'Recherche des mises à jour des logiciels au lancement' $_ } }
-function Set-UpdAuto([bool]$On) { try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue('MajAuLancement', [int]$On, [Microsoft.Win32.RegistryValueKind]::DWord) } finally { $k.Close() } } catch { Write-Ignored 'Mises à jour au lancement' $_ } }
+# choix enregistré dans le registre : $true si l'écriture a réussi (l'interface n'affiche le choix qu'à cette condition)
+function Set-AffichageValue([string]$Name, [int]$Value) {
+    try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue($Name, $Value, [Microsoft.Win32.RegistryValueKind]::DWord) } finally { $k.Close() }; $true }
+    catch { Write-UiLog "Enregistrement du choix impossible ($Name) : $($_.Exception.Message)" 'ERROR'; Show-Info "Choix non enregistré.`n`n$($_.Exception.Message)" 'Error'; $false }
+}
+function Set-SoftAuto([bool]$On) { $ok = Set-AffichageValue 'MajLogicielsAuLancement' ([int]$On); if ($ok -and $On) { Start-SoftAutoTimer }; $ok }
+function Set-UpdAuto([bool]$On) { Set-AffichageValue 'MajAuLancement' ([int]$On) }
 function Get-UpdVersion([string]$Tag) { $t = $Tag -replace '^[vV]', ''; try { [version]$t } catch { $null } }
 
 $UpdScript = @'
@@ -169,8 +174,8 @@ $BgJobDone['UpdDl'] = {
     # (C:\ProgramData\Oliv_Maintenance\Oliv_Maintenance.exe, raccourcis et ouverture de session) remplacé puis lancé ;
     # copie pour l'utilisateur sous le nom fixe à côté de l'ancien exe (Oliv_Maintenance_1.x.y.exe supprimé), jamais
     # lancée : un fichier d'un dossier modifiable sans élévation n'est pas exécuté en administrateur. Empreinte différente :
-    # rien n'est remplacé, exe stable (ancienne version) relancé. Substitution répétée jusqu'à 30 s (exe stable encore
-    # verrouillé le temps de la fermeture)
+    # rien n'est remplacé, exe stable (ancienne version) relancé. Substitution répétée jusqu'à 30 s (exe stable ouvert
+    # par l'antivirus ou par un lancement en cours)
     $q = { param($s) "'" + ($s -replace "'", "''") + "'" }
     $ps = "`$n = $(& $q $p.Dest); `$t = $(& $q $p.Target); `$o = $(& $q $p.Old); `$s = $(& $q $StableExe); `$h = $(& $q $Sync.UpdDlState.Sha)" + @'
 
@@ -219,9 +224,12 @@ function Show-UpdNote {
 $Ui.UpdGo.Add_Click({ Start-UpdInstall })
 $Ui.UpdNotes.Add_Click({ Show-UpdNote })
 $Ui.UpdLater.Add_Click({ $UpdUI.Dismissed = $true; $Ui.UpdBar.Visibility = 'Collapsed' })
-# recherche au lancement, une fois l'interface prête (réseau en tâche de fond, sans effet sur l'ouverture)
-if (Get-SoftAuto) {
-    $SoftAutoTimer = [Windows.Threading.DispatcherTimer]::new(); $SoftAutoTimer.Interval = [TimeSpan]::FromSeconds(30)
+# recherche au lancement, une fois l'interface prête (réseau en tâche de fond, sans effet sur l'ouverture) ; minuteur créé
+# aussi quand l'option est activée dans Paramètres (avant : seulement si elle l'était au démarrage, sans effet avant relance)
+$SoftAutoTimer = $null
+function Start-SoftAutoTimer {
+    if ($script:SoftAutoTimer) { return }
+    $script:SoftAutoTimer = [Windows.Threading.DispatcherTimer]::new(); $SoftAutoTimer.Interval = [TimeSpan]::FromSeconds(30)
     # 30 s après l'ouverture puis toutes les 12 h (application gardée ouverte dans la zone de notification)
     $SoftAutoTimer.Add_Tick({
         $SoftAutoTimer.Interval = [TimeSpan]::FromHours(12)
@@ -234,6 +242,7 @@ if (Get-SoftAuto) {
     })
     $SoftAutoTimer.Start()
 }
+if (Get-SoftAuto) { Start-SoftAutoTimer }
 # application restée ouverte (zone de notification, lancement à l'ouverture de session) : nouvelle vérification toutes les 6 h,
 # sinon la version annoncée au lancement peut avoir été remplacée sur le dépôt
 $UpdUI.Recheck = [Windows.Threading.DispatcherTimer]::new(); $UpdUI.Recheck.Interval = [TimeSpan]::FromHours(6)

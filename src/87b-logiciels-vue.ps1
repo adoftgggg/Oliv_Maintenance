@@ -1,7 +1,7 @@
 # Logiciels : vue « Mes applications / Mettre à jour » (liste, sélection, lignes, états, historique)
 function Initialize-SoftView {
     $w = [Windows.Markup.XamlReader]::Load([System.Xml.XmlNodeReader]::new([xml]$SoftXaml))
-    foreach ($n in 'Stop', 'Go', 'Head', 'FUpd', 'FAll', 'FExcl', 'FHist', 'H0', 'H1', 'H2', 'H3', 'FindBox', 'SumBox', 'SumTot', 'SumWg', 'SumMs', 'SumNo', 'PWg', 'PMs', 'PNo', 'Find', 'FindHint', 'Scroll', 'List', 'Hint', 'Empty', 'HintIcon', 'HintLink', 'Prog', 'HistClear', 'RunStop', 'Run', 'Reinst', 'Status') {
+    foreach ($n in 'Stop', 'Go', 'Head', 'FUpd', 'FAll', 'FExcl', 'FHist', 'H0', 'H1', 'H2', 'H3', 'FindBox', 'SumBox', 'SumTot', 'SumWg', 'SumMs', 'SumNo', 'PWg', 'PMs', 'PNo', 'Find', 'FindHint', 'Scroll', 'List', 'Hint', 'Empty', 'HintIcon', 'HintLink', 'Prog', 'HistClear', 'RunStop', 'Run', 'Status') {
         $SoftUI[$n] = $w.FindName($n)
     }
     $SoftUI.Win = $w
@@ -53,10 +53,9 @@ function Initialize-SoftView {
     $SoftUI.Stop.Add_Click({ Stop-SoftSearch })
     $SoftUI.RunStop.Add_Click({ Stop-SoftUpgrade })
     $SoftUI.HistClear.Add_Click({ Clear-SoftHistory })
-    # un seul bouton : sélection si des lignes sont en surbrillance, sinon toutes les mises à jour non exclues
-    # Mes applications (filtre All) : désinstallation de la sélection ; Mettre à jour : mises à jour
-    $SoftUI.Run.Add_Click({ if ($SoftUI.Filter -eq 'All') { Invoke-SoftRemove @(Get-SoftRemoveTarget) 'uninstall' } else { Invoke-SoftUpgrade @(Get-SoftRunTarget) } })
-    $SoftUI.Reinst.Add_Click({ Invoke-SoftRemove @(Get-SoftRemoveTarget) 'reinstall' })
+    # un seul bouton de mise à jour : sélection si des lignes sont en surbrillance, sinon toutes les mises à jour non exclues
+    # (Mes applications : actions sur chaque ligne et clic droit, pas de bouton en bas)
+    $SoftUI.Run.Add_Click({ Invoke-SoftUpgrade @(Get-SoftRunTarget) })
     # clic hors d'une ligne (zone vide de la liste, en-têtes, bas de fenêtre) : sélection vidée ;
     # boutons, barre de défilement et champ de filtre ignorés (le bouton Mettre à jour agit sur la sélection)
     $root.Add_PreviewMouseLeftButtonDown({
@@ -120,8 +119,6 @@ function Set-SoftScope([string]$Mode) {
     Update-SoftView
     Update-SoftStatus
 }
-# désinstallation / réinstallation : lignes sélectionnées connues de winget (identifiant local)
-function Get-SoftRemoveTarget { @(Get-SoftSelectedApp | Where-Object { Get-SoftLocalId $_ }) }
 function Get-SoftRunTarget {
     $sel = @(Get-SoftSelectedApp)
     if ($sel.Count) { return @($sel | Where-Object { $_.To -and $_.Src -and ($sel.Count -eq 1 -or -not $_.Unknown) }) }
@@ -315,11 +312,18 @@ function Test-SoftUpgrading { [bool]($Sync.Running -and $Sync.Selected -contains
 # une fois par seconde
 function Get-SoftDownloadByte($It) {
     if ($It.DlAt -and ([DateTime]::Now - $It.DlAt).TotalMilliseconds -lt 1000) { return [double]$It.DlBytes }
-    $It.DlAt = [DateTime]::Now; $max = [double]0; $since = $It.PhaseT.AddSeconds(-5)
+    $It.DlAt = [DateTime]::Now
+    # fichier en cours déjà repéré : sa seule taille relue ; dossiers parcourus de nouveau toutes les 5 s seulement (avant :
+    # parcours récursif de %TEMP%\WinGet chaque seconde sur le fil d'interface)
+    if ($It.DlFile -and $It.DlScan -and ([DateTime]::Now - $It.DlScan).TotalSeconds -lt 5) {
+        $fi = [IO.FileInfo]::new($It.DlFile); if ($fi.Exists) { $It.DlBytes = [double]$fi.Length; return [double]$fi.Length }
+    }
+    $max = [double]0; $file = $null; $since = $It.PhaseT.AddSeconds(-5)
     foreach ($d in @("$env:TEMP\WinGet", $(if ($Sync.UserProfile) { "$($Sync.UserProfile)\AppData\Local\Temp\WinGet" })) | Select-Object -Unique) {
         if (-not $d -or -not [IO.Directory]::Exists($d)) { continue }
-        try { foreach ($f in [IO.DirectoryInfo]::new($d).EnumerateFiles('*', 'AllDirectories')) { if ($f.LastWriteTime -ge $since -and $f.Length -gt $max) { $max = [double]$f.Length } } } catch { Write-Ignored 'Progression du téléchargement' $_ }
+        try { foreach ($f in [IO.DirectoryInfo]::new($d).EnumerateFiles('*', 'AllDirectories')) { if ($f.LastWriteTime -ge $since -and $f.Length -gt $max) { $max = [double]$f.Length; $file = $f.FullName } } } catch { Write-Ignored 'Progression du téléchargement' $_ }
     }
+    $It.DlFile = $file; $It.DlScan = [DateTime]::Now
     $It.DlBytes = $max; $max
 }
 function Get-SoftItemText($It) {
@@ -430,8 +434,9 @@ function Update-SoftStatus {
     # onglet Historique : bouton de purge à la place du bouton de mise à jour (grisé si l'historique est vide)
     $SoftUI.HistClear.Visibility = $(if ($SoftUI.Filter -eq 'Hist' -and -not $upg) { 'Visible' } else { 'Collapsed' })
     # grisé si l'historique est vide, pendant une recherche ou pendant une tâche (une mise à jour ajoute des entrées)
-    $SoftUI.HistClear.IsEnabled = (Test-Path -LiteralPath $SoftHistFile) -and -not $Sync.WgRunning -and -not $Sync.Running
-    $SoftUI.HistClear.ToolTip = $(if (-not (Test-Path -LiteralPath $SoftHistFile)) { 'Historique vide' } elseif (-not $SoftUI.HistClear.IsEnabled) { 'Indisponible pendant une recherche ou une mise à jour' } else { $null })
+    $hx = [IO.File]::Exists($SoftHistFile)
+    $SoftUI.HistClear.IsEnabled = $hx -and -not $Sync.WgRunning -and -not $Sync.Running
+    $SoftUI.HistClear.ToolTip = $(if (-not $hx) { 'Historique vide' } elseif (-not $SoftUI.HistClear.IsEnabled) { 'Indisponible pendant une recherche ou une mise à jour' } else { $null })
     $r = $Sync.WgResult
     # bouton principal : logiciel en surbrillance ; secondaire : toutes les mises à jour non exclues
     # même logique que les cartes de mises à jour : rien de sélectionné = tout, sinon la sélection
@@ -446,25 +451,9 @@ function Update-SoftStatus {
     if (-not $SoftUI.Run.IsEnabled) {
         $SoftUI.Run.ToolTip = $(if ($Sync.Running) { 'Une exécution est déjà en cours' } elseif ($Sync.WgRunning) { 'Recherche des mises à jour en cours' } else { 'Aucune mise à jour à installer' })
     }
-    $mine = $SoftUI.Filter -eq 'All'
-    # Mes applications : actions sur chaque ligne (et clic droit pour la sélection multiple), pas de boutons en bas
-    $SoftUI.Reinst.Visibility = 'Collapsed'
+    # Mes applications : actions sur chaque ligne (et clic droit pour la sélection multiple), pas de bouton en bas
     foreach ($e in @($SoftUI.RowCache.Values)) { if ($e -and $e.Acts) { foreach ($b in $e.Acts.Children) { $b.IsEnabled = -not ($Sync.Running -or ($Sync.WgRunning -and -not $Sync.WgListOnly)) } } }
-    if ($mine) {
-        # Mes applications : actions sur la sélection (clic, Ctrl + clic, Maj + clic) ; boutons grisés sans sélection
-        $rm = @(Get-SoftRemoveTarget)
-        $SoftUI.Run.Visibility = $(if ($upg) { 'Collapsed' } else { 'Visible' })
-        $SoftUI.Run.Content = $(if ($rm.Count) { 'Désinstaller ({0})' -f $rm.Count } else { 'Désinstaller' })
-        $SoftUI.Reinst.Content = $(if ($rm.Count) { 'Réinstaller ({0})' -f $rm.Count } else { 'Réinstaller' })
-        $tip = $(if ($Sync.Running) { 'Une exécution est déjà en cours' } elseif ($Sync.WgRunning) { 'Inventaire en cours' }
-            elseif (-not $sel.Count) { 'Sélectionner une ou plusieurs applications (Ctrl + clic, Maj + clic)' }
-            elseif (-not $rm.Count) { 'Sélection inconnue de winget : désinstallation depuis Paramètres > Applications' }
-            else { (@($rm | Select-Object -First 15 | ForEach-Object { Get-SoftShortName $_.Name }) -join "`n") + $(if ($rm.Count -gt 15) { "`n..." } else { '' }) })
-        foreach ($b in $SoftUI.Run, $SoftUI.Reinst) { $b.IsEnabled = $rm.Count -gt 0 -and -not $busy; $b.ToolTip = $tip }
-        $SoftUI.Run.Visibility = 'Collapsed'
-    }
-    $rs = $(if ($mine) { 'WarnBtn' } else { 'PrimaryBtn' })
-    if ($SoftUI.RunStyle -ne $rs) { $SoftUI.RunStyle = $rs; $SoftUI.Run.SetResourceReference([Windows.FrameworkElement]::StyleProperty, $rs) }
+    if ($SoftUI.Filter -eq 'All') { $SoftUI.Run.Visibility = 'Collapsed' }
     $st = $(if ($Sync.WgRunning) { $(if ($Sync.WgCancel) { 'Arrêt de la recherche...' } else { 'Recherche en cours  ·  {0:mm\:ss}  ·  {1}' -f ([DateTime]::Now - $Sync.WgStart), $Sync.WgStatus }) }
         elseif ($upg) { Get-SoftRunSummary $true }
         elseif (-not $r) { 'Aucun inventaire.' }

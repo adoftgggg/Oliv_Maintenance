@@ -114,7 +114,6 @@ public static class WinPlace {
     [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, int msg, IntPtr wp, IntPtr lp);
     [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr h, IntPtr rgn, bool redraw);
     [DllImport("user32.dll")] static extern int GetWindowRgnBox(IntPtr h, out RC r);
-    [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr h);
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct MIX { public int Size; public RC Mon, Work; public int Flags; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Device; }
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMonitorInfoW")] static extern bool GetMonitorInfoX(IntPtr m, ref MIX i);
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct DM {
@@ -136,14 +135,6 @@ public static class WinPlace {
             DM d = new DM(); d.Size = (short)Marshal.SizeOf(typeof(DM)); if (!EnumDisplaySettings(i.Device, -1, ref d)) return 0;
             return (d.PelsWidth != i.Mon.R - i.Mon.L || d.PelsHeight != i.Mon.B - i.Mon.T) ? 1 : 0;
         } catch { return 0; }
-    }
-    public static string ScaleInfo(IntPtr h) {
-        try {
-            IntPtr mon = MonitorFromWindow(h, 2);
-            MIX i = new MIX(); i.Size = Marshal.SizeOf(typeof(MIX)); GetMonitorInfoX(mon, ref i);
-            DM d = new DM(); d.Size = (short)Marshal.SizeOf(typeof(DM)); EnumDisplaySettings(i.Device, -1, ref d);
-            return string.Format("écran {0} : {1}x{2} px réels, {3}x{4} vus par la fenêtre, {5} ppp", i.Device, d.PelsWidth, d.PelsHeight, i.Mon.R - i.Mon.L, i.Mon.B - i.Mon.T, GetDpiForWindow(h));
-        } catch (Exception e) { return e.Message; }
     }
     public static IntPtr MaxHook(IntPtr h, int msg, IntPtr wp, IntPtr lp, ref bool handled) {
         if (msg == 0x0024) {
@@ -175,26 +166,10 @@ public static class WinPlace {
         }
         return IntPtr.Zero;
     }
-    // contrôle de la fenêtre agrandie : zone de travail entièrement couverte (rectangle et découpage) ; sinon détail
-    // (rectangle, zone de travail, découpage, échelles) pour le journal
-    public static string MaxCheck(IntPtr h) {
-        RC w; if (!GetWindowRect(h, out w)) return null;
-        IntPtr mon = MonitorFromWindow(h, 2);
-        MI i = new MI(); i.Size = Marshal.SizeOf(typeof(MI)); if (!GetMonitorInfo(mon, ref i)) return null;
-        RC g; int rt = GetWindowRgnBox(h, out g);
-        bool ok = w.L <= i.Work.L && w.T <= i.Work.T && w.R >= i.Work.R && w.B >= i.Work.B;
-        if (rt > 1) ok = ok && w.L + g.L <= i.Work.L && w.T + g.T <= i.Work.T && w.L + g.R >= i.Work.R && w.T + g.B >= i.Work.B;
-        if (ok) return "";
-        string dpi = " ; " + ScaleInfo(h);
-        return string.Format("fenêtre {0},{1} - {2},{3} ; zone de travail {4},{5} - {6},{7} ; découpage {8}{9}", w.L, w.T, w.R, w.B, i.Work.L, i.Work.T, i.Work.R, i.Work.B,
-            rt > 1 ? string.Format("{0},{1} - {2},{3}", g.L, g.T, g.R, g.B) : "aucun", dpi);
-    }
     public static void NoRegion(IntPtr h) { RC g; if (GetWindowRgnBox(h, out g) > 1) SetWindowRgn(h, IntPtr.Zero, true); }
     // coins arrondis de Windows 11 (DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2) pour les fenêtres sans cadre
     // Windows (WindowChrome) ; sans effet avant Windows 11 (attribut inconnu : code d'erreur renvoyé, ignoré)
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int value, int size);
-    // fenêtre masquée par DWM (DWMWA_CLOAK = 13) jusqu'à son premier rendu complet : jamais de cadre vide ou transparent
-    public static bool Cloak(IntPtr h, bool on) { int v = on ? 1 : 0; return DwmSetWindowAttribute(h, 13, ref v, 4) == 0; }
     public static bool RoundCorners(IntPtr h) { int v = 2; return DwmSetWindowAttribute(h, 33, ref v, 4) == 0; }
     public static int[] Overhang(IntPtr h) {
         RC w; if (!GetWindowRect(h, out w)) return null;

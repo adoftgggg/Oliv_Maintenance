@@ -104,12 +104,9 @@ function Update-LicCard($R) {
     $btns += New-ToolButton 'Paramètres d''activation' $null { Start-Process 'ms-settings:activation' }
     [void]$b.Children.Add((New-ToolBar $btns))
 }
-# secrets (clé du BIOS, mots de passe Wi-Fi) : compte administrateur demandé, puis valable 20 s pour toute la liste
-# (autre ligne affichée sans nouvelle saisie) ; chaque secret affiché se masque seul au bout de 20 s
 # secrets (clé du BIOS, mots de passe Wi-Fi) : masqués par défaut, affichés / masqués par l'œil (application déjà lancée
 # en administrateur : pas de nouvelle saisie d'identifiants)
-function Request-ToolAuth([string]$Scope, [string]$Purpose) { $true }
-function Switch-ToolSecret($Sec, [string]$Scope, [string]$Purpose, $Btn) {
+function Switch-ToolSecret($Sec, $Btn) {
     if ($Sec.Shown) { $Sec.Box.Text = $Sec.Masked; $Sec.Shown = $false } else { $Sec.Box.Text = $Sec.Clear; $Sec.Shown = $true }
     # œil barré une fois le secret affiché (retour visuel de l'action)
     if ($Btn) { Set-EyeState $Btn $Sec.Shown }

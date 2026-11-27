@@ -69,8 +69,8 @@ function Show-AccMenu($Btn) {
     & $add 'Supprimer le compte...' 'del' (-not $me -and -not $a.Builtin -and -not $lastAdm) $(if ($a.Builtin) { 'Compte intégré de Windows : à désactiver plutôt' } else { $why })
     $Btn.ContextMenu = $cm; $cm.PlacementTarget = $Btn; $cm.Placement = 'Bottom'; $cm.IsOpen = $true
 }
-# mot de passe saisi 2 fois (champs masqués) ; renvoie $null si annulé, '' si laissé vide (autorisé seulement si $AllowEmpty)
-function Read-AccPassword([string]$Message, [bool]$AllowEmpty, $Extra) {
+# mot de passe saisi 2 fois (champs masqués) ; renvoie $null si annulé, mot de passe vide accepté (compte sans mot de passe)
+function Read-AccPassword([string]$Message, $Extra) {
     $sp = [Windows.Controls.StackPanel]::new(); $pb = @()
     foreach ($l in 'Mot de passe', 'Confirmation') {
         $t = New-Text $l 'Muted'; $t.Margin = New-Thickness 0 6 0 4; [void]$sp.Children.Add($t)
@@ -84,7 +84,6 @@ function Read-AccPassword([string]$Message, [bool]$AllowEmpty, $Extra) {
         if ($sp.Parent) { $sp.Parent.Content = $null }
         if ($v -ne 'ok') { return $null }
         if ($pb[0].Password -ne $pb[1].Password) { Show-Info 'Les 2 saisies sont différentes.' 'Warn'; $pb[0].Clear(); $pb[1].Clear(); continue }
-        if (-not $pb[0].Password -and -not $AllowEmpty) { Show-Info 'Mot de passe vide refusé.' 'Warn'; continue }
         return $pb[0].SecurePassword
     }
 }
@@ -99,9 +98,12 @@ function Invoke-AccAction($A, [string]$Op) {
                     Remove-LocalGroupMember -SID 'S-1-5-32-544' -Member (Get-LocalUser -SID $A.Sid) -ErrorAction Stop; $v = 'converti en compte utilisateur standard' }
             'off' { if (-not (Confirm-Action "Désactiver le compte « $nm » ?`n`nPlus aucune ouverture de session possible avec ce compte ; ses fichiers sont conservés. Réactivable ici.")) { return }; Disable-LocalUser -SID $A.Sid -ErrorAction Stop; $v = 'désactivé' }
             'on' { if ($A.Builtin -and -not (Confirm-Action "Activer le compte intégré « $nm » ?`n`n" + $(if ($A.Sid -match '-500$') { 'Compte administrateur intégré : définir un mot de passe solide ensuite, il est souvent ciblé.' } else { 'Compte Invité : accès sans mot de passe au PC.' }))) { return }; Enable-LocalUser -SID $A.Sid -ErrorAction Stop; $v = 'activé' }
-            'pwd' { $p = Read-AccPassword "Nouveau mot de passe de « $nm »`n`nLaisser vide pour retirer le mot de passe. Attention : les fichiers chiffrés (EFS) et mots de passe enregistrés par Windows pour ce compte deviennent illisibles." $true $null
+            'pwd' { $p = Read-AccPassword "Nouveau mot de passe de « $nm »`n`nLaisser vide pour retirer le mot de passe. Attention : les fichiers chiffrés (EFS) et mots de passe enregistrés par Windows pour ce compte deviennent illisibles." $null
                     if ($null -eq $p) { return }; Set-LocalUser -SID $A.Sid -Password $p -ErrorAction Stop; $v = 'mot de passe changé' }
-            'del' { if ((Show-Dialog "Supprimer le compte « $nm » ?`n`nLe compte est supprimé ; son dossier C:\Users\$nm reste sur le disque (à supprimer ensuite à la main si inutile)." 'Warn' @(@{ T = 'Annuler'; V = $false; C = $true }, @{ T = 'Supprimer'; V = $true; S = 'WarnBtn' })) -ne $true) { return }
+            # dossier réel du profil (ProfileList du SID : compte Microsoft, profil sur un autre disque...), C:\Users\<nom> supposé avant
+            'del' { $pf = [Environment]::ExpandEnvironmentVariables("$(Get-RegValue "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($A.Sid)" 'ProfileImagePath')")
+                    $pt = $(if ($pf) { "son dossier $pf reste sur le disque (à supprimer ensuite à la main si inutile)" } else { 'aucun dossier de profil (jamais connecté)' })
+                    if ((Show-Dialog "Supprimer le compte « $nm » ?`n`nLe compte est supprimé ; $pt." 'Warn' @(@{ T = 'Annuler'; V = $false; C = $true }, @{ T = 'Supprimer'; V = $true; S = 'WarnBtn' })) -ne $true) { return }
                     Remove-LocalUser -SID $A.Sid -ErrorAction Stop; $v = 'supprimé' }
         }
         Write-UiLog "Compte « $nm » : $v." 'OK'; Add-SessionEvent 'Réglages' "Compte $nm" $v 'ok'
@@ -114,7 +116,7 @@ function New-LocalAccount {
     $name = "$($n[0])".Trim(); $full = "$($n[1])".Trim()
     if (-not $name -or $name.Length -gt 20 -or $name -match '[/\\\[\]:;|=,+*?<>"@]' -or $name.Trim('.') -eq '') { Show-Info 'Nom de compte invalide.' 'Warn'; return }
     $ck = [Windows.Controls.CheckBox]::new(); $ck.Content = 'Administrateur du PC'; $ck.Margin = New-Thickness 0 12 0 0; $ck.SetResourceReference([Windows.Controls.Control]::ForegroundProperty, 'FgBrush')
-    $p = Read-AccPassword "Mot de passe du compte « $name »`n`nLaisser vide pour un compte sans mot de passe (déconseillé pour un administrateur)." $true @($ck)
+    $p = Read-AccPassword "Mot de passe du compte « $name »`n`nLaisser vide pour un compte sans mot de passe (déconseillé pour un administrateur)." @($ck)
     if ($null -eq $p) { return }
     try {
         Import-Module Microsoft.PowerShell.LocalAccounts -ErrorAction SilentlyContinue

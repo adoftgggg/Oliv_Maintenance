@@ -39,8 +39,9 @@ function Invoke-AppReset {
         return
     }
     $msg = "Réinitialiser l'application ?`n`n" +
-           "Les paramètres de l'application reviennent à leur état d'origine et tout son historique est supprimé : journaux, rapports, instantanés des réglages, sauvegardes de la stratégie locale et résultats mémorisés.`n" +
+           "Les paramètres de l'application (thème, onglet de démarrage, zone de notification) reviennent à leur état d'origine et tout son historique est supprimé : journaux, rapports, instantanés des réglages, sauvegardes de la stratégie locale et résultats mémorisés.`n" +
            "Dossier vidé : $LogDir`n`n" +
+           "Conservés : onglets et cartes masqués, ordre des cartes, recherches au lancement et alertes (Paramètres > Onglets et cartes, Mises à jour).`n" +
            "Les réglages Windows déjà appliqués ne sont pas annulés.`n`nL'application va redémarrer."
     if ((Show-Dialog $msg 'Warn' @(@{ T = 'Annuler'; V = $false; D = $true; C = $true }, @{ T = 'Réinitialiser'; V = $true; S = 'WarnBtn' })) -ne $true) {
         return

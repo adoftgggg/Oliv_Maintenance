@@ -85,26 +85,25 @@ function Start-BgJob([string]$Key, [string]$Script) {
     if ($BgJobs.ContainsKey($Key)) { Remove-BgJob $Key $true }
     $BgJobs[$Key] = New-PsJob ($WuLib + "`n" + $Script)
 }
-function Close-BgJob([bool]$Force = $false) {
+# tâches terminées libérées et leur suite exécutée ($BgJobDone) ; arrêt à la fermeture : 91-fermeture.ps1 (BeginStop)
+function Close-BgJob {
     foreach ($k in @($BgJobs.Keys)) {
         $st = "$($BgJobs[$k].PS.InvocationStateInfo.State)"
-        if (-not $Force -and $st -notin 'Completed', 'Failed', 'Stopped') { continue }
-        Remove-BgJob $k $Force
+        if ($st -notin 'Completed', 'Failed', 'Stopped') { continue }
+        Remove-BgJob $k
         if ($BgJobDone[$k]) { & $BgJobDone[$k] }
     }
     foreach ($j in @($BgOrphans)) {
         if ("$($j.PS.InvocationStateInfo.State)" -in 'Completed', 'Failed', 'Stopped') { Close-PsJob $j; [void]$BgOrphans.Remove($j) }
     }
-    if ($Force) { foreach ($r in @($SpareRs)) { try { $r.Dispose() } catch {} }; $SpareRs.Clear() }
 }
 # Mémoire : PowerShell et .NET gardent la mémoire des objets devenus inutiles (analyse du script, XAML, résultats des
 # collectes, runspaces terminés) jusqu'au prochain passage du ramasse-miettes, déclenché seulement sous pression. Libération
 # complète (tas des gros objets compacté) aux moments sans interaction : 15 s après le démarrage, fin d'une exécution de
 # tâches, réduction de la fenêtre.
-function Invoke-MemoryTrim([string]$When) {
+function Invoke-MemoryTrim {
     [Runtime.GCSettings]::LargeObjectHeapCompactionMode = [Runtime.GCLargeObjectHeapCompactionMode]::CompactOnce
     [GC]::Collect(); [GC]::WaitForPendingFinalizers(); [GC]::Collect()
-
 }
 $BgJobs = @{}
 Add-SpareRunspace 3

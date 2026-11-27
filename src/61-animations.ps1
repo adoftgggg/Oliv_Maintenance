@@ -6,7 +6,7 @@
 #   - travail PowerShell des minuteurs suspendu pendant l'effet (Test-AnimBusy) : le fil d'interface reste libre ;
 #   - réglable dans Paramètres > Apparence : toujours (défaut), suivre Windows, jamais.
 # API : Start-Transition (brique de base), Add-WindowAnim (ouverture / fermeture de fenêtre), Show-PageTransition,
-#       Set-Fold (dépliage / repliage), Invoke-Morph (contenu reconstruit).
+#       Set-Fold (dépliage / repliage).
 # =====================================================================================================================
 $Anim = @{ Until = [DateTime]::MinValue }
 $Anim.EaseOut = [Windows.Media.Animation.CubicEase]::new(); $Anim.EaseOut.EasingMode = 'EaseOut'; $Anim.EaseOut.Freeze()
@@ -101,11 +101,6 @@ function Show-PageTransition($Page, [double]$Dx) { Start-Transition $Page -Dx $D
 function Set-Fold($El, [bool]$Open) {
     if ($Open) { $El.Visibility = 'Visible'; Start-Transition $El -Dy -8 -Ms 200 }
     else { Start-Transition $El -From 1 -To 0 -Dy -6 -Ms 120 -Out -Collapse }
-}
-# Contenu reconstruit (« + N autres » / « Réduire ») : nouveau contenu affiché en fondu
-function Invoke-Morph($Panel, [scriptblock]$Action) {
-    & $Action
-    Start-Transition $Panel -From 0.25 -Dy -4 -Ms 180
 }
 # Travail différé après l'effet en cours (rafraîchissement de page) : la dernière demande remplace la précédente
 function Invoke-AfterAnim([scriptblock]$Action) {

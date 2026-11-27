@@ -28,7 +28,7 @@
     <SolidColorBrush x:Key="ErrFgBrush" Color="#FCA5A5"/>
     <SolidColorBrush x:Key="PendBgBrush" Color="#3A2E14"/>
     <SolidColorBrush x:Key="ToggleOffBrush" Color="#7C818B"/>
-    <SolidColorBrush x:Key="DisabledFgBrush" Color="#A3A8B0"/>
+    <SolidColorBrush x:Key="DisabledFgBrush" Color="#7C828C"/>
 
     <Style x:Key="HoverPlain" TargetType="Border">
       <Setter Property="Background" Value="Transparent"/>
@@ -186,28 +186,6 @@
       </Setter>
     </Style>
 
-    <!-- Ligne de menu déroulant (choix du thème) -->
-    <Style x:Key="MenuRow" TargetType="Button">
-      <Setter Property="Foreground" Value="{DynamicResource FgBrush}"/>
-      <Setter Property="FontSize" Value="13"/>
-      <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="HorizontalContentAlignment" Value="Left"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <Border x:Name="Bd" Background="Transparent" CornerRadius="4" Padding="8,7,16,7">
-              <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-
     <Style x:Key="CloseBtn" TargetType="Button" BasedOn="{StaticResource IconBtn}">
       <Setter Property="Template">
         <Setter.Value>
@@ -313,21 +291,6 @@
       <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="CornerRadius" Value="8"/>
-    </Style>
-
-    <Style x:Key="Console" TargetType="TextBox">
-      <Setter Property="IsReadOnly" Value="True"/>
-      <Setter Property="FontFamily" Value="Consolas"/>
-      <Setter Property="FontSize" Value="12"/>
-      <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
-      <Setter Property="Foreground" Value="{DynamicResource FgBrush}"/>
-      <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}"/>
-      <Setter Property="Padding" Value="10"/>
-      <Setter Property="TextWrapping" Value="Wrap"/>
-      <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
-      <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
-      <Setter Property="SelectionBrush" Value="{DynamicResource SelBrush}"/>
-      <Setter Property="CaretBrush" Value="{DynamicResource FgBrush}"/>
     </Style>
 
     <Style TargetType="TextBox">
@@ -502,7 +465,7 @@
                 <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="4" Opacity="0.28"/></Border.Effect>
                 <DockPanel>
                   <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="14,7,14,8">
-                    <TextBlock x:Name="SearchFoot" FontSize="11" Foreground="{DynamicResource MutedBrush}" Text="&#x2191;&#x2193; pour choisir  &#xB7;  Entrée pour ouvrir  &#xB7;  Échap pour fermer"/>
+                    <TextBlock FontSize="11" Foreground="{DynamicResource MutedBrush}" Text="&#x2191;&#x2193; pour choisir  &#xB7;  Entrée pour ouvrir  &#xB7;  Échap pour fermer"/>
                   </Border>
                   <ScrollViewer MaxHeight="520" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="SearchList" Margin="6"/></ScrollViewer>
                 </DockPanel>
@@ -591,7 +554,7 @@
           </DockPanel>
           <Border x:Name="MaintRight" Grid.Column="2">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
-              <StackPanel x:Name="MaintCards">
+              <StackPanel>
                 <Border Style="{StaticResource Panel}" Padding="16,14,16,14" Margin="0,0,0,12">
                 <StackPanel>
                 <Grid>
@@ -619,7 +582,7 @@
                   <Grid Margin="8,4">
                     <StackPanel VerticalAlignment="Center" Margin="0,0,330,0">
                       <TextBlock TextWrapping="Wrap" Text="État de santé des disques (SMART)" FontWeight="SemiBold"/>
-                      <TextBlock TextWrapping="Wrap" x:Name="SmartStatus" Style="{StaticResource Muted}" Text="Santé, température, usure, heures de fonctionnement, erreurs"/>
+                      <TextBlock TextWrapping="Wrap" Style="{StaticResource Muted}" Text="Santé, température, usure, heures de fonctionnement, erreurs"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="SmartLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>
@@ -644,7 +607,7 @@
                   <Grid Margin="8,4">
                     <StackPanel VerticalAlignment="Center" Margin="0,0,330,0">
                       <TextBlock TextWrapping="Wrap" Text="Rapport de batterie" FontWeight="SemiBold"/>
-                      <TextBlock TextWrapping="Wrap" x:Name="BatteryStatus" Style="{StaticResource Muted}" Text="Capacité d&apos;origine et actuelle, usure, historique d&apos;utilisation"/>
+                      <TextBlock TextWrapping="Wrap" Style="{StaticResource Muted}" Text="Capacité d&apos;origine et actuelle, usure, historique d&apos;utilisation"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                       <TextBlock x:Name="BatteryLast" Style="{StaticResource Muted}" FontSize="11" TextAlignment="Left" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Width="150" VerticalAlignment="Center" Margin="0,0,12,0"/>

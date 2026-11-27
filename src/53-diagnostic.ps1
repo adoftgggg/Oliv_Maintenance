@@ -32,7 +32,8 @@ function Update-WuAge {
         } catch {
             Write-Ignored 'Enregistrement de la dernière recherche Windows Update' $_
         }
-        $sum = 'Recherche Windows Update en ligne : {0} disponible(s), {1} en attente de redémarrage ({2}).' -f @($w.Items).Count, @($w.Reboot).Count, $w.Detail
+        $na = @($w.Items).Count; $nr = @($w.Reboot).Count
+        $sum = 'Recherche Windows Update en ligne : {0} {1}, {2} en attente de redémarrage ({3}).' -f $na, (Get-Plural $na 'mise à jour disponible' 'mises à jour disponibles'), $nr, $w.Detail
         Write-UiLog $sum
         # journal de la carte : Accueil\Mises a jour Windows, un fichier par mois avec le détail des KB
         $lines = @($sum) + @($w.Items | ForEach-Object { '   en attente : {0}' -f $_.Title }) + @($w.Reboot | ForEach-Object { '   installée, redémarrage requis : {0}' -f $_.Title })
@@ -78,15 +79,12 @@ function Show-DiagResult($D) {
 function Add-RecoveryKeyRow([string]$Key) {
     [void](Add-SecretKeyRow $InfoUI.DiagPanel 'Clé de récupération' $Key $null 'Clé de récupération BitLocker affichée.' 'Clé de récupération BitLocker copiée dans le presse-papiers.')
 }
-# Vérification d'un compte administrateur : ouverture de session réseau (sinon interactive) avec LogonUser,
-# puis présence du SID Administrateurs (S-1-5-32-544) dans le jeton, y compris en « refus seul » (jeton filtré par l'UAC).
-
 # ---------- BitLocker du volume système : menu « ... » de la ligne du diagnostic rapide ----------
 # Activer : protecteur TPM + mot de passe de récupération numérique, espace utilisé seul, sans test matériel (chiffrement
 # en arrière-plan dès maintenant), clé sauvegardée dans Entra ID / Active Directory si le poste y est joint.
-# Désactiver : déchiffrement complet en arrière-plan, après confirmation et authentification administrateur (comme
-# l'affichage de la clé). Reprendre : protection suspendue (mise à jour du BIOS...) réactivée. Opérations dans une tâche
-# de fond (module BitLocker, CIM), diagnostic relancé à la fin.
+# Désactiver : déchiffrement complet en arrière-plan, après confirmation. Reprendre : protection suspendue (mise à jour du
+# BIOS...) réactivée ; reprendre le chiffrement : conversion en pause relancée. Opérations dans une tâche de fond (module
+# BitLocker, CIM), diagnostic relancé à la fin.
 function Add-BitLockerMenu($V, [string]$State) {
     $InfoUI.BlValue = $V
     if ($State -in 'encrypting', 'decrypting') { Start-BlWatch }

@@ -24,7 +24,14 @@ function Test-EnvList($V) {
 # dossier introuvable = seulement si on peut l'affirmer : variables du profil remplacées par celles du compte ciblé (et non du
 # compte administrateur qui a élevé l'application), lecteur absent pour ce processus (lecteur réseau de l'utilisateur, clé
 # débranchée) ou chemin réseau (\\serveur, lent ou injoignable en administrateur) = considéré présent, jamais proposé au retrait
+# résultat mémorisé par chemin pendant l'affichage (chaque frappe du filtre refaisait un Test-Path par dossier du PATH),
+# vidé à l'ouverture de la fenêtre et après chaque modification (Update-EnvView)
+$EnvDirCache = @{}
 function Test-EnvDir([string]$P) {
+    if ($EnvDirCache.ContainsKey($P)) { return $EnvDirCache[$P] }
+    $v = Test-EnvDirCore $P; $EnvDirCache[$P] = $v; $v
+}
+function Test-EnvDirCore([string]$P) {
     $x = "$P"
     if ($UserProfilePath) {
         foreach ($m in @(@('%USERPROFILE%', $UserProfilePath), @('%LOCALAPPDATA%', "$UserProfilePath\AppData\Local"), @('%APPDATA%', "$UserProfilePath\AppData\Roaming"), @('%HOMEPATH%', ($UserProfilePath -replace '^[A-Za-z]:', '')), @('%TEMP%', "$UserProfilePath\AppData\Local\Temp"), @('%TMP%', "$UserProfilePath\AppData\Local\Temp"))) {
@@ -45,7 +52,7 @@ function Update-EnvCard {
     [void](Add-KV $b 'Dossiers du PATH introuvables' $(if ($miss) { "$miss" } else { 'aucun' }) $(if ($miss) { 'WarnFgBrush' } else { '' }))
     [void]$b.Children.Add((New-ToolBar @((New-ToolButton 'Gérer les variables...' $null { Show-EnvWindow } 'PrimaryBtn'))))
 }
-function Update-EnvView { Update-EnvCard; if ($EnvUI.Win) { Update-EnvList } }
+function Update-EnvView { $EnvDirCache.Clear(); Update-EnvCard; if ($EnvUI.Win) { Update-EnvList } }
 $EnvXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Oliv_Maintenance - Variables d'environnement" Width="1000" Height="700" MinWidth="560" MinHeight="460"
@@ -104,6 +111,7 @@ $EnvXaml = @'
 '@
 function Show-EnvWindow {
     if ($EnvUI.Win) { if ($EnvUI.Win.WindowState -eq 'Minimized') { $EnvUI.Win.WindowState = 'Normal' }; [void]$EnvUI.Win.Activate(); return }
+    $EnvDirCache.Clear()
     $w = [Windows.Markup.XamlReader]::Parse($EnvXaml)
     $w.Resources.MergedDictionaries.Add($Window.Resources)
     Set-ChildWindow $w 'Variables'
@@ -113,7 +121,9 @@ function Show-EnvWindow {
     $EnvUI.ScopeU.Add_Click({ $EnvUI.Scope = 'U'; Update-EnvList })
     $EnvUI.ScopeS.Add_Click({ $EnvUI.Scope = 'S'; Update-EnvList })
     $EnvUI.Add.Add_Click({ Edit-EnvVar $(if ($EnvUI.Scope -eq 'S') { $EnvSys } else { $EnvUsr }) $null })
-    $EnvUI.Find.Add_TextChanged({ $EnvUI.FindHint.Visibility = $(if ($EnvUI.Find.Text) { 'Collapsed' } else { 'Visible' }); Update-EnvList })
+    # filtre recalculé 200 ms après la dernière frappe (comme les services), pas à chaque touche
+    if (-not $EnvUI.FindTimer) { $EnvUI.FindTimer = [Windows.Threading.DispatcherTimer]::new(); $EnvUI.FindTimer.Interval = [TimeSpan]::FromMilliseconds(200); $EnvUI.FindTimer.Add_Tick({ $EnvUI.FindTimer.Stop(); Update-EnvList }) }
+    $EnvUI.Find.Add_TextChanged({ $EnvUI.FindHint.Visibility = $(if ($EnvUI.Find.Text) { 'Collapsed' } else { 'Visible' }); $EnvUI.FindTimer.Stop(); $EnvUI.FindTimer.Start() })
     $EnvUI.FindBox.Add_MouseLeftButtonDown({ [void]$EnvUI.Find.Focus() })
     $EnvUI.Scroll.Add_SizeChanged({ $sb = [math]::Max([double]0, $EnvUI.Scroll.ActualWidth - $EnvUI.Scroll.ViewportWidth); $EnvUI.Head.Margin = New-Thickness 14 8 (10 + $sb) 6 })
     $w.Add_Closed({ $EnvUI.Win = $null })
@@ -181,7 +191,7 @@ function Edit-EnvVar([string]$Path, $Var) {
     if (-not $r) { return }
     $name = "$($r[0])".Trim(); if (-not $name -or $name -match '[=\s]') { Show-Info 'Nom invalide : ni espace ni signe =.' 'Warn'; return }
     $value = $(if ($multi) { (@("$($r[1])" -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join ';') } else { "$($r[1])" })
-    if (-not $isNew -and $value -ceq $Var.Value) { return }
+    if (-not $isNew -and $value -ceq $Var.Value) { Show-Toast "Aucun changement : $name inchangée"; return }
     # nom existant saisi comme nouvelle variable : refusé (le remplacement contournait la présentation en liste, le
     # récapitulatif avant / après et le contrôle du PATH système presque vide)
     if ($isNew -and @(Get-EnvVar $Path | Where-Object { $_.Name -eq $name }).Count) { Show-Info "La variable $name existe déjà ($where) : la modifier depuis sa ligne de la liste." 'Warn'; return }

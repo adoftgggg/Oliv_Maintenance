@@ -554,6 +554,8 @@ function Update-InfoFast([switch]$Force) {
 # Devices), puis WM_SETTINGCHANGE « windows » diffusé aux applications ouvertes. Dans les deux cas « Laisser Windows gérer
 # mon imprimante par défaut » désactivé pour ce compte (LegacyDefaultPrinterMode = 1), sinon Windows la remplace par la
 # dernière imprimante utilisée.
+# texte entre apostrophes d'une requête WQL : barre oblique inverse et apostrophe échappées
+function ConvertTo-WqlString([string]$S) { $S.Replace('\', '\\').Replace("'", "\'") }
 function Set-DefaultPrinter($P) {
     $names = @("$($P.Name)", "$($P.Source)") | Where-Object { $_ }
     if (-not (Confirm-Action ("Définir « {0} » comme imprimante par défaut de {1} ?`n`n« Laisser Windows gérer mon imprimante par défaut » est désactivé pour ce compte : l'imprimante choisie reste celle par défaut." -f $P.Name, $UserName))) { return }
@@ -561,7 +563,10 @@ function Set-DefaultPrinter($P) {
         $self = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq $UserSid
         Set-RegValue 'HKCU\Software\Microsoft\Windows NT\CurrentVersion\Windows' 'LegacyDefaultPrinterMode' 1
         if ($self) {
-            $wp = @(Get-CimInstance Win32_Printer -ErrorAction Stop | Where-Object { "$($_.Name)" -in $names }) | Select-Object -First 1
+            # requête filtrée sur le nom (avant : toutes les imprimantes interrogées, plusieurs secondes de fenêtre figée avec des
+            # imprimantes réseau hors ligne)
+            $wq = (@($names | ForEach-Object { "Name='{0}'" -f (ConvertTo-WqlString $_) }) -join ' OR ')
+            $wp = @(Get-CimInstance Win32_Printer -Filter $wq -ErrorAction Stop) | Select-Object -First 1
             if (-not $wp) { throw 'imprimante introuvable (Win32_Printer)' }
             $rc = (Invoke-CimMethod -InputObject $wp -MethodName SetDefaultPrinter -ErrorAction Stop).ReturnValue
             if ($rc -ne 0) { throw "SetDefaultPrinter : code $rc" }

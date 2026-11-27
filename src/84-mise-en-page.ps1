@@ -53,7 +53,7 @@ $Window.Add_StateChanged({
     if ($Window.WindowState -eq 'Minimized' -and -not $Sync.Running -and (-not $script:LastTrim -or ([DateTime]::Now - $script:LastTrim).TotalSeconds -ge 60)) {
         $script:LastTrim = [DateTime]::Now
         [void]$Window.Dispatcher.BeginInvoke([Action]{
-            try { Invoke-MemoryTrim 'fenêtre réduite' } catch { Write-Ignored 'Libération de la mémoire' $_ }
+            try { Invoke-MemoryTrim } catch { Write-Ignored 'Libération de la mémoire' $_ }
         }, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
     }
 })

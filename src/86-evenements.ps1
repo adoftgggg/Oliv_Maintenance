@@ -177,7 +177,10 @@ $Ui.TimeSyncBtn.Add_Click({
 $Ui.CleanRescan.Add_Click({ Start-CleanScan })
 # ---------- Raccourcis clavier : Ctrl+1 à Ctrl+9 = onglets, F5 = actualiser la page affichée, Ctrl+Entrée = appliquer la sélection
 # (Ctrl+F : recherche globale, Ctrl+molette / Ctrl+ / Ctrl- / Ctrl+0 : taille de l'interface, définis ailleurs)
+# retour visuel dans tous les cas (avant : rien d'affiché, trace dans le fichier journal seulement, et aucune réaction sur
+# les pages sans actualisation)
 function Invoke-PageRefresh {
+    $done = $true
     switch ($Sync.CurPage) {
         # collecteur d'informations déjà en boucle : relectures demandées par drapeaux (imprimantes, disques)
         'Info'  {
@@ -188,12 +191,14 @@ function Invoke-PageRefresh {
             Write-FileLog 'Accueil actualisé (F5).' 'APP'
         }
         'Maint' { Start-CleanScan; Write-FileLog 'Tailles du nettoyage recalculées (F5).' 'APP' }
-        'Perf'  { if ($Lazy.Done) { Update-StartupList; Update-PendingBar; Write-FileLog 'Applications au démarrage relues (F5).' 'APP' } }
-        'Perso' { if ($AppxList) { Update-AppxList; Write-FileLog 'Applications préinstallées relues (F5).' 'APP' } }
+        'Perf'  { if ($Lazy.Done) { Update-StartupList; Update-PendingBar; Write-FileLog 'Applications au démarrage relues (F5).' 'APP' } else { $done = $false } }
+        'Perso' { if ($AppxList) { Update-AppxList; Write-FileLog 'Applications préinstallées relues (F5).' 'APP' } else { $done = $false } }
         'Svc'   { if ($SvcUI.Mode -eq 'Tsk') { Start-TskRead } else { Start-SvcRead } }
         'Tools' { Update-ToolsPage }
         'Log'   { [void](Update-LogStatistic) }
+        default { $done = $false }
     }
+    Show-Toast $(if ($done) { 'Page actualisée' } else { 'Rien à actualiser sur cette page pour l''instant' }) $done
 }
 $Window.Add_PreviewKeyDown({
     param($s, $e)

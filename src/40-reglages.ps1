@@ -331,7 +331,7 @@ function Test-Need([string]$Need) {
             # stratégies honorées seulement en Entreprise / Éducation (DisableSettingsAgent : Pro exclu par Microsoft)
             'Entreprise' { $v = "$(Get-RegValue 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion' 'EditionID')" -match '(?i)^(Enterprise|Education|IoTEnterprise)' }
             # Defender actif (ni passif ni désactivé au profit d'un autre antivirus) : réglages Defender utiles
-            'Defender' { $v = "$((Get-MpComputerStatus -ErrorAction Stop).AMRunningMode)" -eq 'Normal' }
+            'Defender' { $pre = Get-NeedPre 'Defender'; $v = $(if ($null -ne $pre) { $pre } else { "$((Get-MpComputerStatus -ErrorAction Stop).AMRunningMode)" -eq 'Normal' }) }
             # version cible : éditions Pro / Entreprise / Éducation (pas Famille = Core*), version affichée lisible (24H2...)
             'TargetRelease' { $v = "$(Get-RegValue 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion' 'EditionID')" -notlike 'Core*' -and "$WinDisplayVer" -match '^\d{2}H\d$' }
             default {
@@ -380,13 +380,13 @@ function Add-TweakCardCore([string]$Page, $LeftPanel, $RightPanel, [string[]]$Ri
         if (-not $list.Count) { continue }
         $c = New-Card $grp '' $info.Glyph
         foreach ($tw in $list) {
-            $ok   = $Build -ge $tw.MinBuild
-            $desc = if ($ok) { '' } else { "Non disponible sur cette version de Windows (build $Build)" }
+            # réglages absents de cette version de Windows déjà écartés par le filtre MinBuild : toujours disponibles ici
+            $desc = ''
             # précision entre parenthèses du libellé (« LLMNR (résolution de noms locale) ») : dans l'aide « ? », libellé court
             $lbl = "$($tw.Label)"; $pre = ''
             if ($lbl -match '^(.+?)\s*\(([^()]+)\)$') { $lbl = $Matches[1]; $pre = $Matches[2].Substring(0, 1).ToUpper() + $Matches[2].Substring(1) + '.' + "`n`n" }
             $r = New-SettingRow $lbl $desc ("{0}{1}`n`n{2}" -f $pre, $tw.Desc, $tw.Tip) $tw.Effect
-            $r.Tweak = $tw; $r.Enabled = $ok
+            $r.Tweak = $tw; $r.Enabled = $true
             try { $r.Orig = Get-TweakValue $tw } catch { $r.Orig = $null }
             $r.Current = $r.Orig; $r.Staged = $null
             $r.Key = "T|$($tw.Id)|$UserSid"
@@ -397,12 +397,12 @@ function Add-TweakCardCore([string]$Page, $LeftPanel, $RightPanel, [string[]]$Ri
                 $r.DdText = New-Text ''; $r.DdText.VerticalAlignment = 'Center'; $r.DdText.TextWrapping = 'NoWrap'; $r.DdText.FontSize = 13
                 [void]$r.Choices.Children.Add($r.DdText)
                 $dd = [Windows.Controls.Button]::new(); $dd.Style = $Window.FindResource('IconBtn'); $dd.Content = [string][char]0xE70D
-                $dd.Width = 40; $dd.Height = 28; $dd.ToolTip = 'Choisir'; $dd.IsEnabled = $ok; $dd.DataContext = $r
+                $dd.Width = 40; $dd.Height = 28; $dd.ToolTip = 'Choisir'; $dd.DataContext = $r
                 $dd.Add_Click({ param($s, $e) Show-ChoiceMenu $s })
                 [void]$r.Host.Children.Add($dd); $r.Dropdown = $dd
             } else {
                 $tg = [Windows.Controls.CheckBox]::new()
-                $tg.Style = $Window.FindResource('Toggle'); $tg.IsEnabled = $ok
+                $tg.Style = $Window.FindResource('Toggle')
                 $tg.DataContext = $r
                 $tg.Add_Click($ToggleClick)
                 [void]$r.Host.Children.Add($tg)
@@ -533,8 +533,6 @@ function Set-StartupEntry($Entry, [bool]$Enable) {
     Set-RegValue $Entry.Approved $Entry.ValueName $bytes 'Binary'
 }
 
-$StartupClick = { param($s, $e) Set-Staged $s.DataContext ([bool]$s.IsChecked) }
-
 # ligne d'un fichier .reg pour une valeur de tout type (texte, texte extensible, DWORD, QWORD, binaire, multi-chaîne)
 function ConvertTo-RegExportLine([string]$Name, [string]$Kind, $Data) {
     $esc = { param($t) "$t".Replace('\', '\\').Replace('"', '\"') }
@@ -639,7 +637,7 @@ function Update-StartupList {
         $r.Key = "S|$($e.Approved)|$($e.ValueName)|$UserSid"
         $tg = [Windows.Controls.CheckBox]::new()
         $tg.Style = $Window.FindResource('Toggle'); $tg.IsChecked = $e.Enabled; $tg.DataContext = $r
-        $tg.Add_Click($StartupClick)
+        $tg.Add_Click($ToggleClick)
         $r.Toggle = $tg
         [void]$r.Host.Children.Add($tg)
         $del = [Windows.Controls.Button]::new()

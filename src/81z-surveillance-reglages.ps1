@@ -39,7 +39,9 @@ function Test-TweakReference {
     $TweakWatch.Checked = $true
     if (-not $ref) { Save-TweakReference; return }   # 1re ouverture : référence posée, rien à comparer
     # valeurs relues maintenant (la ligne garde la valeur de sa construction) ; seules les valeurs encore applicables sont comparées
-    foreach ($r in @($TweakRows)) { if ($r.Tweak -and $r.Enabled -and -not $r.Pending) { try { $now = Get-TweakValue $r.Tweak; if ("$now" -ne "$($r.Current)") { $r.Current = $now; Set-RowDisplay $r $now } } catch { $null = $_ } } }
+    # réglages à lecture lente (Defender, pare-feu, partage SMB : modules CIM, plusieurs secondes sur le fil d'interface,
+    # fenêtre figée) : pas relus, valeur de construction des lignes (lue en arrière-plan au démarrage, moins de 20 s avant)
+    foreach ($r in @($TweakRows)) { if ($r.Tweak -and $r.Enabled -and -not $r.Pending -and -not ($r.Tweak.Get -and $r.Tweak.Get.ToString() -match $TwSlowPattern)) { try { $now = Get-TweakValue $r.Tweak; if ("$now" -ne "$($r.Current)") { $r.Current = $now; Set-RowDisplay $r $now } } catch { $null = $_ } } }
     $diff = Get-SnapshotDiff ([pscustomobject]@{ Values = $ref.Values })
     # mode jeu activé ou désactivé depuis (application ou raccourcis du Bureau) : ses réglages ont changé par la volonté de
     # l'utilisateur, jamais signalés

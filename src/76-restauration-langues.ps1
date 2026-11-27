@@ -73,6 +73,14 @@ function New-LangCard {
 function Update-LangCard {
     $b = $LangUI.Body; if (-not $b) { return }
     $b.Children.Clear()
+    # application élevée avec un autre compte que celui de la session : Get-WinUserLanguageList lirait les langues de ce
+    # compte-là (affichées avant sans le dire, boutons ensuite refusés) ; la raison est affichée à la place de la liste
+    if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne $UserSid) {
+        $t = New-Text "Langues et claviers de $UserName : à gérer depuis sa session (Paramètres > Heure et langue). L'application tourne sous le compte administrateur $env:USERDOMAIN\$env:USERNAME, et Windows n'applique ce réglage qu'au compte qui le fait." 'Muted'
+        $t.TextWrapping = 'Wrap'; [void]$b.Children.Add($t)
+        try { Add-OfficeLangSection $b } catch { Write-Ignored 'Langues d''Office' $_ }
+        return
+    }
     $list = $null
     try { $list = Get-WinUserLanguageList -ErrorAction Stop } catch { $t = New-Text "Langues illisibles : $($_.Exception.Message)" 'Muted'; [void]$b.Children.Add($t); return }
     $nKb = 0; foreach ($l in $list) { $nKb += @($l.InputMethodTips).Count }
@@ -299,11 +307,19 @@ function Show-AddKeyboardMenu($Btn) {
         $mi = [Windows.Controls.MenuItem]::new(); $mi.Tag = $E
         if ($have.ContainsKey($E.Klid)) { $mi.Header = '{0}  ({1})  ·  déjà installé' -f $E.Name, $E.Lang; $mi.IsEnabled = $false }
         else { $mi.Header = '{0}  ({1})' -f $E.Name, $E.Lang; $mi.Add_Click({ param($s, $ev) Add-UserKeyboard $s.Tag }) }
-        $mi }
+        $mi }.GetNewClosure()
     foreach ($kl in $KbCommon) { if ($all -contains $kl) { $en = Get-KlidEntry $kl; if ($en) { [void]$cm.Items.Add((& $mk $en)) } } }
     [void]$cm.Items.Add([Windows.Controls.Separator]::new())
-    $sub = [Windows.Controls.MenuItem]::new(); $sub.Header = 'Tous les claviers'
-    foreach ($en in @($all | ForEach-Object { Get-KlidEntry $_ } | Where-Object { $_ } | Sort-Object { $_.Name })) { [void]$sub.Items.Add((& $mk $en)) }
+    # « Tous les claviers » (environ 200, deux lectures du registre chacun) construit à sa 1re ouverture seulement : avant,
+    # construit avant l'ouverture du menu, qui mettait plusieurs dixièmes de seconde à s'afficher
+    $sub = [Windows.Controls.MenuItem]::new(); $sub.Header = 'Tous les claviers'; $sub.Tag = @{ All = $all; Mk = $mk; Done = $false }
+    $wait = [Windows.Controls.MenuItem]::new(); $wait.Header = 'Lecture des claviers...'; $wait.IsEnabled = $false; [void]$sub.Items.Add($wait)
+    $sub.Add_SubmenuOpened({
+        param($s, $e)
+        $t = $s.Tag; if ($t.Done -or $e.OriginalSource -ne $s) { return }
+        $t.Done = $true; $s.Items.Clear()
+        foreach ($en in @($t.All | ForEach-Object { Get-KlidEntry $_ } | Where-Object { $_ } | Sort-Object { $_.Name })) { [void]$s.Items.Add((& $t.Mk $en)) }
+    })
     [void]$cm.Items.Add($sub)
     $cm.PlacementTarget = $Btn; $cm.Placement = 'Bottom'; $cm.MaxHeight = 560; $cm.IsOpen = $true
 }

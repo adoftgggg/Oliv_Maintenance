@@ -101,7 +101,7 @@ function Invoke-LazyStep {
             $mt = [Windows.Threading.DispatcherTimer]::new(); $mt.Interval = [TimeSpan]::FromSeconds(15)
             $mt.Add_Tick({ param($s, $e)
                 $s.Stop()
-                try { Invoke-MemoryTrim 'après le démarrage' } catch { Write-Ignored 'Libération de la mémoire' $_ }
+                try { Invoke-MemoryTrim } catch { Write-Ignored 'Libération de la mémoire' $_ }
             })
             $mt.Start()
         }

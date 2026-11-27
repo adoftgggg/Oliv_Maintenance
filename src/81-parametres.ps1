@@ -160,14 +160,15 @@ function New-SettingsPage {
     }
     $SetUI.AlertOn = Add-SettingsChoice $c.Body 'Alertes du poste en notification' 'Quand l''application est réduite ou dans la zone de notification : redémarrage en attente, mises à jour Windows et logiciels disponibles, disque presque plein (une seule fois par alerte).' ([ordered]@{ On = 'Activées'; Off = 'Désactivées' }) $(if (Get-AlertOn) { 'On' } else { 'Off' }) {
         param($s, $e) $on = "$($s.DataContext)" -eq 'On'
-        try { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue('AlertesPoste', [int]$on, [Microsoft.Win32.RegistryValueKind]::DWord) } finally { $k.Close() } } catch { Write-Ignored 'Alertes du poste' $_ }
+        # écriture en échec : erreur affichée, bouton et Journal inchangés (avant : choix affiché comme pris)
+        if (-not (Set-AffichageValue 'AlertesPoste' ([int]$on))) { return }
         foreach ($x in $SetUI.AlertOn) { $x.Tag = $(if ($x.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
         Write-UiLog ('Alertes du poste en notification : {0}.' -f $(if ($on) { 'activées' } else { 'désactivées' })) 'APP' }
     [void]$p.Children.Add($c.Card)
 
     # Configuration du poste : exportation / importation (préparer un autre PC à l'identique)
     $c = New-Card 'Configuration du poste' '' ([string][char]0xE8B7)
-    $t = New-Text 'Exporter : réglages gérés par l''application, applications du catalogue installées, onglets et cartes masqués, dans un fichier. Importer sur un autre poste : réglages différents préparés (bandeau Appliquer, rien n''est changé sans validation), applications manquantes sélectionnées dans Applications > Installer.' 'Muted'
+    $t = New-Text 'Exporter : réglages gérés par l''application, applications du catalogue installées, onglets et cartes masqués, dans un fichier. Importer sur un autre poste : récapitulatif des différences à valider, puis réglages appliqués (instantané des réglages actuels enregistré avant) et applications manquantes installées.' 'Muted'
     $t.Margin = New-Thickness 46 0 18 8; [void]$c.Body.Children.Add($t)
     $bar = [Windows.Controls.StackPanel]::new(); $bar.Orientation = 'Horizontal'; $bar.Margin = New-Thickness 46 0 18 14
     $b = New-Button 'Exporter...' 'PrimaryBtn'; $b.Height = 30; $b.MinWidth = 96; $b.Margin = New-Thickness 0 0 8 0; $b.Add_Click({ try { Export-PcConfig } catch { Write-UiLog "Exportation de la configuration : $($_.Exception.Message)" 'ERROR' } }); [void]$bar.Children.Add($b)
@@ -214,19 +215,17 @@ function New-SettingsPage {
 
     $c = New-Card 'Mises à jour de l''application' '' ([string][char]0xE895)
     $SetUI.UpdAuto = Add-SettingsChoice $c.Body 'Recherche au lancement' 'Bandeau en haut de la fenêtre quand une nouvelle version est publiée ; rien n''est installé sans ton accord.' ([ordered]@{ On = 'Activée'; Off = 'Désactivée' }) $(if (Get-UpdAuto) { 'On' } else { 'Off' }) {
-        param($s, $e) Set-UpdAuto ("$($s.DataContext)" -eq 'On'); foreach ($x in $SetUI.UpdAuto) { $x.Tag = $(if ($x.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
+        param($s, $e) if (-not (Set-UpdAuto ("$($s.DataContext)" -eq 'On'))) { return }; foreach ($x in $SetUI.UpdAuto) { $x.Tag = $(if ($x.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
         Write-UiLog ('Recherche de mise à jour au lancement : {0}.' -f $(if ("$($s.DataContext)" -eq 'On') { 'activée' } else { 'désactivée' })) 'APP' }
     $SetUI.SoftAuto = Add-SettingsChoice $c.Body 'Mises à jour des logiciels installés au lancement' 'Recherche en arrière-plan 30 secondes après l''ouverture de l''application (winget et Microsoft Store) ; résultat dans Applications > Mettre à jour, rien n''est installé sans ton accord.' ([ordered]@{ On = 'Activée'; Off = 'Désactivée' }) $(if (Get-SoftAuto) { 'On' } else { 'Off' }) {
-        param($s, $e) Set-SoftAuto ("$($s.DataContext)" -eq 'On'); foreach ($x in $SetUI.SoftAuto) { $x.Tag = $(if ($x.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
+        param($s, $e) if (-not (Set-SoftAuto ("$($s.DataContext)" -eq 'On'))) { return }; foreach ($x in $SetUI.SoftAuto) { $x.Tag = $(if ($x.DataContext -eq $s.DataContext) { 'on' } else { '' }) }
         Write-UiLog ('Recherche des mises à jour des logiciels au lancement : {0}.' -f $(if ("$($s.DataContext)" -eq 'On') { 'activée' } else { 'désactivée' })) 'APP' }
-    $ub = [Windows.Controls.WrapPanel]::new(); $ub.Margin = New-Thickness 38 0 10 14
-    # recherche manuelle et état : en-tête de Paramètres (pas de doublon dans cette carte)
+    # recherche manuelle et état : en-tête de Paramètres (pas de doublon dans cette carte ; état affiché à la fin de la construction)
     $c.Card.Margin = New-Thickness 0 12 0 0
     [void]$p.Children.Add($c.Card)
-    Update-UpdStatus $(if ($UpdUI.Info) { 'Version {0} disponible.' -f (Get-UpdVersion $UpdUI.Info.Tag) } elseif ($UpdUI.Checked) { Get-UpdUpToDate } else { 'Pas encore vérifié pendant cette session.' })
 
     $c = New-Card 'Onglets et cartes affichés' 'Onglets de la barre et cartes de chaque onglet : affichés ou masqués, ordre des cartes (raccourci : clic droit sur une carte)' ([string][char]0xE8A9)
-    $SetUI.CardsBody = [Windows.Controls.StackPanel]::new(); [void]$c.Body.Children.Add($SetUI.CardsBody); $SetUI.CardsCard = $c.Card; $c.Card.Margin = New-Thickness 0 12 0 12
+    $SetUI.CardsBody = [Windows.Controls.StackPanel]::new(); [void]$c.Body.Children.Add($SetUI.CardsBody); $c.Card.Margin = New-Thickness 0 12 0 12
     [void]$p.Children.Add($c.Card)
 
     $c = New-Card 'À propos' '' ([string][char]0xE946)
@@ -407,7 +406,7 @@ function Update-SettingsNav {
 }
 function Show-SettingsSection([string]$Key) {
     if (-not $SetUI.SecFirst -or -not $SetUI.SecFirst.Contains($Key)) { return }
-    $SetUI.Sec = $Key; Set-SettingsNavOn $Key; $SetUI.SecJump = [DateTime]::Now
+    Set-SettingsNavOn $Key; $SetUI.SecJump = [DateTime]::Now
     # 1re rubrique (Mises à jour) : haut des Paramètres, avec l'en-tête Oliv_Maintenance et son bouton de recherche de mise à jour
     $y = $(if ($Key -eq @($SettingsSections.Keys)[0]) { 0 } else { (Get-SettingsTop $SetUI.SecFirst[$Key]) - 4 })
     if ($Ui.PageSettings -is [Windows.Controls.ScrollViewer]) { $Ui.PageSettings.ScrollToVerticalOffset([math]::Max([double]0, $y)) }
@@ -645,7 +644,7 @@ function Set-AppPref($P) {
     try { if ($null -ne $P.Positions) { $WinPos.Enabled = [bool]$P.Positions; Save-WindowPositionStore } } catch { Write-Ignored 'Importation : positions' $_ }
     try { if ($null -ne $P.ReduireZone) { $Tray.Min = [bool]$P.ReduireZone }; if ($null -ne $P.FermerReduit) { $Tray.Close = [bool]$P.FermerReduit; $Tray.CloseSet = $true }; if ($null -ne $P.DemarrageReduit) { $Tray.StartMin = [bool]$P.DemarrageReduit }; Save-TraySetting } catch { Write-Ignored 'Importation : zone de notification' $_ }
     try { if ($null -ne $P.Alertes) { $k = Open-RegKey $CardRegKey $true $true; try { $k.SetValue('AlertesPoste', [int][bool]$P.Alertes, [Microsoft.Win32.RegistryValueKind]::DWord) } finally { $k.Close() } } } catch { Write-Ignored 'Importation : alertes' $_ }
-    try { if ($null -ne $P.MajAuLancement) { Set-UpdAuto ([bool]$P.MajAuLancement) }; if ($null -ne $P.MajLogiciels) { Set-SoftAuto ([bool]$P.MajLogiciels) } } catch { Write-Ignored 'Importation : recherches au lancement' $_ }
+    try { if ($null -ne $P.MajAuLancement) { [void](Set-UpdAuto ([bool]$P.MajAuLancement)) }; if ($null -ne $P.MajLogiciels) { [void](Set-SoftAuto ([bool]$P.MajLogiciels)) } } catch { Write-Ignored 'Importation : recherches au lancement' $_ }
     try { if ($null -ne $P.OuvertureSession -and [bool]$P.OuvertureSession -ne [bool](Get-AutoStartTask)) { Set-AutoStart ([bool]$P.OuvertureSession) } } catch { Write-UiLog "Importation : ouverture de session - $($_.Exception.Message)" 'WARN' }
     try {
         if ($P.OrdreCartes) {
@@ -654,7 +653,6 @@ function Set-AppPref($P) {
             foreach ($pg in $CardPages.Keys) { $CardMove.Applied.Remove($pg); try { Restore-CardOrder $pg } catch { Write-Ignored 'Importation : ordre des cartes' $_ } }
         }
     } catch { Write-Ignored 'Importation : ordre des cartes' $_ }
-    # Paramètres déjà construits : reconstruits pour refléter les nouveaux choix
     # Paramètres déjà construits : choix actifs remis à jour
     if ($SetUI.Built) {
         $now = Get-AppPref
@@ -694,7 +692,12 @@ function Import-PcConfig {
         Update-ApplyButton
     }
     if ($tabs.Count) { foreach ($x in $tabs) { [void]$HiddenTabs.Add($x) }; Save-HiddenTab; Update-TabVisibility }
-    if ($cards.Count) { foreach ($x in $cards) { [void]$HiddenCards.Add($x) }; Save-HiddenCard }
+    # cartes masquées appliquées tout de suite (pages déjà construites) et comptées (avant : enregistrées seulement)
+    if ($cards.Count) {
+        foreach ($x in $cards) { [void]$HiddenCards.Add($x) }; Save-HiddenCard
+        foreach ($pg in @($CardPages.Keys)) { try { Update-CardVisibility $pg } catch { Write-Ignored 'Importation : cartes masquées' $_ } }
+        try { Update-CardCount } catch { Write-Ignored 'Importation : cartes masquées' $_ }
+    }
     if ($pref.Count) { Set-AppPref $o.Interface; Write-UiLog ('Paramètres de l''application importés : ' + ($pref -join ' ; ')) 'APP' }
     Write-UiLog ('Configuration de {0} importée ({1}) : {2} réglages, {3} onglets et {4} cartes masqués{5}.' -f $o.Poste, [IO.Path]::GetFileName($dlg.FileName), $diff.Count, $tabs.Count, $cards.Count, $(if ($todo.Count) { ", installation de $($todo.Count) applications" } else { '' })) 'OK'
     Add-SessionEvent 'Configuration' 'Importation de la configuration' ('{0} réglages, {1} applications' -f $diff.Count, $todo.Count) 'ok'

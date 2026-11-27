@@ -67,6 +67,16 @@ function Invoke-Task_WuReset {
             Write-TaskLog "Service $n démarré."
         } catch { Write-TaskLog "Service $n : $($_.Exception.Message)" 'WARN' }
     }
+    # sauvegardes des réinitialisations précédentes (.bak_<date>, parfois plusieurs Go, jamais retirées avant) supprimées ;
+    # celle de cette réinitialisation est gardée (retour arrière possible)
+    $freed = [double]0
+    foreach ($d in "$env:windir\SoftwareDistribution", "$env:windir\System32") {
+        foreach ($b in @(Get-ChildItem -LiteralPath $d -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(DataStore|Download|catroot2)\.bak_\d{8}-\d{6}$' -and -not $_.Name.EndsWith($stamp) })) {
+            $sz = Get-DirSize $b.FullName; Remove-TreeSafe $b.FullName
+            if (-not (Test-Path -LiteralPath $b.FullName)) { $freed += $sz; Write-TaskLog "Ancienne sauvegarde supprimée : $($b.FullName)" }
+        }
+    }
+    if ($freed -gt 0) { Write-TaskLog ('Anciennes sauvegardes de Windows Update supprimées : {0} libérés.' -f (Format-Size $freed)) }
     Write-TaskLog 'Composants Windows Update réinitialisés. L''historique affiché dans Paramètres repart de zéro ; lancer une recherche de mises à jour.' 'OK'
 }
 function Invoke-Task_WuInstall {

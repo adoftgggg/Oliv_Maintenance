@@ -74,7 +74,7 @@ function Confirm-Action([string]$Message) {
 function Complete-Run {
     $Sync.Running = $false
     [void]$Window.Dispatcher.BeginInvoke([Action]{
-        try { Invoke-MemoryTrim 'fin des tâches' } catch { Write-Ignored 'Libération de la mémoire' $_ }
+        try { Invoke-MemoryTrim } catch { Write-Ignored 'Libération de la mémoire' $_ }
     }, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
     $Ui.ProgressBar.IsIndeterminate = $false; $Ui.RunBar.IsIndeterminate = $false
     $Ui.AbortBtn.IsEnabled = $false
